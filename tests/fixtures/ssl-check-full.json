@@ -1,0 +1,46 @@
+{
+  "grade": "A+",
+  "issuer": "DigiCert SHA2 Extended Validation Server CA",
+  "subject": "github.com",
+  "validFrom": "2024-03-07T00:00:00.000Z",
+  "validTo": "2025-03-12T23:59:59.000Z",
+  "daysRemaining": 180,
+  "chainDepth": 3,
+  "keySize": 2048,
+  "signatureAlgorithm": "sha256WithRSAEncryption",
+  "sans": ["github.com", "www.github.com"],
+  "chain": ["github.com", "DigiCert SHA2 EV CA", "DigiCert Global Root CA"],
+  "chainComplete": true,
+  "chainOrderValid": true,
+  "chainDetails": [
+    { "subject": "github.com", "issuer": "DigiCert SHA2 EV CA", "order": 0, "isTrusted": true },
+    { "subject": "DigiCert SHA2 EV CA", "issuer": "DigiCert Global Root CA", "order": 1, "isTrusted": true }
+  ],
+  "protocols": [
+    { "name": "TLSv1.3", "supported": true, "secure": "good" },
+    { "name": "TLSv1.2", "supported": true, "secure": "good" },
+    { "name": "TLSv1.1", "supported": false, "secure": "warning" }
+  ],
+  "cipherSuites": [
+    { "name": "TLS_AES_256_GCM_SHA384", "protocol": "TLSv1.3", "strength": "strong" },
+    { "name": "TLS_CHACHA20_POLY1305_SHA256", "protocol": "TLSv1.3", "strength": "strong" }
+  ],
+  "forwardSecrecy": true,
+  "vulnerabilities": [
+    { "id": "CVE-2014-0160", "name": "Heartbleed", "status": "not-vulnerable" },
+    { "id": "CVE-2014-3566", "name": "POODLE", "status": "not-vulnerable" }
+  ],
+  "certType": "EV",
+  "hsts": {
+    "enabled": true,
+    "maxAge": 31536000,
+    "preload": true,
+    "includeSubDomains": true
+  },
+  "cnMatchesSan": true,
+  "wildcardScope": null,
+  "ct": { "hasSct": true, "logCount": 3 },
+  "caa": ["0 issue \"digicert.com\""],
+  "secureRenegotiation": true,
+  "tlsCompression": false
+}

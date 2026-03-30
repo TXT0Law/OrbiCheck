@@ -1,0 +1,366 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-required:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Self-test require-tests gate
+        run: bash scripts/ci/test-require-tests.sh
+
+      - name: Enforce test file requirement for feature changes
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          bash scripts/ci/require-tests.sh "${BASE_SHA}" "${HEAD_SHA}"
+
+  lint:
+    needs: test-required
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          UV_LINK_MODE=copy uv sync --extra dev
+
+      - name: Install osint-engine dependencies
+        run: |
+          cd backend/scan
+          npm install --no-package-lock --legacy-peer-deps
+
+      - name: Lint frontend
+        run: pnpm lint
+
+      - name: Lint backend
+        run: |
+          cd backend
+          UV_LINK_MODE=copy uv run ruff check .
+
+      - name: Lint osint-engine
+        run: |
+          cd backend/scan
+          npm run lint
+
+  frontend:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend tests with coverage
+        run: bash scripts/ci/test.sh frontend
+
+      - name: Build frontend coverage summary
+        if: always()
+        run: |
+          mkdir -p coverage-summary
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "const fs=require('fs'); const s=JSON.parse(fs.readFileSync('coverage/coverage-summary.json','utf8')); const pct=s?.total?.lines?.pct; fs.writeFileSync('coverage-summary/frontend.txt', Number.isFinite(pct)?String(pct):'unavailable');"
+          else
+            echo unavailable > coverage-summary/frontend.txt
+          fi
+
+      - name: Upload frontend coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-frontend
+          if-no-files-found: ignore
+          path: |
+            coverage
+            coverage-summary/frontend.txt
+
+      - name: Upload frontend artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-artifacts
+          if-no-files-found: ignore
+          path: |
+            coverage
+            test-results
+            playwright-report
+
+  backend:
+    needs: lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: UV_LINK_MODE=copy uv sync --extra dev
+
+      - name: Run backend tests with coverage
+        run: bash ../scripts/ci/test.sh backend
+
+      - name: Build backend coverage summary
+        if: always()
+        run: |
+          mkdir -p coverage-summary
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          output = Path("coverage-summary/backend.txt")
+          coverage_xml = Path("coverage.xml")
+          if not coverage_xml.exists():
+              output.write_text("unavailable", encoding="utf-8")
+          else:
+              root = ET.parse(coverage_xml).getroot()
+              line_rate = root.attrib.get("line-rate")
+              if line_rate is None:
+                  output.write_text("unavailable", encoding="utf-8")
+              else:
+                  pct = round(float(line_rate) * 100, 2)
+                  output.write_text(str(pct), encoding="utf-8")
+          PY
+
+      - name: Upload backend coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-backend
+          if-no-files-found: ignore
+          path: |
+            backend/coverage.xml
+            backend/coverage-summary/backend.txt
+
+      - name: Upload backend artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-artifacts
+          if-no-files-found: ignore
+          path: |
+            backend/.pytest_cache
+            backend/.coverage
+            backend/coverage.xml
+
+  osint-engine:
+    needs: lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/scan/package.json
+
+      - name: Install scan service dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+
+      - name: Run osint-engine tests with coverage
+        run: bash ../../scripts/ci/test.sh osint
+
+      - name: Build osint-engine coverage summary
+        if: always()
+        run: |
+          mkdir -p coverage-summary
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "const fs=require('fs'); const s=JSON.parse(fs.readFileSync('coverage/coverage-summary.json','utf8')); const pct=s?.total?.lines?.pct; fs.writeFileSync('coverage-summary/osint.txt', Number.isFinite(pct)?String(pct):'unavailable');"
+          else
+            echo unavailable > coverage-summary/osint.txt
+          fi
+
+      - name: Upload osint-engine coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-osint
+          if-no-files-found: ignore
+          path: |
+            backend/scan/coverage
+            backend/scan/coverage-summary/osint.txt
+
+      - name: Upload osint-engine artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osint-engine-test-artifacts
+          if-no-files-found: ignore
+          path: |
+            backend/scan/coverage
+
+  coverage-summary:
+    if: ${{ github.event_name == 'pull_request' }}
+    needs: [frontend, backend, osint-engine]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+          path: coverage-input
+
+      - name: Upsert sticky PR coverage comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const marker = '<!-- orbicheck-coverage-summary -->';
+            const readValue = (file) => {
+              const path = `coverage-input/${file}`;
+              if (!fs.existsSync(path)) {
+                return { label: 'unavailable', numeric: null };
+              }
+
+              const raw = fs.readFileSync(path, 'utf8').trim();
+              const numeric = Number(raw);
+              if (Number.isFinite(numeric)) {
+                return { label: `${numeric.toFixed(2)}%`, numeric };
+              }
+              return { label: 'unavailable', numeric: null };
+            };
+
+            const frontend = readValue('frontend.txt');
+            const backend = readValue('backend.txt');
+            const osint = readValue('osint.txt');
+
+            const values = [frontend.numeric, backend.numeric, osint.numeric];
+            let overall = 'improved';
+            if (values.some((value) => value === null)) {
+              overall = 'unavailable';
+            } else if (values.some((value) => value < 70)) {
+              overall = 'regressed';
+            }
+
+            const body = `${marker}
+            ## Coverage Summary
+
+            | Service | Coverage |
+            | --- | --- |
+            | Frontend coverage | ${frontend.label} |
+            | Backend coverage | ${backend.label} |
+            | OSINT coverage | ${osint.label} |
+
+            **Overall status:** ${overall}
+            `;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find((comment) =>
+              comment.user.type === 'Bot' && comment.body.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+  quality-gate:
+    if: ${{ always() }}
+    needs: [test-required, lint, frontend, backend, osint-engine]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce lint and test gate
+        run: |
+          if [ "${{ needs.test-required.result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.frontend.result }}" != "success" ] || \
+             [ "${{ needs.backend.result }}" != "success" ] || \
+             [ "${{ needs.osint-engine.result }}" != "success" ]; then
+            echo "Quality gate failed. lint/tests are not fully green."
+            exit 1
+          fi
+          echo "Quality gate passed."

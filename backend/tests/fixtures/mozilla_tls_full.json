@@ -1,0 +1,28 @@
+{
+  "id": 123456,
+  "target": "example.com",
+  "grade": "A+",
+  "score": 90,
+  "forward_secrecy": true,
+  "secure_renegotiation": true,
+  "tls_compression": false,
+  "connection": {
+    "serverside": true,
+    "protocols": [
+      {"name": "TLSv1.3", "supported": true},
+      {"name": "TLSv1.2", "supported": true},
+      {"name": "TLSv1.1", "supported": false},
+      {"name": "TLSv1.0", "supported": false},
+      {"name": "SSLv3", "supported": false}
+    ],
+    "ciphers": [
+      {"name": "TLS_AES_256_GCM_SHA384", "protocol": "TLSv1.3", "curves": ["prime256v1", "secp384r1"]},
+      {"name": "TLS_CHACHA20_POLY1305_SHA256", "protocol": "TLSv1.3"},
+      {"name": "TLS_AES_128_GCM_SHA256", "protocol": "TLSv1.3"},
+      {"name": "ECDHE-RSA-AES256-GCM-SHA384", "protocol": "TLSv1.2"},
+      {"name": "ECDHE-RSA-AES128-CBC-SHA", "protocol": "TLSv1.2"}
+    ],
+    "curves": ["prime256v1", "secp384r1", "secp521r1"]
+  },
+  "protocols": ["TLSv1.3", "TLSv1.2"]
+}

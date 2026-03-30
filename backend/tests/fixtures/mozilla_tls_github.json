@@ -1,0 +1,59 @@
+{
+  "id": 123456,
+  "scan_id": 123456,
+  "target": "github.com",
+  "has_vulnerabilities": false,
+  "grade": "A+",
+  "score": 90,
+  "chain_complete": true,
+  "chain_order_valid": true,
+  "forward_secrecy": true,
+  "ocsp_stapling": true,
+  "certificate_transparency": true,
+  "secure_renegotiation": true,
+  "tls_compression": false,
+  "certificates": [
+    {
+      "subject": {"CN": "github.com", "O": "GitHub, Inc."},
+      "issuer": {"CN": "DigiCert SHA2 Extended Validation Server CA", "O": "DigiCert Inc"},
+      "trusted": true,
+      "valid_from": "2024-03-07T00:00:00.000Z",
+      "valid_to": "2025-03-12T23:59:59.000Z"
+    },
+    {
+      "subject": {"CN": "DigiCert SHA2 Extended Validation Server CA", "O": "DigiCert Inc"},
+      "issuer": {"CN": "DigiCert Global Root G2", "O": "DigiCert Inc"},
+      "trusted": true,
+      "valid_from": "2022-01-01T00:00:00.000Z",
+      "valid_to": "2031-12-31T23:59:59.000Z"
+    }
+  ],
+  "connection": {
+    "protocols": [
+      {"name": "TLSv1.3", "supported": true},
+      {"name": "TLSv1.2", "supported": true},
+      {"name": "TLSv1.1", "supported": false},
+      {"name": "TLSv1.0", "supported": false}
+    ],
+    "ciphers": [
+      {"name": "TLS_AES_256_GCM_SHA384", "protocol": "TLSv1.3"},
+      {"name": "TLS_CHACHA20_POLY1305_SHA256", "protocol": "TLSv1.3"},
+      {"name": "TLS_AES_128_GCM_SHA256", "protocol": "TLSv1.3"},
+      {"name": "ECDHE-RSA-AES256-GCM-SHA384", "protocol": "TLSv1.2"}
+    ]
+  },
+  "protocols": ["TLSv1.3", "TLSv1.2"],
+  "ciphers": [
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "ECDHE-RSA-AES256-GCM-SHA384"
+  ],
+  "heartbleed": false,
+  "poodle": false,
+  "beast": false,
+  "crime": false,
+  "freak": false,
+  "logjam": false,
+  "drown": false,
+  "robot": false
+}

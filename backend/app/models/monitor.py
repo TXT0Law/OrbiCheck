@@ -1,0 +1,323 @@
+"""Monitor ORM models for uptime and change detection.
+
+NOTE: Primary keys in this module are UUID (PostgreSQL UUID type).
+
+MonitorChange foreign keys to snapshots use columns ``previous_snapshot_id`` and
+``current_snapshot_id`` (SET NULL on snapshot delete). The HTTP API serializes
+these as ``snapshotBeforeId`` / ``snapshotAfterId`` (see Pydantic schemas).
+"""
+
+from __future__ import annotations
+
+import enum
+import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.alert_event import AlertEvent
+
+
+class MonitorStatus(str, enum.Enum):
+    UP = "up"
+    DOWN = "down"
+    DEGRADED = "degraded"
+    PAUSED = "paused"
+    PENDING = "pending"
+
+
+class CheckErrorType(str, enum.Enum):
+    TIMEOUT = "timeout"
+    DNS_RESOLUTION = "dns_resolution"
+    CONNECTION_REFUSED = "connection_refused"
+    SSL_ERROR = "ssl_error"
+    HTTP_ERROR = "http_error"
+    CONTENT_TOO_LARGE = "content_too_large"
+    UNKNOWN = "unknown"
+
+
+class Monitor(Base):
+    # Prefixed to avoid clashing with unrelated DB tables named "monitors" (e.g. integer PK).
+    __tablename__ = "osint_monitors"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True, default=1)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    capabilities: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    enabled_capabilities: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
+    interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    http_method: Mapped[str] = mapped_column(String(10), nullable=False, default="GET")
+    expected_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[MonitorStatus] = mapped_column(
+        Enum(MonitorStatus, native_enum=False, length=16),
+        nullable=False,
+        default=MonitorStatus.PENDING,
+    )
+    tags: Mapped[list[str]] = mapped_column(ARRAY(String(50)), nullable=False)
+
+    last_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_response_time_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_change_detected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ssl_expiry_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_ssl_probe_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    total_checks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_changes_detected: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    uptime_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_response_time_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    checks: Mapped[list["MonitorCheck"]] = relationship(
+        back_populates="monitor", cascade="all, delete-orphan"
+    )
+    snapshots: Mapped[list["MonitorSnapshot"]] = relationship(
+        back_populates="monitor", cascade="all, delete-orphan"
+    )
+    changes: Mapped[list["MonitorChange"]] = relationship(
+        back_populates="monitor", cascade="all, delete-orphan"
+    )
+    visual_captures: Mapped[list["MonitorVisualCapture"]] = relationship(
+        back_populates="monitor", cascade="all, delete-orphan"
+    )
+    visual_changes: Mapped[list["MonitorVisualChange"]] = relationship(
+        back_populates="monitor", cascade="all, delete-orphan"
+    )
+    alert_events: Mapped[list["AlertEvent"]] = relationship(
+        "AlertEvent",
+        back_populates="monitor",
+        cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (Index("ix_osint_monitors_user_enabled", "user_id", "is_enabled"),)
+
+
+class MonitorCheck(Base):
+    __tablename__ = "osint_monitor_checks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitors.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response_time_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    error_type: Mapped[CheckErrorType | None] = mapped_column(
+        Enum(CheckErrorType, native_enum=False, length=32),
+        nullable=True,
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    ssl_days_remaining: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ssl_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    evaluated_capabilities: Mapped[list[str]] = mapped_column(
+        ARRAY(String(32)),
+        nullable=False,
+        server_default="{}",
+    )
+
+    monitor: Mapped[Monitor] = relationship(back_populates="checks")
+
+    __table_args__ = (
+        Index("ix_osint_monitor_checks_monitor_time", "monitor_id", "checked_at"),
+    )
+
+
+class MonitorSnapshot(Base):
+    __tablename__ = "osint_monitor_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitors.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    check_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitor_checks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    charset: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    http_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_baseline: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    normalization_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="0 = raw body; future versions = applied normalization pipeline",
+    )
+
+    monitor: Mapped[Monitor] = relationship(back_populates="snapshots")
+
+    __table_args__ = (
+        Index("ix_osint_snapshots_monitor_time", "monitor_id", "captured_at"),
+    )
+
+
+class MonitorChange(Base):
+    __tablename__ = "osint_monitor_changes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitors.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    previous_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitor_snapshots.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    current_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitor_snapshots.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    diff_summary: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    change_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    previous_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    current_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    threshold_met: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # When True, SSE content_changed was published; False = suppressed; NULL = legacy rows.
+    notification_dispatched: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    monitor: Mapped[Monitor] = relationship(back_populates="changes")
+    snapshot_before: Mapped["MonitorSnapshot | None"] = relationship(
+        foreign_keys=[previous_snapshot_id],
+    )
+    snapshot_after: Mapped["MonitorSnapshot | None"] = relationship(
+        foreign_keys=[current_snapshot_id],
+    )
+
+    __table_args__ = (
+        Index("ix_osint_changes_monitor_detected", "monitor_id", "detected_at"),
+    )
+
+
+class MonitorVisualCapture(Base):
+    __tablename__ = "osint_monitor_visual_captures"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitors.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    check_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitor_checks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    image_png: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    width_px: Mapped[int] = mapped_column(Integer, nullable=False)
+    height_px: Mapped[int] = mapped_column(Integer, nullable=False)
+    viewport_width: Mapped[int] = mapped_column(Integer, nullable=False)
+    viewport_height: Mapped[int] = mapped_column(Integer, nullable=False)
+    full_page: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    perceptual_hash_hex: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    dhash_algo: Mapped[str] = mapped_column(String(16), nullable=False, default="dhash")
+
+    monitor: Mapped[Monitor] = relationship(back_populates="visual_captures")
+
+    __table_args__ = (
+        Index("ix_osint_visual_captures_monitor_time", "monitor_id", "captured_at"),
+    )
+
+
+class MonitorVisualChange(Base):
+    __tablename__ = "osint_monitor_visual_changes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitors.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    previous_capture_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitor_visual_captures.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    current_capture_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("osint_monitor_visual_captures.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    diff_summary: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    monitor: Mapped[Monitor] = relationship(back_populates="visual_changes")
+
+    __table_args__ = (
+        Index("ix_osint_visual_changes_monitor_detected", "monitor_id", "detected_at"),
+    )

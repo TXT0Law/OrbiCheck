@@ -1,0 +1,34 @@
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+
+import { Providers } from "@/lib/providers";
+import { ThemeProvider } from "@/components/theme-provider";
+import "./globals.css";
+
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata: Metadata = {
+  title: "OrbiCheck",
+  description: "OrbiCheck dashboard shell",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${inter.className} antialiased`}
+        style={{ backgroundColor: "#fafafa", color: "#18181b" }}
+      >
+        <Providers>
+          <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+            {children}
+          </ThemeProvider>
+        </Providers>
+      </body>
+    </html>
+  );
+}

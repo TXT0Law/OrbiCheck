@@ -1,0 +1,91 @@
+/**
+ * Unified API response wrapper types.
+ * Matches backend FastAPI response format.
+ */
+
+export interface ApiSuccessResponse<T> {
+  status: "success";
+  data: T;
+  meta?: Record<string, unknown>;
+}
+
+export interface ApiErrorDetail {
+  code: string;
+  message: string;
+}
+
+export interface ApiErrorResponse {
+  status: "error";
+  error: ApiErrorDetail;
+}
+
+export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
+
+// === Scan API specific ===
+
+export interface ScanResponse {
+  id: string;
+  url: string;
+  domain: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  progress: number;
+  totalModules: number;
+  completedModules: number;
+  securityScore: number | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface ScanModuleResultResponse {
+  id: string;
+  moduleName: string;
+  status: "pending" | "running" | "success" | "failed" | "timeout";
+  rawResult: Record<string, unknown> | null;
+  errorMessage: string | null;
+  durationMs: number | null;
+  completedAt: string | null;
+}
+
+export interface ScanDetailApiResponse extends ScanResponse {
+  moduleResults: ScanModuleResultResponse[];
+}
+
+export interface ScanListApiResponse {
+  scans: ScanResponse[];
+  total: number;
+}
+
+export interface ScanProgressEvent {
+  progress: number;
+  phase: "pending" | "quick" | "medium" | "heavy" | "done" | "error" | "cancelled";
+  detail: string;
+  completedModules: number;
+  totalModules: number;
+  done?: boolean;
+  error?: boolean;
+  cancelled?: boolean;
+}
+
+// === URL Group API contracts ===
+
+export interface UrlGroupContract {
+  id: string;
+  name: string;
+  description: string | null;
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UrlGroupMemberContract {
+  id: string;
+  url: string;
+  displayLabel: string | null;
+  sortOrder: number;
+  createdAt: string;
+  scanId: string | null;
+  status: string;
+  securityScore: number | null;
+}

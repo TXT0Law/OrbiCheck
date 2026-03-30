@@ -1,0 +1,6 @@
+packages:
+  - "."
+
+ignoredBuiltDependencies:
+  - esbuild
+  - unrs-resolver

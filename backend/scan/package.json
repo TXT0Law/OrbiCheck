@@ -1,0 +1,39 @@
+{
+  "name": "orbicheck-scan-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "npx playwright install chromium",
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "lint": "eslint . --ext .js",
+    "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
+    "test:watch": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:cov": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --coverage --runInBand"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
+    "express": "^4.21.0",
+    "follow-redirects": "^1.15.11",
+    "got": "^14.6.6",
+    "helmet": "^8.1.0",
+    "playwright": "^1.58.2",
+    "psl": "^1.15.0",
+    "unzipper": "^0.12.3",
+    "url-parse": "^1.5.10",
+    "uuid": "^13.0.0",
+    "wappalyzer": "^7.0.3",
+    "whois": "^2.16.1",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "eslint": "^8.57.1",
+    "jest": "^29.7.0",
+    "supertest": "^7.1.4"
+  }
+}

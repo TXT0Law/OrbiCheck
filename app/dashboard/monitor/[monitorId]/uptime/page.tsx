@@ -1,0 +1,71 @@
+"use client";
+
+import { Suspense } from "react";
+
+import { MonitorCapabilityDisabled } from "@/components/monitor/monitor-capability-disabled";
+import { MonitorChecksTable } from "@/components/monitor/monitor-checks-table";
+import { useMonitorDetail } from "@/components/monitor/monitor-detail-context";
+import { MonitorFailureDistribution } from "@/components/monitor/monitor-failure-distribution";
+import { MonitorLatencyChart } from "@/components/monitor/monitor-latency-chart";
+import { MonitorSloTargetBar } from "@/components/monitor/monitor-slo-target-bar";
+import { MonitorTimeRangePicker } from "@/components/monitor/monitor-time-range-picker";
+import { MonitorUptimeChart } from "@/components/monitor/monitor-uptime-chart";
+import { MonitorUptimeSummary } from "@/components/monitor/monitor-uptime-summary";
+import { MonitorUptimeThresholdsBanner } from "@/components/monitor/monitor-uptime-thresholds-banner";
+import { MonitorUptimeSkeleton } from "@/components/monitor/skeletons/monitor-uptime-skeleton";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { useMonitorPeriod } from "@/lib/hooks/use-monitor-period";
+import { getMonitorDetailMessages } from "@/lib/i18n/monitor-detail";
+import { useMonitorUptime } from "@/lib/hooks/use-monitors";
+
+export default function MonitorUptimePage() {
+  return (
+    <Suspense fallback={<MonitorUptimeSkeleton />}>
+      <MonitorUptimeContent />
+    </Suspense>
+  );
+}
+
+function MonitorUptimeContent() {
+  const lang = useAppearanceLanguage();
+  const td = getMonitorDetailMessages(lang);
+  const { monitor } = useMonitorDetail();
+  const { period } = useMonitorPeriod();
+  const { data: uptimeData } = useMonitorUptime(monitor.id, period);
+
+  if (!monitor.enabledCapabilities.includes("uptime_only")) {
+    return (
+      <MonitorCapabilityDisabled capability="uptime_only" monitorId={monitor.id} />
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">{td.uptimeTitle}</h2>
+        <MonitorTimeRangePicker />
+      </div>
+
+      <MonitorSloTargetBar
+        currentUptime={uptimeData?.uptimePercentage ?? null}
+        period={period}
+      />
+
+      <MonitorUptimeSummary monitorId={monitor.id} />
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <MonitorUptimeChart monitorId={monitor.id} />
+        <MonitorLatencyChart monitorId={monitor.id} />
+      </div>
+
+      <MonitorFailureDistribution monitorId={monitor.id} />
+
+      <MonitorUptimeThresholdsBanner
+        thresholds={monitor.capabilities.uptime_only.thresholds}
+        monitorId={monitor.id}
+      />
+
+      <MonitorChecksTable monitorId={monitor.id} />
+    </div>
+  );
+}

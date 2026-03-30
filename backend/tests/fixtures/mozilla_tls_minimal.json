@@ -1,0 +1,10 @@
+{
+  "grade": "A",
+  "chain_complete": true,
+  "forward_secrecy": true,
+  "protocols": ["TLSv1.3", "TLSv1.2"],
+  "ciphers": ["TLS_AES_256_GCM_SHA384", "ECDHE-RSA-AES256-GCM-SHA384"],
+  "certificates": [
+    {"subject": {"CN": "example.com"}, "issuer": {"CN": "CA"}, "trusted": true}
+  ]
+}

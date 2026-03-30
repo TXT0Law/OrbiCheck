@@ -1,0 +1,77 @@
+name: Staging Deploy
+
+on:
+  push:
+    branches: [develop]
+
+concurrency:
+  group: staging-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build backend package
+        run: |
+          cd backend
+          UV_LINK_MODE=copy uv sync --extra dev
+          UV_LINK_MODE=copy uv run python -m compileall app
+
+      - name: Build osint-engine package
+        run: |
+          cd backend/scan
+          npm install --no-package-lock --legacy-peer-deps
+
+      - name: Deploy to staging
+        env:
+          STAGING_DEPLOY_ENDPOINT: ${{ secrets.STAGING_DEPLOY_ENDPOINT }}
+          STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
+        run: |
+          echo "Starting staging deployment"
+          if [ -n "${STAGING_DEPLOY_ENDPOINT}" ] && [ -n "${STAGING_DEPLOY_TOKEN}" ]; then
+            curl -fsS -X POST "${STAGING_DEPLOY_ENDPOINT}" \
+              -H "Authorization: Bearer ${STAGING_DEPLOY_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d '{"ref":"'"${GITHUB_SHA}"'","environment":"staging"}'
+          else
+            echo "Staging deploy secrets are not configured; running dry-run deploy."
+          fi
+
+      - name: Smoke check staging
+        env:
+          STAGING_HEALTHCHECK_URL: ${{ secrets.STAGING_HEALTHCHECK_URL }}
+        run: |
+          if [ -n "${STAGING_HEALTHCHECK_URL}" ]; then
+            curl -fsS "${STAGING_HEALTHCHECK_URL}"
+          else
+            echo "No staging smoke endpoint configured; skipping remote smoke check."
+          fi

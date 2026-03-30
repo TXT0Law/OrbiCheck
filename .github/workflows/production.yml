@@ -1,0 +1,101 @@
+name: Production Deploy
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  manual-approval:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require manual production approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.token }}
+          approvers: ${{ github.repository_owner }}
+          minimum-approvals: 1
+          issue-title: "Production deploy approval: ${{ github.ref_name }}"
+          issue-body: |
+            Please approve this production deployment.
+
+            - Repository: ${{ github.repository }}
+            - Tag: ${{ github.ref_name }}
+            - Commit: ${{ github.sha }}
+
+  deploy-production:
+    needs: manual-approval
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build backend package
+        run: |
+          cd backend
+          UV_LINK_MODE=copy uv sync --extra dev
+          UV_LINK_MODE=copy uv run python -m compileall app
+
+      - name: Build osint-engine package
+        run: |
+          cd backend/scan
+          npm install --no-package-lock --legacy-peer-deps
+
+      - name: Deploy to production
+        env:
+          PRODUCTION_DEPLOY_ENDPOINT: ${{ secrets.PRODUCTION_DEPLOY_ENDPOINT }}
+          PRODUCTION_DEPLOY_TOKEN: ${{ secrets.PRODUCTION_DEPLOY_TOKEN }}
+        run: |
+          echo "Starting production deployment for tag ${GITHUB_REF_NAME}"
+          if [ -z "${PRODUCTION_DEPLOY_ENDPOINT}" ] || [ -z "${PRODUCTION_DEPLOY_TOKEN}" ]; then
+            echo "Missing production deploy secrets. Configure environment secrets before running this workflow."
+            exit 1
+          fi
+
+          curl -fsS -X POST "${PRODUCTION_DEPLOY_ENDPOINT}" \
+            -H "Authorization: Bearer ${PRODUCTION_DEPLOY_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"ref":"'"${GITHUB_SHA}"'","tag":"'"${GITHUB_REF_NAME}"'","environment":"production"}'
+
+      - name: Smoke check production
+        env:
+          PRODUCTION_HEALTHCHECK_URL: ${{ secrets.PRODUCTION_HEALTHCHECK_URL }}
+        run: |
+          if [ -z "${PRODUCTION_HEALTHCHECK_URL}" ]; then
+            echo "Missing production smoke check URL."
+            exit 1
+          fi
+          curl -fsS "${PRODUCTION_HEALTHCHECK_URL}"
