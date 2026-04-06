@@ -102,7 +102,7 @@ export default function ScanSummaryPage() {
         <CardHeader>
           <CardTitle className="text-lg font-semibold">Scan Info</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2 lg:grid-cols-5">
+        <CardContent className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           <div>
             <p className="text-muted-foreground">Domain</p>
             <p className="font-medium text-zinc-900 dark:text-zinc-100">{detail.domain}</p>

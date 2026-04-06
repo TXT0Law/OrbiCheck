@@ -7,10 +7,11 @@ import { Sidebar } from "@/components/layout/sidebar";
 
 const pushMock = vi.fn();
 const setTheme = vi.fn();
+const pathnameMock = vi.hoisted(() => vi.fn(() => "/dashboard/scan"));
 
 vi.mock("next/navigation", () => ({
   useRouter: vi.fn(() => ({ push: pushMock })),
-  usePathname: vi.fn(() => "/dashboard/scan"),
+  usePathname: pathnameMock,
 }));
 
 vi.mock("next-themes", () => ({
@@ -39,15 +40,30 @@ vi.mock("@/components/alerts/alert-count-badge", () => ({
 }));
 
 describe("layout components", () => {
-  it("toggles theme in header", () => {
+  it("toggles theme in header and shows the current page title", () => {
+    pathnameMock.mockReturnValue("/dashboard/monitor");
+
     render(<Header />);
 
     fireEvent.click(screen.getByRole("button", { name: /toggle theme/i }));
     expect(setTheme).toHaveBeenCalledWith("dark");
+    expect(screen.getByText("Monitor")).toBeInTheDocument();
+  });
+
+  it("renders the mobile menu trigger when a callback is provided", () => {
+    pathnameMock.mockReturnValue("/dashboard");
+    const onMenuClick = vi.fn();
+
+    render(<Header onMenuClick={onMenuClick} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open navigation/i }));
+    expect(onMenuClick).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
   it("renders sidebar links and active section", () => {
+    pathnameMock.mockReturnValue("/dashboard/scan");
+
     render(<Sidebar />);
 
     expect(screen.getByAltText("OrbiCheck logo")).toBeInTheDocument();
