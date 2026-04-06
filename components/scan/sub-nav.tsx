@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft, Shield, Globe, FileText, LayoutDashboard } from "lucide-react";
-import type { ComponentType } from "react";
+import { useState, type ComponentType } from "react";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -42,6 +42,7 @@ interface SubNavProps {
 
 export function SubNav({ scanId, domain }: SubNavProps) {
   const pathname = usePathname();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const scanRootHref = `/dashboard/scan/${scanId}`;
 
   return (
@@ -56,46 +57,55 @@ export function SubNav({ scanId, domain }: SubNavProps) {
         </Link>
         <p className="mt-3 text-xs uppercase tracking-wide text-zinc-400">Scanned Domain</p>
         <p className="mt-1 truncate text-sm font-semibold text-white">{domain}</p>
+        <button
+          type="button"
+          onClick={() => setMobileNavOpen((open) => !open)}
+          className="mt-2 flex items-center gap-1 text-xs text-zinc-400 md:hidden"
+        >
+          {mobileNavOpen ? "Hide modules ▲" : "Show modules ▼"}
+        </button>
       </div>
 
-      <ScrollArea className="max-h-[48vh] px-3 py-4 md:h-[calc(100vh-110px)] md:max-h-none">
-        <div className="space-y-5 pb-4">
-          {SCAN_SUB_NAV_GROUPS.map((group) => {
-            const GroupIcon = SUB_NAV_ICONS[group.icon];
+      <div className={`${mobileNavOpen ? "block" : "hidden"} md:block`}>
+        <ScrollArea className="max-h-[30vh] px-3 py-4 md:h-[calc(100vh-110px)] md:max-h-none">
+          <div className="space-y-5 pb-4">
+            {SCAN_SUB_NAV_GROUPS.map((group) => {
+              const GroupIcon = SUB_NAV_ICONS[group.icon];
 
-            return (
-              <section key={group.title}>
-                <div className="mb-2 flex items-center gap-2 px-2">
-                  <GroupIcon className="h-3.5 w-3.5 text-zinc-400" />
-                  <p className="text-[11px] uppercase tracking-wide text-zinc-400">{group.title}</p>
-                </div>
+              return (
+                <section key={group.title}>
+                  <div className="mb-2 flex items-center gap-2 px-2">
+                    <GroupIcon className="h-3.5 w-3.5 text-zinc-400" />
+                    <p className="text-[11px] uppercase tracking-wide text-zinc-400">{group.title}</p>
+                  </div>
 
-                <div className="space-y-1">
-                  {group.items.map((item) => {
-                    const { href, pathForActive } = navHref(scanRootHref, item);
-                    const isActive = isNavItemActive(pathname, pathForActive);
+                  <div className="space-y-1">
+                    {group.items.map((item) => {
+                      const { href, pathForActive } = navHref(scanRootHref, item);
+                      const isActive = isNavItemActive(pathname, pathForActive);
 
-                    return (
-                      <Link
-                        key={item.label}
-                        href={href}
-                        aria-current={isActive ? "page" : undefined}
-                        className={`flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors ${
-                          isActive
-                            ? "bg-zinc-800 text-white"
-                            : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
-                        }`}
-                      >
-                        <span>{item.label}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      </ScrollArea>
+                      return (
+                        <Link
+                          key={item.label}
+                          href={href}
+                          aria-current={isActive ? "page" : undefined}
+                          className={`flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors ${
+                            isActive
+                              ? "bg-zinc-800 text-white"
+                              : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+                          }`}
+                        >
+                          <span>{item.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      </div>
     </aside>
   );
 }

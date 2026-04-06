@@ -91,7 +91,7 @@ function ModuleJobRow({ scanId, job, scanStatus }: ModuleJobRowProps) {
 
   return (
     <div className="rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-800">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span>{config.icon}</span>
           <span className="font-mono font-medium text-zinc-900 dark:text-zinc-100">{job.module}</span>

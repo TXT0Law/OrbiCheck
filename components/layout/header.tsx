@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { Moon, Sun } from "lucide-react";
+import { Menu, Moon, Sun } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 
 import { getUserEmail } from "@/lib/auth";
@@ -13,11 +14,27 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export function Header() {
+interface HeaderProps {
+  onMenuClick?: () => void;
+}
+
+function getPageTitle(path: string): string {
+  if (path === "/dashboard") return "Dashboard";
+  if (path.startsWith("/dashboard/scan")) return "Scan";
+  if (path.startsWith("/dashboard/monitor")) return "Monitor";
+  if (path.startsWith("/dashboard/alerts")) return "Alerts";
+  if (path.startsWith("/dashboard/reports")) return "Reports";
+  if (path.startsWith("/dashboard/settings")) return "Settings";
+  return "Dashboard";
+}
+
+export function Header({ onMenuClick }: HeaderProps) {
+  const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
   const userEmail = getUserEmail();
 
   const initial = useMemo(() => userEmail.charAt(0).toUpperCase() || "U", [userEmail]);
+  const pageTitle = getPageTitle(pathname);
 
   const toggleTheme = () => {
     setTheme(resolvedTheme === "dark" ? "light" : "dark");
@@ -26,7 +43,19 @@ export function Header() {
   return (
     <header className="h-14 border-b border-zinc-200 bg-white px-6 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex h-full items-center justify-between">
-        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Dashboard</p>
+        <div className="flex items-center gap-3">
+          {onMenuClick ? (
+            <button
+              type="button"
+              onClick={onMenuClick}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 md:hidden"
+              aria-label="Open navigation"
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+          ) : null}
+          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{pageTitle}</p>
+        </div>
 
         <div className="flex items-center gap-3">
           <button

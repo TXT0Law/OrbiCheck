@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 
 import { AlertSSEProvider } from "@/components/alerts/alert-sse-provider";
 import { Header } from "@/components/layout/header";
-import { Sidebar } from "@/components/layout/sidebar";
+import { Sidebar, SidebarContent } from "@/components/layout/sidebar";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 export default function DashboardLayout({
   children,
@@ -12,6 +14,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const scanReservedSegments = ["groups", "new"];
   const scanMatch = pathname.match(/^\/dashboard\/scan\/([^/]+)/);
@@ -37,8 +40,17 @@ export default function DashboardLayout({
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <AlertSSEProvider />
       <Sidebar />
-      <div className="ml-[240px] min-h-screen flex flex-col">
-        <Header />
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent
+          side="left"
+          className="top-[var(--demo-bar-height,0px)] h-[calc(100vh-var(--demo-bar-height,0px))] w-[240px] p-0"
+          aria-describedby={undefined}
+        >
+          <SidebarContent onClose={() => setSidebarOpen(false)} className="border-r-0" />
+        </SheetContent>
+      </Sheet>
+      <div className="flex min-h-screen flex-col pt-[var(--demo-bar-height,0px)] md:ml-[240px]">
+        <Header onMenuClick={() => setSidebarOpen(true)} />
         <main className="flex-1 p-6 md:p-8">{children}</main>
       </div>
     </div>

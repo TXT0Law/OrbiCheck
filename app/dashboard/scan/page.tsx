@@ -332,9 +332,9 @@ export default function ScanPage() {
 
       <Card>
         <CardHeader className="space-y-4">
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <CardTitle className="text-lg font-semibold">Scan List</CardTitle>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm text-muted-foreground">
                 {scanList?.total ?? 0} results {isFetching ? "(refreshing...)" : ""}
               </p>
@@ -355,10 +355,11 @@ export default function ScanPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_180px_auto_auto]">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-[1fr_180px_180px_180px_180px]">
+            <div className="col-span-2 flex flex-wrap items-center gap-2">
               <ScanViewToggle mode={viewMode} onChange={setViewMode} />
               <Input
+                className="min-w-0"
                 aria-label="Search scans"
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
@@ -398,12 +399,16 @@ export default function ScanPage() {
               <option value="cancelled">Category: Cancelled</option>
             </select>
 
-            <Button onClick={applySearch} className="h-10 bg-zinc-900 text-white hover:bg-zinc-800">
+            <Button
+              onClick={applySearch}
+              className="h-10 w-full"
+            >
               Search
             </Button>
             <Button
+              variant="outline"
               onClick={resetFilters}
-              className="h-10 border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              className="h-10 w-full"
             >
               Reset
             </Button>
@@ -425,7 +430,7 @@ export default function ScanPage() {
             recentScans.map((scan) => (
               <div
                 key={scan.id}
-                className="flex items-center gap-3 rounded-md border border-zinc-200 p-3 dark:border-zinc-800"
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-800"
               >
                 <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
@@ -444,7 +449,7 @@ export default function ScanPage() {
                 </div>
                 {renderStatus(scan.backendStatus)}
 
-                <div className="flex items-center gap-2">
+                <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
                   <Button
                     onClick={() =>
                       handleRescan({
