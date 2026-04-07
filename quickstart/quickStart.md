@@ -127,3 +127,54 @@ This is usually caused by one of the following:
    Stop dev first, then run build.
 
 If the issue persists, try: `rm -rf .next && pnpm dev`
+
+
+
+
+
+---
+
+### Docker Compose Deployment (Alternative to Native)
+
+If you prefer containers over native processes, the full stack can be started via Docker Compose. This requires only Docker — no local PostgreSQL, Redis, or Node.js needed.
+
+**Start all 7 services** (postgres, redis, scan-service, backend, celery-worker, celery-beat, frontend):
+
+```bash
+bash deploy/deploy.sh
+```
+
+The script builds images, starts containers, and waits until every service is healthy. Once done:
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
+
+**Stop the stack:**
+
+```bash
+bash deploy/deploy.sh --down
+```
+
+**Production mode** (uses external PostgreSQL and Redis):
+
+```bash
+DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/db" \
+REDIS_URL="redis://host:6379/0" \
+bash deploy/deploy.sh --prod
+```
+
+**Reset all data and volumes:**
+
+```bash
+docker compose down --remove-orphans -v
+```
+
+**Useful commands:**
+
+```bash
+docker compose ps                              # Service status
+docker compose logs --no-color backend         # View backend logs
+docker compose logs --no-color -f scan-service # Follow scan-service logs
+docker compose exec backend bash               # Shell into backend
+```
+
+> **Note**: The backend container automatically handles database migration on startup. For fresh databases it creates tables and stamps Alembic; for existing databases it runs `alembic upgrade head`.

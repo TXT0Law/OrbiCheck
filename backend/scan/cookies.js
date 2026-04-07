@@ -1,11 +1,12 @@
 import axios from 'axios';
-import { chromium } from 'playwright';
+
 import middleware from './_common/middleware.js';
+import { launchChromium } from './_common/playwright-browser.js';
 
 const BROWSER_TIMEOUT_MS = 20000;
 
 const getPlaywrightCookies = async (url) => {
-  const browser = await chromium.launch({
+  const browser = await launchChromium({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });

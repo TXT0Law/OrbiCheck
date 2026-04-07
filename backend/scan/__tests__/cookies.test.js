@@ -19,23 +19,17 @@ function createResponseCapture() {
   };
 }
 
-function createPlaywrightMock({ clientCookies = [], browserError = null }) {
+function createBrowserMock({ clientCookies = [], browserError = null }) {
   return {
-    chromium: {
-      launch: jest.fn().mockResolvedValue({
-        newContext: jest.fn().mockResolvedValue({
-          newPage: jest.fn().mockResolvedValue({
-            goto: jest.fn().mockImplementation(async () => {
-              if (browserError) {
-                throw browserError;
-              }
-            }),
-          }),
-          cookies: jest.fn().mockResolvedValue(clientCookies),
+    newContext: jest.fn().mockResolvedValue({
+      newPage: jest.fn().mockResolvedValue({
+        goto: jest.fn().mockImplementation(async () => {
+          if (browserError) throw browserError;
         }),
-        close: jest.fn().mockResolvedValue(undefined),
       }),
-    },
+      cookies: jest.fn().mockResolvedValue(clientCookies),
+    }),
+    close: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -50,9 +44,10 @@ async function loadHandlerWithMocks({ axiosResult, axiosError, clientCookies, br
     },
   }));
 
-  await jest.unstable_mockModule('playwright', () =>
-    createPlaywrightMock({ clientCookies, browserError })
-  );
+  const browserMock = createBrowserMock({ clientCookies, browserError });
+  await jest.unstable_mockModule('../_common/playwright-browser.js', () => ({
+    launchChromium: jest.fn().mockResolvedValue(browserMock),
+  }));
 
   const { handler } = await import('../cookies.js');
   return handler;
@@ -132,6 +127,37 @@ describe('cookies module', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.body.error).toContain('Missing required query parameter: url');
+  });
+
+  it('falls back gracefully when Playwright browser fails', async () => {
+    const handler = await loadHandlerWithMocks({
+      axiosResult: {
+        headers: {
+          'set-cookie': ['lang=en; Path=/'],
+        },
+      },
+      clientCookies: [],
+      browserError: new Error('Chromium not found'),
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.headerCookies).toEqual(['lang=en; Path=/']);
+    expect(response.body.clientCookies).toBeNull();
+  });
+
+  it('returns skipped when axios returns no set-cookie and browser throws', async () => {
+    const handler = await loadHandlerWithMocks({
+      axiosResult: { headers: {} },
+      clientCookies: [],
+      browserError: new Error('launch failed'),
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ skipped: 'No cookies' });
   });
 
   it('is registered in module registry', async () => {
