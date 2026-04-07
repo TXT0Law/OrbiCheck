@@ -1,7 +1,14 @@
 /** @type {import('next').NextConfig} */
-const apiOrigin = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+const publicApiOrigin = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+const internalApiOrigin = (
+  process.env.INTERNAL_API_URL ||
+  publicApiOrigin ||
+  "http://localhost:8000"
+).replace(/\/+$/, "");
+const disableApiRewrite = process.env.DISABLE_API_REWRITE === "1";
 
 const nextConfig = {
+  output: "standalone",
   // Disable webpack cache to avoid ENOENT pack.gz on external drives
   webpack: (config, { dev }) => {
     if (dev) config.cache = false;
@@ -30,8 +37,12 @@ const nextConfig = {
     ];
   },
   async rewrites() {
+    if (disableApiRewrite) {
+      return [];
+    }
+
     return [
-      { source: "/api/v1/:path*", destination: `${apiOrigin}/api/v1/:path*` },
+      { source: "/api/v1/:path*", destination: `${internalApiOrigin}/api/v1/:path*` },
     ];
   },
 };

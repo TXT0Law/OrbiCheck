@@ -1,16 +1,27 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV UV_LINK_MODE=copy
+ENV PATH="/app/backend/.venv/bin:${PATH}"
 
-RUN pip install --no-cache-dir uv
+WORKDIR /app/backend
 
-COPY pyproject.toml ./
-RUN uv venv && uv pip install -e .
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-COPY . .
+COPY backend/pyproject.toml backend/alembic.ini ./
+RUN uv venv .venv
 
-RUN uv run alembic upgrade head 2>/dev/null || true
+COPY backend ./
+COPY docker/backend/entrypoint.sh /usr/local/bin/backend-entrypoint.sh
+COPY docker/celery/entrypoint.sh /usr/local/bin/celery-entrypoint.sh
+
+RUN chmod +x /usr/local/bin/backend-entrypoint.sh /usr/local/bin/celery-entrypoint.sh \
+    && uv pip install --python .venv/bin/python -e .
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"
+
+CMD ["/usr/local/bin/backend-entrypoint.sh"]

@@ -1,6 +1,7 @@
 // backend/scan/screenshot.js
 // Screenshot capture using Playwright (replaces Puppeteer)
-import { chromium } from 'playwright';
+
+import { launchChromium } from './_common/playwright-browser.js';
 import middleware from './_common/middleware.js';
 
 const DEFAULT_VIEWPORT_WIDTH = 1280;
@@ -54,7 +55,7 @@ const screenshotHandler = async (targetUrl, req) => {
 
   let browser = null;
   try {
-    browser = await chromium.launch({
+    browser = await launchChromium({
       headless: true,
       args: [
         '--no-sandbox',

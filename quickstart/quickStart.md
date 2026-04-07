@@ -127,3 +127,32 @@ This is usually caused by one of the following:
    Stop dev first, then run build.
 
 If the issue persists, try: `rm -rf .next && pnpm dev`
+
+
+
+
+
+啟動 / 停止 / 重置
+啟動整套：
+
+bash deploy/deploy.sh
+停止整套：
+
+bash deploy/deploy.sh --down
+Production override 啟動：
+
+DATABASE_URL=... REDIS_URL=... bash deploy/deploy.sh --prod
+Production override 停止：
+
+bash deploy/deploy.sh --prod --down
+重置整套與資料卷：
+
+docker compose down --remove-orphans -v
+查看目前服務狀態：
+
+docker compose ps
+查看 log：
+
+docker compose logs --no-color backend
+docker compose logs --no-color frontend
+docker compose logs --no-color scan-service
