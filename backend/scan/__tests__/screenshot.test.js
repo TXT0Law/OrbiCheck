@@ -1,19 +1,80 @@
 /**
- * Tests for screenshot module (Playwright).
- * Uses mocked handlers; real capture requires Playwright Chromium.
+ * Tests for screenshot module (Playwright via _common/playwright-browser.js).
+ * Covers both route-level (supertest) and handler-level (mocked launchChromium) tests.
  * Keep this file updated when changing ../screenshot.js (CI: require-tests.sh).
  */
 
+import { jest } from '@jest/globals';
 import request from 'supertest';
 
 import { app, setModulesForTest } from '../server.js';
 
-describe('screenshot module (Playwright)', () => {
+function createResponseCapture() {
+  return {
+    headersSent: false,
+    statusCode: 200,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.headersSent = true;
+      this.body = body;
+      return this;
+    },
+  };
+}
+
+function createBrowserMock({ screenshotBuffer = Buffer.from('png-data'), gotoError = null }) {
+  return {
+    newContext: jest.fn().mockResolvedValue({
+      newPage: jest.fn().mockResolvedValue({
+        goto: jest.fn().mockImplementation(async () => {
+          if (gotoError) throw gotoError;
+        }),
+        setDefaultTimeout: jest.fn(),
+        screenshot: jest.fn().mockResolvedValue(screenshotBuffer),
+      }),
+    }),
+    close: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
+async function loadHandlerWithMocks({ screenshotBuffer, gotoError, launchError } = {}) {
+  jest.resetModules();
+
+  if (launchError) {
+    await jest.unstable_mockModule('../_common/playwright-browser.js', () => ({
+      launchChromium: jest.fn().mockRejectedValue(launchError),
+    }));
+  } else {
+    const browserMock = createBrowserMock({ screenshotBuffer, gotoError });
+    await jest.unstable_mockModule('../_common/playwright-browser.js', () => ({
+      launchChromium: jest.fn().mockResolvedValue(browserMock),
+    }));
+  }
+
+  const { handler } = await import('../screenshot.js');
+  return handler;
+}
+
+async function invokeHandler(handler, url = 'https://example.com', query = {}) {
+  const req = { query: { url, ...query } };
+  const res = createResponseCapture();
+  await handler(req, res);
+  return res;
+}
+
+describe('screenshot module — route level', () => {
+  beforeEach(() => {
+    setModulesForTest(new Map());
+  });
+
   it('returns success with image when mock captures successfully', async () => {
     const mockScreenshot = (_req, res) => {
       res.status(200).json({
         success: true,
-        image: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        image: 'iVBORw0KGgoAAAANSUhEUg==',
         viewport: '1280x720',
         capturedAt: new Date().toISOString(),
         duration_ms: 100,
@@ -41,36 +102,13 @@ describe('screenshot module (Playwright)', () => {
     expect(response.body.error).toMatch(/url|missing/i);
   });
 
-  it('returns error for invalid URL when mock returns error structure', async () => {
-    const mockInvalid = (_req, res) => {
-      res.status(200).json({
-        success: false,
-        image: null,
-        error: 'URL provided is invalid',
-        duration_ms: 5,
-      });
-    };
-    setModulesForTest(new Map([['screenshot', mockInvalid]]));
-
-    const response = await request(app)
-      .get('/api/scan/screenshot')
-      .query({ url: 'http://' });
-
-    expect(response.statusCode).toBe(200);
-    const body = response.body;
-    expect(body.success).toBe(false);
-    expect(body.image).toBeNull();
-    expect(body.error).toBeTruthy();
-  });
-
   it('forwards viewportWidth, viewportHeight, and fullPage query params to the handler', async () => {
     let capturedQuery = null;
     const mockScreenshot = (req, res) => {
       capturedQuery = { ...req.query };
       res.status(200).json({
         success: true,
-        image:
-          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        image: 'iVBORw0KGgoAAAANSUhEUg==',
         viewport: '600x400',
         fullPage: true,
         capturedAt: new Date().toISOString(),
@@ -94,5 +132,68 @@ describe('screenshot module (Playwright)', () => {
     expect(capturedQuery.viewportWidth).toBe('600');
     expect(capturedQuery.viewportHeight).toBe('400');
     expect(capturedQuery.fullPage).toBe('true');
+  });
+});
+
+describe('screenshot module — handler unit tests (mocked launchChromium)', () => {
+  it('returns base64 image on successful capture', async () => {
+    const fakeBuffer = Buffer.from('test-image-data');
+    const handler = await loadHandlerWithMocks({ screenshotBuffer: fakeBuffer });
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.image).toBe(fakeBuffer.toString('base64'));
+    expect(response.body.viewport).toBe('1280x720');
+    expect(response.body.duration_ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it('returns 500 via middleware when URL is missing', async () => {
+    const handler = await loadHandlerWithMocks();
+    const req = { query: {} };
+    const res = createResponseCapture();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body.error).toMatch(/no url/i);
+  });
+
+  it('returns error for invalid URL', async () => {
+    const handler = await loadHandlerWithMocks();
+    const response = await invokeHandler(handler, '://bad');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toContain('invalid');
+  });
+
+  it('prepends http:// when protocol is missing', async () => {
+    const handler = await loadHandlerWithMocks();
+    const response = await invokeHandler(handler, 'example.com');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(true);
+  });
+
+  it('returns error when browser launch fails', async () => {
+    const handler = await loadHandlerWithMocks({
+      launchError: new Error('Chromium not found'),
+    });
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toContain('Chromium not found');
+  });
+
+  it('clamps viewport to allowed range', async () => {
+    const handler = await loadHandlerWithMocks();
+    const response = await invokeHandler(handler, 'https://example.com', {
+      viewportWidth: '100',
+      viewportHeight: '99999',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(true);
   });
 });

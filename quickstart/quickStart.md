@@ -132,27 +132,49 @@ If the issue persists, try: `rm -rf .next && pnpm dev`
 
 
 
-啟動 / 停止 / 重置
-啟動整套：
+---
 
+### Docker Compose Deployment (Alternative to Native)
+
+If you prefer containers over native processes, the full stack can be started via Docker Compose. This requires only Docker — no local PostgreSQL, Redis, or Node.js needed.
+
+**Start all 7 services** (postgres, redis, scan-service, backend, celery-worker, celery-beat, frontend):
+
+```bash
 bash deploy/deploy.sh
-停止整套：
+```
 
+The script builds images, starts containers, and waits until every service is healthy. Once done:
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
+
+**Stop the stack:**
+
+```bash
 bash deploy/deploy.sh --down
-Production override 啟動：
+```
 
-DATABASE_URL=... REDIS_URL=... bash deploy/deploy.sh --prod
-Production override 停止：
+**Production mode** (uses external PostgreSQL and Redis):
 
-bash deploy/deploy.sh --prod --down
-重置整套與資料卷：
+```bash
+DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/db" \
+REDIS_URL="redis://host:6379/0" \
+bash deploy/deploy.sh --prod
+```
 
+**Reset all data and volumes:**
+
+```bash
 docker compose down --remove-orphans -v
-查看目前服務狀態：
+```
 
-docker compose ps
-查看 log：
+**Useful commands:**
 
-docker compose logs --no-color backend
-docker compose logs --no-color frontend
-docker compose logs --no-color scan-service
+```bash
+docker compose ps                              # Service status
+docker compose logs --no-color backend         # View backend logs
+docker compose logs --no-color -f scan-service # Follow scan-service logs
+docker compose exec backend bash               # Shell into backend
+```
+
+> **Note**: The backend container automatically handles database migration on startup. For fresh databases it creates tables and stamps Alembic; for existing databases it runs `alembic upgrade head`.

@@ -25,6 +25,11 @@ An external-perspective website security assessment platform. Provide a URL, get
   - [Scan Service Setup](#scan-service-setup)
   - [Database Migration](#database-migration)
   - [Start All Services](#start-all-services)
+- [Docker Deployment](#docker-deployment)
+  - [One-Command Start](#one-command-start)
+  - [Production Mode](#production-mode)
+  - [Docker Services](#docker-services)
+  - [DigitalOcean App Platform](#digitalocean-app-platform)
 - [Environment Variables](#environment-variables)
 - [API Documentation](#api-documentation)
 - [Testing](#testing)
@@ -109,10 +114,13 @@ Backend (FastAPI :8000)
     |-- --> Redis (:6379)          Cache + task broker
     |-- --> PostgreSQL (:5432)     Data persistence
     |
-    '-- Celery worker (optional)   Async scan tasks + scheduled monitoring
+    |-- Celery worker              Async scan tasks + scheduled monitoring
+    '-- Celery beat                Periodic task scheduler
 ```
 
 The frontend communicates only with the backend. The Scan Service is an internal service that wraps 30+ OSINT modules and is called exclusively by the backend via HTTP.
+
+All seven services (frontend, backend, scan-service, celery-worker, celery-beat, postgres, redis) can be started with a single command using Docker Compose — see [Docker Deployment](#docker-deployment).
 
 ---
 
@@ -224,7 +232,84 @@ Open http://localhost:3000 in your browser. Default login credentials:
 
 > **Security Warning**: These are development-only defaults. For any non-local deployment, you **must** change `AUTH_LOGIN_EMAIL`, `AUTH_LOGIN_PASSWORD`, and set a strong random value for `AUTH_SESSION_SECRET` in `backend/.env`. Never use the default credentials in production.
 
-> **Quickstart script**: Alternatively, if PostgreSQL and Redis are already running locally, you can use `bash quickstart/start.sh` to start all three services in one command. See `quickstart/quickStart.md` for details.
+> **Quickstart script**: If PostgreSQL and Redis are already running locally, you can use `bash quickstart/start.sh` to start all three services in one command. See `quickstart/quickStart.md` for details.
+
+> **Docker**: Prefer `bash deploy/deploy.sh` for a fully containerised stack (includes PostgreSQL, Redis, Celery). No local dependencies required beyond Docker. See [Docker Deployment](#docker-deployment).
+
+---
+
+## Docker Deployment
+
+The full stack is containerised via Docker Compose. All seven services (postgres, redis, scan-service, backend, celery-worker, celery-beat, frontend) are orchestrated with health checks and dependency ordering.
+
+### One-Command Start
+
+```bash
+bash deploy/deploy.sh
+```
+
+This will:
+1. Copy `.env.example` files if missing
+2. Build all Docker images (multi-stage)
+3. Start the full stack (`docker compose up -d`)
+4. Wait for every service to report healthy
+
+Once complete, open http://localhost:3000 (frontend) and http://localhost:8000 (backend).
+
+To stop:
+
+```bash
+bash deploy/deploy.sh --down
+```
+
+To reset all data (removes volumes):
+
+```bash
+docker compose down --remove-orphans -v
+```
+
+### Production Mode
+
+Production mode uses external PostgreSQL and Redis instead of the local containers:
+
+```bash
+DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/db" \
+REDIS_URL="redis://host:6379/0" \
+bash deploy/deploy.sh --prod
+```
+
+This starts the app services only (postgres and redis containers are scaled to 0). The `docker-compose.prod.yml` override injects the external connection strings.
+
+### Docker Services
+
+| Service | Image / Dockerfile | Port | Notes |
+|---------|-------------------|------|-------|
+| **postgres** | `postgres:16-alpine` | 5432 (internal) | Data persisted via named volume |
+| **redis** | `redis:7-alpine` | 6379 (internal) | AOF persistence |
+| **scan-service** | `docker/scan/Dockerfile` | 4000 (internal) | Alpine + system Chromium (no Playwright download) |
+| **backend** | `docker/backend/Dockerfile` | 8000 (published) | Auto-runs Alembic migration on startup |
+| **celery-worker** | same as backend | — | `CELERY_MODE=worker` |
+| **celery-beat** | same as backend | — | `CELERY_MODE=beat` |
+| **frontend** | `docker/frontend/Dockerfile` | 3000 (published) | Next.js standalone output |
+
+Key design decisions:
+- **scan-service** uses `node:20-alpine` + system `chromium` package instead of the Playwright base image, avoiding flaky browser downloads during build
+- **backend** entrypoint handles fresh databases (creates tables + `alembic stamp head`) and existing databases (`alembic upgrade head`) automatically
+- **celery-worker** and **celery-beat** share the backend image and are routed by the `CELERY_MODE` env var
+- **frontend** uses multi-stage build with `output: "standalone"` and rewrites `/api/v1/*` to the internal backend hostname
+
+### DigitalOcean App Platform
+
+A `.do/app.yaml` spec is included for DigitalOcean App Platform deployment. It defines all services, workers, managed databases (Postgres + Redis), and ingress routing rules. Adjust secrets (`AUTH_SESSION_SECRET`, `AUTH_LOGIN_PASSWORD`) before deploying.
+
+### Useful Docker Commands
+
+```bash
+docker compose ps                          # Service status
+docker compose logs --no-color backend     # View backend logs
+docker compose logs --no-color -f frontend # Follow frontend logs
+docker compose exec backend bash           # Shell into backend container
+```
 
 ---
 
@@ -380,8 +465,21 @@ OrbiCheck/
 │   ├── scan/               # Node.js Scan Service (30+ OSINT modules)
 │   └── tests/              # Backend tests (unit, integration, e2e)
 │
-├── quickstart/             # One-command local startup scripts
-├── docker/                 # Partial Docker configs
+├── docker/                 # Docker configurations
+│   ├── frontend/Dockerfile #   Next.js multi-stage standalone build
+│   ├── backend/Dockerfile  #   FastAPI + Alembic + Celery
+│   ├── backend/entrypoint.sh # Bootstrap-friendly DB init
+│   ├── celery/entrypoint.sh  # Worker / beat mode router
+│   ├── scan/Dockerfile     #   Node.js + system Chromium
+│   └── init/init-db.sql    #   PostgreSQL extensions
+├── docker-compose.yml      # Full local stack (7 services)
+├── docker-compose.prod.yml # Production override (external DB/Redis)
+├── deploy/deploy.sh        # One-command build + up + healthcheck
+├── .do/app.yaml            # DigitalOcean App Platform spec
+├── .dockerignore
+│
+├── quickstart/             # Native local startup scripts (no Docker)
+├── scripts/                # Dev / CI scripts
 ├── Makefile                # Common dev commands
 └── package.json
 ```
