@@ -33,6 +33,7 @@ class Scan(Base):
     total_modules: Mapped[int] = mapped_column(Integer, default=0)
     completed_modules: Mapped[int] = mapped_column(Integer, default=0)
     security_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scan_options: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

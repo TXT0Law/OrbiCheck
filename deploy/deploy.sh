@@ -128,10 +128,10 @@ compose build
 
 if [ "${PROD_MODE}" -eq 1 ]; then
   compose up -d --remove-orphans --scale postgres=0 --scale redis=0
-  services=(scan-service backend celery-worker celery-beat frontend)
+  services=(scan-service scanner backend celery-worker celery-beat frontend)
 else
   compose up -d --remove-orphans
-  services=(postgres redis scan-service backend celery-worker celery-beat frontend)
+  services=(postgres redis scan-service scanner backend celery-worker celery-beat frontend)
 fi
 
 for service in "${services[@]}"; do

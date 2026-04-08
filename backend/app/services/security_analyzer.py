@@ -193,8 +193,30 @@ def _get_open_ports(raw_results: dict) -> list[int]:
     ports_raw = _ensure_dict(ports_raw)
     open_ports = ports_raw.get("openPorts", [])
     if isinstance(open_ports, list):
-        return [int(p) for p in open_ports if isinstance(p, (int, str))]
+        normalized = []
+        for port in open_ports:
+            if isinstance(port, dict) and isinstance(port.get("port"), (int, str)):
+                normalized.append(int(port["port"]))
+            elif isinstance(port, (int, str)):
+                normalized.append(int(port))
+        return normalized
     return []
+
+
+def _get_ports_data(raw_results: dict) -> dict:
+    """Extract normalized ports payload."""
+    return _ensure_dict(raw_results.get("ports", {}))
+
+
+def _is_ports_behind_proxy(raw_results: dict) -> bool:
+    """Return True when the port scan is flagged as proxy/CDN-backed."""
+    return bool(_get_ports_data(raw_results).get("behindProxy", False))
+
+
+def _get_ports_proxy_provider(raw_results: dict) -> str | None:
+    """Return detected proxy/CDN provider name when available."""
+    provider = _get_ports_data(raw_results).get("proxyProvider")
+    return str(provider) if provider else None
 
 
 def _get_tls_raw(raw_results: dict) -> dict:
@@ -449,15 +471,16 @@ def _score_infrastructure_category(raw_results: dict) -> tuple[float, float]:
     max_pts = 15.0
 
     open_ports: list[int] = []
+    behind_proxy = _is_ports_behind_proxy(raw_results)
     if "ports" in raw_results:
         open_ports = _get_open_ports(raw_results)
 
     dangerous_open = any(p in DANGEROUS_PORTS for p in open_ports)
-    if not dangerous_open:
+    if behind_proxy or not dangerous_open:
         earned += 5
 
     risky_open = any(p in RISKY_PORTS_INFRA for p in open_ports)
-    if not risky_open:
+    if behind_proxy or not risky_open:
         earned += 3
 
     firewall = _ensure_dict(raw_results.get("firewall"))
@@ -517,6 +540,8 @@ def detect_ssl_expired(raw_results: dict) -> bool:
 
 def detect_has_dangerous_ports(raw_results: dict) -> bool:
     if "ports" not in raw_results:
+        return False
+    if _is_ports_behind_proxy(raw_results):
         return False
     return any(p in DANGEROUS_PORTS for p in _get_open_ports(raw_results))
 
@@ -824,9 +849,10 @@ def compute_category_summary(raw_results: dict) -> list[dict]:
         elif cat_name == "Network":
             if "ports" in raw_results:
                 open_ports = _get_open_ports(raw_results)
-                for p in open_ports:
-                    if p in DANGEROUS_PORTS or p in RISKY_PORTS_INFRA:
-                        issue_count += 1
+                if not _is_ports_behind_proxy(raw_results):
+                    for p in open_ports:
+                        if p in DANGEROUS_PORTS or p in RISKY_PORTS_INFRA:
+                            issue_count += 1
             mail = _ensure_dict(raw_results.get("mail-config"))
             spf = mail.get("spf", {})
             if isinstance(spf, dict) and spf.get("status") == "fail":
@@ -895,8 +921,10 @@ def extract_key_findings(raw_results: dict, max_findings: int = 8) -> list[dict]
         )
 
     open_ports = _get_open_ports(raw_results)
+    behind_proxy = _is_ports_behind_proxy(raw_results)
+    proxy_provider = _get_ports_proxy_provider(raw_results)
     dangerous = [p for p in open_ports if p in DANGEROUS_PORTS]
-    if dangerous:
+    if dangerous and not behind_proxy:
         findings.append(
             {
                 "title": "Dangerous ports open",
@@ -905,8 +933,18 @@ def extract_key_findings(raw_results: dict, max_findings: int = 8) -> list[dict]
                 "module": "ports",
             },
         )
+    elif behind_proxy:
+        provider_suffix = f" ({proxy_provider})" if proxy_provider else ""
+        findings.append(
+            {
+                "title": "Port scan results may be inaccurate",
+                "description": f"Target is behind CDN/proxy{provider_suffix}.",
+                "severity": "info",
+                "module": "ports",
+            },
+        )
     risky = [p for p in open_ports if p in RISKY_PORTS_INFRA]
-    if risky:
+    if risky and not behind_proxy:
         findings.append(
             {
                 "title": "Risky ports open",

@@ -11,6 +11,8 @@ from app.models.scan import ModuleStatus, ScanStatus
 from app.services import scan_service
 from app.services.transformers import ALL_MODULES
 
+PORTS_MODULE = "ports"
+
 
 class _FakeDb:
     def __init__(self) -> None:
@@ -58,6 +60,11 @@ async def test_create_scan_creates_pending_scan_and_module_slots(
     assert scan.status == ScanStatus.PENDING
     assert scan.user_id == 7
     assert scan.total_modules == 2
+    assert scan.scan_options == {
+        "enablePortScan": False,
+        "portScanProfile": "quick",
+        "acknowledgeScanAuthorization": False,
+    }
     assert len(module_rows) == len(ALL_MODULES)
     assert sum(1 for row in module_rows if row.status == ModuleStatus.PENDING) == 2
 
@@ -72,7 +79,79 @@ async def test_create_scan_uses_all_modules_when_none_selected(
 
     scan = await scan_service.create_scan(db, "https://example.com", None, 1)
 
+    assert scan.total_modules == len(ALL_MODULES) - 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_scan_skips_ports_when_port_scan_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _FakeDb()
+    monkeypatch.setattr(scan_service, "validate_url_safety", lambda _url: None)
+
+    scan = await scan_service.create_scan(db, "https://example.com", None, 1)
+
+    module_rows = [obj for obj in db.added if getattr(obj, "module_name", None)]
+    ports_row = next(row for row in module_rows if row.module_name == PORTS_MODULE)
+
+    assert scan.total_modules == len(ALL_MODULES) - 1
+    assert ports_row.status == ModuleStatus.SUCCESS
+    assert ports_row.raw_result == {
+        "skipped": True,
+        "data": {"note": "Skipped because port scanning is disabled"},
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_scan_keeps_ports_when_port_scan_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _FakeDb()
+    monkeypatch.setattr(scan_service, "validate_url_safety", lambda _url: None)
+
+    scan = await scan_service.create_scan(
+        db,
+        "https://example.com",
+        None,
+        1,
+        enable_port_scan=True,
+    )
+
+    module_rows = [obj for obj in db.added if getattr(obj, "module_name", None)]
+    ports_row = next(row for row in module_rows if row.module_name == PORTS_MODULE)
+
     assert scan.total_modules == len(ALL_MODULES)
+    assert scan.scan_options == {
+        "enablePortScan": True,
+        "portScanProfile": "quick",
+        "acknowledgeScanAuthorization": False,
+    }
+    assert ports_row.status == ModuleStatus.PENDING
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_scan_stores_port_scan_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = _FakeDb()
+    monkeypatch.setattr(scan_service, "validate_url_safety", lambda _url: None)
+
+    scan = await scan_service.create_scan(
+        db,
+        "https://example.com",
+        None,
+        1,
+        enable_port_scan=True,
+        port_scan_profile="deep",
+        acknowledge_scan_authorization=True,
+    )
+
+    assert scan.scan_options == {
+        "enablePortScan": True,
+        "portScanProfile": "deep",
+        "acknowledgeScanAuthorization": True,
+    }
 
 
 @pytest.mark.unit

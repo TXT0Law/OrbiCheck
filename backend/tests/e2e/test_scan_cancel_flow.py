@@ -19,7 +19,15 @@ async def test_scan_cancel_flow_preserves_partial_results(
 ) -> None:
     in_memory_scans: dict[UUID, object] = {}
 
-    async def _fake_create_scan(_db, url: str, modules=None, user_id: int = 1):
+    async def _fake_create_scan(
+        _db,
+        url: str,
+        modules=None,
+        user_id: int = 1,
+        enable_port_scan: bool = False,
+        port_scan_profile: str = "quick",
+        acknowledge_scan_authorization: bool = False,
+    ):
         scan = scan_record_factory(
             url=url,
             domain="example.com",
@@ -28,6 +36,9 @@ async def test_scan_cancel_flow_preserves_partial_results(
             total_modules=5,
             completed_modules=0,
         )
+        assert enable_port_scan is False
+        assert port_scan_profile == "quick"
+        assert acknowledge_scan_authorization is False
         in_memory_scans[scan.id] = scan
         return scan
 
@@ -75,6 +86,6 @@ async def test_scan_cancel_flow_preserves_partial_results(
     detail = detail_response.json()["data"]
     assert detail["status"] == "cancelled"
     assert detail["whois"]["registrar"] == "Example"
-    assert detail["ports"][0]["port"] == 80
+    assert detail["ports"]["entries"][0]["port"] == 80
     assert list_response.status_code == 200
     assert list_response.json()["data"]["total"] == 1

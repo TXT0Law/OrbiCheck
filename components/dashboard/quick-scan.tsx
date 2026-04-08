@@ -22,7 +22,12 @@ export function QuickScan({ className }: QuickScanProps) {
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: (targetUrl: string) => createScan(targetUrl),
+    mutationFn: (targetUrl: string) =>
+      createScan(targetUrl, {
+        enablePortScan: true,
+        portScanProfile: "quick",
+        acknowledgeScanAuthorization: true,
+      }),
     onSuccess: (scan) => {
       void queryClient.invalidateQueries({ queryKey: ["scans"] });
       router.push(`/dashboard/scan/${scan.id}`);

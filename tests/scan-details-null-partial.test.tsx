@@ -32,15 +32,17 @@ describe("scan detail components null/partial guards", () => {
   it("renders ports table for partial port payload", () => {
     render(
       <PortsDetail
-        data={[
-          {
-            port: 443,
-            protocol: "tcp",
-            service: "https",
-            state: "open",
-            banner: "",
-          },
-        ]}
+        data={{
+          entries: [
+            {
+              port: 443,
+              protocol: "tcp",
+              service: "https",
+              state: "open",
+              banner: "",
+            },
+          ],
+        }}
       />
     );
 

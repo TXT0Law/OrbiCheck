@@ -278,7 +278,93 @@ export interface PortResult {
   protocol: "tcp" | "udp";
   service: string;
   state: "open" | "closed" | "filtered";
+  reason?: string;
   banner: string;
+  version?: string;
+  product?: string;
+  extraInfo?: string;
+  scripts?: Record<string, string>;
+}
+
+export interface OsClass {
+  vendor: string;
+  osFamily: string;
+  osGen: string;
+  type: string;
+  accuracy: number;
+}
+
+export interface OsMatch {
+  name: string;
+  accuracy: number;
+  osClasses?: OsClass[];
+}
+
+export interface OsDetection {
+  osMatches?: OsMatch[];
+  deviceType?: string;
+  uptimeSeconds?: number;
+  uptimeLastBoot?: string;
+  tcpSequenceDifficulty?: number;
+  tcpSequenceDescription?: string;
+  tcpSequenceValues?: string;
+  ipIdSequence?: string;
+  tcpTsSequence?: string;
+  networkDistance?: number;
+  fingerprint?: string;
+}
+
+export interface TracerouteHop {
+  hop: number;
+  rttMs: number | null;
+  /** nmap traceroute address */
+  address: string;
+  /** trace-route module legacy field */
+  ip?: string;
+  hostname?: string | null;
+}
+
+export interface ScanStats {
+  startTime?: string;
+  endTime?: string;
+  elapsedSeconds?: number;
+  hostsUp?: number;
+  hostsTotal?: number;
+  rawPacketsSent?: string;
+  rawPacketsReceived?: string;
+}
+
+export interface HostStatus {
+  up: boolean;
+  latency?: number | null;
+  method?: string | null;
+}
+
+export interface PortScanSummary {
+  notShown?: string | null;
+  closedCount?: number | null;
+  filteredCount?: number | null;
+  totalPortsScanned?: number | null;
+}
+
+export interface PortsResult {
+  engine?: string;
+  profile?: "quick" | "standard" | "deep";
+  method?: string;
+  durationMs?: number;
+  startTime?: string;
+  endTime?: string;
+  behindProxy?: boolean;
+  proxyProvider?: string | null;
+  note?: string;
+  detectedTechnologies?: string[];
+  osFingerprint?: string | null;
+  entries: PortResult[];
+  hostStatus?: HostStatus;
+  scanSummary?: PortScanSummary;
+  osDetection?: OsDetection;
+  traceroute?: TracerouteHop[];
+  scanStats?: ScanStats;
 }
 
 export interface StatusResult {
@@ -443,13 +529,6 @@ export interface SecurityTxtResult {
   policy: string | null;
 }
 
-export interface TracerouteHop {
-  hop: number;
-  ip: string;
-  hostname: string | null;
-  rttMs: number;
-}
-
 export interface TracerouteResult {
   hops: TracerouteHop[];
   totalHops: number;
@@ -608,7 +687,7 @@ export interface ScanDetail {
   ip: IpInfoResult;
   whois: WhoisResult | null;
   dns: DnsResult;
-  ports: PortResult[] | null;
+  ports: PortsResult | null;
   statusCheck: StatusResult;
   screenshot: ScreenshotResult | null;
   pageSource?: PageSourceResult | null;

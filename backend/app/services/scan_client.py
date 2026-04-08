@@ -62,7 +62,11 @@ async def call_scan_module(module_name: str, url: str) -> dict:
         }
 
 
-async def call_scan_batch(url: str, modules: list[str]) -> dict:
+async def call_scan_batch(
+    url: str,
+    modules: list[str],
+    scan_options: dict | None = None,
+) -> dict:
     """Call batch scan on the Scan Service."""
     requested = list(dict.fromkeys(modules))
 
@@ -85,7 +89,11 @@ async def call_scan_batch(url: str, modules: list[str]) -> dict:
         if runnable:
             response = await client.post(
                 f"{SCAN_SERVICE_BASE}/api/scan/batch",
-                json={"url": url, "modules": runnable},
+                json={
+                    "url": url,
+                    "modules": runnable,
+                    "scanOptions": scan_options or {},
+                },
             )
             response.raise_for_status()
             payload = response.json()
@@ -106,7 +114,11 @@ async def call_scan_batch(url: str, modules: list[str]) -> dict:
         }
 
 
-def call_scan_batch_sync(url: str, modules: list[str]) -> dict:
+def call_scan_batch_sync(
+    url: str,
+    modules: list[str],
+    scan_options: dict | None = None,
+) -> dict:
     """Synchronous version for Celery tasks."""
     requested = list(dict.fromkeys(modules))
 
@@ -129,7 +141,11 @@ def call_scan_batch_sync(url: str, modules: list[str]) -> dict:
         if runnable:
             response = client.post(
                 f"{SCAN_SERVICE_BASE}/api/scan/batch",
-                json={"url": url, "modules": runnable},
+                json={
+                    "url": url,
+                    "modules": runnable,
+                    "scanOptions": scan_options or {},
+                },
             )
             response.raise_for_status()
             payload = response.json()

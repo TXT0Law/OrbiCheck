@@ -1137,37 +1137,180 @@ def transform_whois(raw: dict) -> dict:
     }
 
 
-def transform_ports(raw: dict) -> list[dict]:
-    """Raw ports -> PortResult[]."""
+def transform_ports(raw: dict) -> dict:
+    """Raw ports -> PortsResult."""
     raw = _ensure_dict(raw)
-    open_ports = raw.get("openPorts", [])
-    failed_ports = raw.get("failedPorts", [])
+    open_ports = raw.get("openPorts", raw.get("open_ports", []))
+    closed_ports = raw.get("closedPorts", raw.get("failedPorts", raw.get("closed_ports", [])))
+    filtered_ports = raw.get("filteredPorts", raw.get("filtered_ports", []))
+    scan_stats_raw = raw.get("scanStats", raw.get("scan_stats"))
+    start_time = raw.get("startTime", raw.get("start_time"))
+    end_time = raw.get("endTime", raw.get("end_time"))
+
     if not isinstance(open_ports, list):
         open_ports = []
-    if not isinstance(failed_ports, list):
-        failed_ports = []
-    results = []
-    for port in open_ports:
-        results.append(
-            {
-                "port": int(port),
-                "protocol": "tcp",
-                "service": _port_service_name(int(port)),
-                "state": "open",
-                "banner": "",
-            }
-        )
-    for port in failed_ports:
-        results.append(
-            {
-                "port": int(port),
-                "protocol": "tcp",
-                "service": _port_service_name(int(port)),
-                "state": "closed",
-                "banner": "",
-            }
-        )
-    return sorted(results, key=lambda r: r["port"])
+    if not isinstance(closed_ports, list):
+        closed_ports = []
+    if not isinstance(filtered_ports, list):
+        filtered_ports = []
+
+    results: list[dict] = []
+    _append_port_results(results, open_ports, "open")
+    _append_port_results(results, filtered_ports, "filtered")
+    _append_port_results(results, closed_ports, "closed")
+
+    result = {
+        "engine": raw.get("engine"),
+        "profile": raw.get("profile"),
+        "method": raw.get("method"),
+        "durationMs": _to_int(raw.get("durationMs", raw.get("duration_ms")), 0),
+        "behindProxy": bool(raw.get("behindProxy", raw.get("behind_proxy", False))),
+        "proxyProvider": raw.get("proxyProvider", raw.get("proxy_provider")),
+        "note": raw.get("note"),
+        "detectedTechnologies": _to_string_list(
+            raw.get("detectedTechnologies", raw.get("detected_technologies", []))
+        ),
+        "osFingerprint": raw.get("osFingerprint", raw.get("os_fingerprint")),
+        "entries": sorted(results, key=lambda result: result["port"]),
+    }
+
+    host_status_raw = raw.get("hostStatus", raw.get("host_status"))
+    if isinstance(host_status_raw, dict):
+        result["hostStatus"] = _transform_host_status(host_status_raw)
+
+    scan_summary_raw = raw.get("scanSummary", raw.get("scan_summary"))
+    transformed_summary = _transform_scan_summary(scan_summary_raw)
+    if transformed_summary:
+        result["scanSummary"] = transformed_summary
+
+    # OS Detection
+    os_det_raw = raw.get("osDetection", raw.get("os_detection"))
+    if os_det_raw and isinstance(os_det_raw, dict):
+        result["osDetection"] = _transform_os_detection(os_det_raw)
+
+    # Traceroute
+    traceroute_raw = raw.get("traceroute", [])
+    if isinstance(traceroute_raw, list) and traceroute_raw:
+        result["traceroute"] = _transform_traceroute(traceroute_raw)
+
+    # Scan Stats
+    if scan_stats_raw and isinstance(scan_stats_raw, dict):
+        result["scanStats"] = _transform_scan_stats(scan_stats_raw)
+        start_time = start_time or result["scanStats"].get("startTime")
+        end_time = end_time or result["scanStats"].get("endTime")
+
+    if start_time:
+        result["startTime"] = start_time
+    if end_time:
+        result["endTime"] = end_time
+
+    return result
+
+
+def _transform_os_detection(raw: dict) -> dict:
+    """Transform raw OS detection data."""
+    os_matches_raw = raw.get("osMatches", raw.get("os_matches", []))
+    os_matches = []
+    for m in (os_matches_raw if isinstance(os_matches_raw, list) else []):
+        if not isinstance(m, dict):
+            continue
+        classes_raw = m.get("osClasses", m.get("os_classes", []))
+        os_classes = []
+        for c in (classes_raw if isinstance(classes_raw, list) else []):
+            if not isinstance(c, dict):
+                continue
+            os_classes.append({
+                "vendor": str(c.get("vendor", "")),
+                "osFamily": str(c.get("osFamily", c.get("os_family", ""))),
+                "osGen": str(c.get("osGen", c.get("os_gen", ""))),
+                "type": str(c.get("type", "")),
+                "accuracy": _to_int(c.get("accuracy"), 0),
+            })
+        os_matches.append({
+            "name": str(m.get("name", "")),
+            "accuracy": _to_int(m.get("accuracy"), 0),
+            "osClasses": os_classes,
+        })
+
+    return {
+        "osMatches": os_matches,
+        "deviceType": raw.get("deviceType", raw.get("device_type")),
+        "uptimeSeconds": _to_int(raw.get("uptimeSeconds", raw.get("uptime_seconds")), None),
+        "uptimeLastBoot": raw.get("uptimeLastBoot", raw.get("uptime_last_boot")),
+        "tcpSequenceDifficulty": _to_int(
+            raw.get("tcpSequenceDifficulty", raw.get("tcp_sequence_difficulty")), None
+        ),
+        "tcpSequenceDescription": raw.get(
+            "tcpSequenceDescription", raw.get("tcp_sequence_description")
+        ),
+        "tcpSequenceValues": raw.get("tcpSequenceValues", raw.get("tcp_sequence_values")),
+        "ipIdSequence": raw.get("ipIdSequence", raw.get("ip_id_sequence")),
+        "tcpTsSequence": raw.get("tcpTsSequence", raw.get("tcp_ts_sequence")),
+        "networkDistance": _to_int(
+            raw.get("networkDistance", raw.get("network_distance")), None
+        ),
+        "fingerprint": raw.get("fingerprint"),
+    }
+
+
+def _transform_traceroute(raw: list) -> list[dict]:
+    """Transform raw traceroute hops."""
+    hops = []
+    for hop in raw:
+        if not isinstance(hop, dict):
+            continue
+        rtt = hop.get("rttMs", hop.get("rtt_ms"))
+        hops.append({
+            "hop": _to_int(hop.get("hop", hop.get("ttl")), 0),
+            "rttMs": round(float(rtt), 2) if rtt is not None else None,
+            "address": str(hop.get("address", hop.get("ipaddr", ""))),
+            "hostname": hop.get("hostname", hop.get("host")) or None,
+        })
+    return sorted(hops, key=lambda h: h["hop"])
+
+
+def _transform_scan_stats(raw: dict) -> dict:
+    """Transform raw scan statistics."""
+    return {
+        "startTime": raw.get("startTime", raw.get("start_time")),
+        "endTime": raw.get("endTime", raw.get("end_time")),
+        "elapsedSeconds": _to_float(
+            raw.get("elapsedSeconds", raw.get("elapsed_seconds")), None
+        ),
+        "hostsUp": _to_int(raw.get("hostsUp", raw.get("hosts_up")), 0),
+        "hostsTotal": _to_int(raw.get("hostsTotal", raw.get("hosts_total")), 0),
+        "rawPacketsSent": raw.get("rawPacketsSent", raw.get("raw_packets_sent")),
+        "rawPacketsReceived": raw.get("rawPacketsReceived", raw.get("raw_packets_received")),
+    }
+
+
+def _transform_host_status(raw: dict) -> dict:
+    """Transform host reachability metadata."""
+    return {
+        "up": bool(raw.get("up")),
+        "latency": _to_float(raw.get("latency"), None),
+        "method": raw.get("method"),
+    }
+
+
+def _transform_scan_summary(raw) -> dict | None:
+    """Transform scan summary metadata."""
+    if isinstance(raw, str):
+        text = raw.strip()
+        return {"notShown": text} if text else None
+
+    if not isinstance(raw, dict):
+        return None
+
+    return {
+        "notShown": raw.get("notShown", raw.get("not_shown")),
+        "closedCount": _to_int(raw.get("closedCount", raw.get("closed_count")), None),
+        "filteredCount": _to_int(raw.get("filteredCount", raw.get("filtered_count")), None),
+        "totalPortsScanned": _to_int(
+            raw.get("totalPortsScanned", raw.get("total_ports_scanned")),
+            None,
+        ),
+    }
 
 
 def transform_screenshot(raw: dict) -> dict:
@@ -1992,6 +2135,22 @@ def _extract_chain(raw: dict) -> list[str]:
     return chain
 
 
+BANNER_SERVICE_HINTS = (
+    ("openssh", "ssh"),
+    ("ssh-", "ssh"),
+    ("smtp", "smtp"),
+    ("esmtp", "smtp"),
+    ("ftp", "ftp"),
+    ("imap", "imap"),
+    ("pop3", "pop3"),
+    ("mysql", "mysql"),
+    ("postgres", "postgresql"),
+    ("rdp", "rdp"),
+)
+
+HTTP_BANNER_TOKENS = ("http/", "server:", "apache", "nginx", "iis")
+HTTPS_PORTS = frozenset({443, 8443})
+
 WELL_KNOWN_PORTS = {
     20: "ftp-data",
     21: "ftp",
@@ -2019,16 +2178,109 @@ WELL_KNOWN_PORTS = {
     3000: "dev-server",
     3306: "mysql",
     3389: "rdp",
+    445: "microsoft-ds",
     5060: "sip",
+    5432: "postgresql",
     5900: "vnc",
+    6379: "redis",
     8000: "http-alt",
     8080: "http-proxy",
+    8443: "https-alt",
     8888: "http-alt",
+    9200: "elasticsearch",
+    27017: "mongodb",
 }
 
 
-def _port_service_name(port: int) -> str:
-    return WELL_KNOWN_PORTS.get(port, "unknown")
+def _append_port_results(results: list[dict], entries: list, state: str) -> None:
+    for entry in entries:
+        port = _port_number(entry)
+        if port <= 0:
+            continue
+        banner = _port_banner(entry) if state == "open" else ""
+        version = _port_version(entry) if state == "open" else None
+        product = _port_field(entry, "product") if state == "open" else None
+        extra_info = _port_field(entry, "extraInfo", "extra_info") if state == "open" else None
+        scripts = _port_scripts(entry) if state == "open" else None
+        reason = _port_field(entry, "reason")
+        results.append(
+            {
+                "port": port,
+                "protocol": _port_field(entry, "protocol") or "tcp",
+                "service": _port_service_name(port, banner),
+                "state": state,
+                "reason": reason,
+                "banner": banner,
+                "version": version,
+                "product": product,
+                "extraInfo": extra_info,
+                "scripts": scripts,
+            }
+        )
+
+
+def _port_number(entry) -> int:
+    if isinstance(entry, dict):
+        return _to_int(entry.get("port"), 0)
+    return _to_int(entry, 0)
+
+
+def _port_field(entry, *keys: str) -> str | None:
+    if not isinstance(entry, dict):
+        return None
+    for key in keys:
+        val = entry.get(key)
+        if val is not None:
+            s = str(val).strip()
+            if s:
+                return s[:512]
+    return None
+
+
+def _port_banner(entry) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    return str(entry.get("banner", "") or "").strip()[:512]
+
+
+def _port_version(entry) -> str | None:
+    if not isinstance(entry, dict):
+        return None
+    version = str(entry.get("version", "") or "").strip()
+    return version[:512] if version else None
+
+
+def _port_scripts(entry) -> dict[str, str] | None:
+    if not isinstance(entry, dict):
+        return None
+    scripts = entry.get("scripts")
+    if not isinstance(scripts, dict):
+        return None
+    normalized = {
+        str(key): str(value)
+        for key, value in scripts.items()
+        if str(value).strip()
+    }
+    return normalized or None
+
+
+def _service_from_banner(port: int, banner: str) -> str | None:
+    if not banner:
+        return None
+
+    lowered = banner.lower()
+    for token, service in BANNER_SERVICE_HINTS:
+        if token in lowered:
+            return service
+
+    if any(token in lowered for token in HTTP_BANNER_TOKENS):
+        return "https" if port in HTTPS_PORTS else "http"
+
+    return None
+
+
+def _port_service_name(port: int, banner: str = "") -> str:
+    return _service_from_banner(port, banner) or WELL_KNOWN_PORTS.get(port, "unknown")
 
 
 def _to_string_list(items) -> list[str]:

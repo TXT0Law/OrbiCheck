@@ -17,8 +17,19 @@ async def test_full_scan_flow_request_to_result(
 ) -> None:
     in_memory_scans: dict[UUID, object] = {}
 
-    async def _fake_create_scan(_db, url: str, modules=None, user_id: int = 1):
+    async def _fake_create_scan(
+        _db,
+        url: str,
+        modules=None,
+        user_id: int = 1,
+        enable_port_scan: bool = False,
+        port_scan_profile: str = "quick",
+        acknowledge_scan_authorization: bool = False,
+    ):
         assert user_id == 1
+        assert enable_port_scan is False
+        assert port_scan_profile == "quick"
+        assert acknowledge_scan_authorization is False
         scan = scan_record_factory(
             url=url,
             domain="example.com",
@@ -47,11 +58,11 @@ async def test_full_scan_flow_request_to_result(
     monkeypatch.setattr(scan_service, "delete_scan", _fake_delete_scan)
     monkeypatch.setattr(
         "app.api.v1.endpoints.scans.execute_scan.delay",
-        lambda _scan_id, _modules=None: None,
+        lambda _scan_id, _modules=None, _scan_options=None: None,
     )
     monkeypatch.setattr(
         "app.api.v1.endpoints.scans.execute_scan.run",
-        lambda _scan_id, _modules=None: None,
+        lambda _scan_id, _modules=None, _scan_options=None: None,
     )
 
     create_response = await async_client.post("/api/v1/scans", json={"url": "example.com"})

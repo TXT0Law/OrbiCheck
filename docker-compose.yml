@@ -55,6 +55,24 @@ services:
     networks:
       - orbicheck
 
+  scanner:
+    build:
+      context: .
+      dockerfile: docker/scanner/Dockerfile
+    expose:
+      - "5000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - orbicheck
+
   backend:
     build:
       context: .
@@ -65,6 +83,7 @@ services:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql+asyncpg://orbicheck:orbicheck@postgres:5432/orbicheck}
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379/0}
       SCAN_SERVICE_URL: ${DOCKER_SCAN_SERVICE_URL:-http://scan-service:4000}
+      NMAP_SCANNER_URL: ${DOCKER_NMAP_SCANNER_URL:-http://scanner:5000}
       CORS_ORIGINS: '["http://localhost:3000","http://frontend:3000"]'
       AUTH_COOKIE_SECURE: "false"
       MONITOR_INLINE_DISPATCH: "false"
@@ -76,6 +95,8 @@ services:
       redis:
         condition: service_healthy
       scan-service:
+        condition: service_healthy
+      scanner:
         condition: service_healthy
     networks:
       - orbicheck
@@ -91,6 +112,7 @@ services:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql+asyncpg://orbicheck:orbicheck@postgres:5432/orbicheck}
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379/0}
       SCAN_SERVICE_URL: ${DOCKER_SCAN_SERVICE_URL:-http://scan-service:4000}
+      NMAP_SCANNER_URL: ${DOCKER_NMAP_SCANNER_URL:-http://scanner:5000}
       MONITOR_INLINE_DISPATCH: "false"
       CELERY_MODE: worker
     depends_on:
@@ -99,6 +121,8 @@ services:
       redis:
         condition: service_healthy
       scan-service:
+        condition: service_healthy
+      scanner:
         condition: service_healthy
     healthcheck:
       test:
@@ -123,6 +147,7 @@ services:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql+asyncpg://orbicheck:orbicheck@postgres:5432/orbicheck}
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379/0}
       SCAN_SERVICE_URL: ${DOCKER_SCAN_SERVICE_URL:-http://scan-service:4000}
+      NMAP_SCANNER_URL: ${DOCKER_NMAP_SCANNER_URL:-http://scanner:5000}
       MONITOR_INLINE_DISPATCH: "false"
       CELERY_MODE: beat
     depends_on:
@@ -131,6 +156,8 @@ services:
       redis:
         condition: service_healthy
       scan-service:
+        condition: service_healthy
+      scanner:
         condition: service_healthy
     healthcheck:
       test:

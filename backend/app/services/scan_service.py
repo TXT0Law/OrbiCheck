@@ -40,6 +40,8 @@ SCAN_CANCEL_REQUESTED_TTL = 86400
 
 TERMINAL_STATUSES = (ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELLED)
 CANCELLABLE_STATUSES = (ScanStatus.PENDING, ScanStatus.RUNNING)
+PORTS_MODULE = "ports"
+DEFAULT_PORT_SCAN_PROFILE = "quick"
 
 
 async def _get_scan_for_user(
@@ -131,6 +133,9 @@ async def create_scan(
     url: str,
     modules: list[str] | None = None,
     user_id: int = 1,
+    enable_port_scan: bool = False,
+    port_scan_profile: str = DEFAULT_PORT_SCAN_PROFILE,
+    acknowledge_scan_authorization: bool = False,
 ) -> Scan:
     """Create a new scan record and its module result slots.
 
@@ -145,6 +150,9 @@ async def create_scan(
         if modules and len(modules) > 0
         else list(ALL_MODULES)
     )
+    selected = list(dict.fromkeys(selected))
+    if not enable_port_scan and PORTS_MODULE in selected:
+        selected = [module_name for module_name in selected if module_name != PORTS_MODULE]
 
     scan = Scan(
         url=url,
@@ -152,12 +160,21 @@ async def create_scan(
         user_id=user_id,
         status=ScanStatus.PENDING,
         total_modules=len(selected),
+        scan_options={
+            "enablePortScan": enable_port_scan,
+            "portScanProfile": port_scan_profile,
+            "acknowledgeScanAuthorization": acknowledge_scan_authorization,
+        },
     )
     db.add(scan)
     await db.flush()
 
     now = datetime.now(timezone.utc)
     skipped_payload = {"skipped": True, "data": {"note": "Skipped by user"}}
+    port_scan_skipped_payload = {
+        "skipped": True,
+        "data": {"note": "Skipped because port scanning is disabled"},
+    }
 
     for module_name in ALL_MODULES:
         if module_name in selected:
@@ -167,11 +184,16 @@ async def create_scan(
                 status=ModuleStatus.PENDING,
             )
         else:
+            skipped_result = (
+                port_scan_skipped_payload
+                if module_name == PORTS_MODULE and not enable_port_scan
+                else skipped_payload
+            )
             module_result = ScanModuleResult(
                 scan_id=scan.id,
                 module_name=module_name,
                 status=ModuleStatus.SUCCESS,
-                raw_result=skipped_payload,
+                raw_result=skipped_result,
                 duration_ms=0,
                 completed_at=now,
             )
@@ -351,19 +373,38 @@ async def rescan(
         await db.delete(mr)
     await db.flush()
 
+    scan_options = getattr(existing, "scan_options", None) or {}
+    enable_port_scan = bool(scan_options.get("enablePortScan", False))
+    port_scan_profile = str(
+        scan_options.get("portScanProfile", DEFAULT_PORT_SCAN_PROFILE)
+    )
+
     for module_name in ALL_MODULES:
-        module_result = ScanModuleResult(
-            scan_id=existing.id,
-            module_name=module_name,
-            status=ModuleStatus.PENDING,
-        )
+        if module_name == PORTS_MODULE and not enable_port_scan:
+            module_result = ScanModuleResult(
+                scan_id=existing.id,
+                module_name=module_name,
+                status=ModuleStatus.SUCCESS,
+                raw_result={
+                    "skipped": True,
+                    "data": {"note": "Skipped because port scanning is disabled"},
+                },
+                duration_ms=0,
+                completed_at=datetime.now(timezone.utc),
+            )
+        else:
+            module_result = ScanModuleResult(
+                scan_id=existing.id,
+                module_name=module_name,
+                status=ModuleStatus.PENDING,
+            )
         db.add(module_result)
     await db.flush()
 
     existing.status = ScanStatus.PENDING
     existing.progress = 0
     existing.completed_modules = 0
-    existing.total_modules = len(ALL_MODULES)
+    existing.total_modules = len(ALL_MODULES) if enable_port_scan else len(ALL_MODULES) - 1
     existing.security_score = None
     existing.error_message = None
     existing.started_at = None
@@ -383,9 +424,24 @@ async def rescan(
         await redis_client.aclose()
 
     if settings.APP_ENV.lower() == "development" and background_tasks:
-        background_tasks.add_task(execute_scan.run, str(existing.id))
+        background_tasks.add_task(
+            execute_scan.run,
+            str(existing.id),
+            None,
+            {
+                "enablePortScan": enable_port_scan,
+                "portScanProfile": port_scan_profile,
+            },
+        )
     elif settings.APP_ENV.lower() != "development":
-        task = execute_scan.delay(str(existing.id))
+        task = execute_scan.delay(
+            str(existing.id),
+            None,
+            {
+                "enablePortScan": enable_port_scan,
+                "portScanProfile": port_scan_profile,
+            },
+        )
         existing.celery_task_id = task.id if task else None
         existing.status = ScanStatus.RUNNING
         existing.started_at = datetime.now(timezone.utc)

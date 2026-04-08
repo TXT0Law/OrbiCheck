@@ -42,7 +42,7 @@ def _sample_report_data() -> dict:
                 },
                 "dns": {"a": ["203.0.113.10"], "mx": ["mail.example.com"], "ns": ["ns1.example.com"]},
                 "ip": {"ip": "203.0.113.10", "country": "US"},
-                "ports": [{"port": 443, "service": "https"}],
+                "ports": {"entries": [{"port": 443, "service": "https"}]},
                 "firewall": {"hasWaf": True},
                 "threats": {},
                 "techStack": {"technologies": [{"name": "Next.js"}]},
@@ -88,7 +88,7 @@ def test_generate_recommendations_detects_dangerous_ports() -> None:
     detail = {
         "ssl": {"daysRemaining": -1},
         "headers": {"securityChecks": [{"name": "content-security-policy", "status": "missing"}]},
-        "ports": [{"port": 21}, {"port": 443}],
+        "ports": {"entries": [{"port": 21}, {"port": 443}]},
         "dnssec": {"enabled": False},
     }
     recommendations = generate_recommendations(detail, [])
@@ -105,6 +105,7 @@ def test_render_markdown_contains_expected_sections() -> None:
     assert "# Security Assessment Report - example.com" in markdown
     assert "## 1. Executive Summary" in markdown
     assert "## 5. Recommendations" in markdown
+    assert "- Open ports: 443" in markdown
 
 
 @pytest.mark.unit

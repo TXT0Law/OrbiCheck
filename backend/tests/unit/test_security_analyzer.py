@@ -192,6 +192,22 @@ def test_v2_critical_cap_dangerous_port():
 
 
 @pytest.mark.unit
+def test_v2_cdn_proxy_ports_do_not_trigger_critical_cap():
+    raw = _perfect_raw()
+    raw["ports"] = {
+        "openPorts": [23, 443, 445],
+        "behindProxy": True,
+        "proxyProvider": "Cloudflare",
+    }
+
+    r = compute_security_score_v2(raw)
+
+    assert r is not None
+    assert r.severity_cap_applied is None
+    assert r.score > 39
+
+
+@pytest.mark.unit
 def test_v2_high_cap_missing_csp():
     raw = _perfect_raw()
     del raw["headers"]["content-security-policy"]
@@ -521,6 +537,22 @@ def test_extract_key_findings_respects_max_findings():
     }
     findings = extract_key_findings(raw, max_findings=3)
     assert len(findings) <= 3
+
+
+@pytest.mark.unit
+def test_extract_key_findings_replaces_dangerous_port_with_proxy_notice():
+    raw = {
+        "ports": {
+            "openPorts": [23, 443],
+            "behindProxy": True,
+            "proxyProvider": "Cloudflare",
+        },
+    }
+
+    findings = extract_key_findings(raw, max_findings=20)
+
+    assert any("behind CDN/proxy (Cloudflare)" in item["description"] for item in findings)
+    assert all(item["title"] != "Dangerous ports open" for item in findings)
 
 
 @pytest.mark.unit

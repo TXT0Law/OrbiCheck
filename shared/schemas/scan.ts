@@ -10,6 +10,10 @@ export const ScanCreateSchema = z.object({
     }
     return trimmed;
   }),
+  modules: z.array(z.string()).optional(),
+  enablePortScan: z.boolean().default(false),
+  portScanProfile: z.enum(["quick", "standard", "deep"]).default("quick"),
+  acknowledgeScanAuthorization: z.boolean().default(false),
 });
 
 export type ScanCreateInput = z.infer<typeof ScanCreateSchema>;

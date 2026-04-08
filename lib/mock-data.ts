@@ -1,4 +1,4 @@
-import type { RecentScan, ScanDetail, ScanResultCardData } from "@/shared/types/scan";
+import type { PortsResult, RecentScan, ScanDetail, ScanResultCardData } from "@/shared/types/scan";
 
 export type {
   ArchiveSnapshot,
@@ -154,6 +154,47 @@ export const MOCK_SCAN_RESULT: ScanResultCardData = {
   reportHref: "/dashboard/scan/scan-001",
 };
 
+const MOCK_PORTS_DETAIL: PortsResult = {
+  engine: "nmap",
+  profile: "standard",
+  method: "nmap -sT -sV -O -T3 --top-ports 1000",
+  durationMs: 12345,
+  detectedTechnologies: ["OpenSSH", "nginx"],
+  osFingerprint: "Linux 2.6.32 - 3.10",
+  entries: [
+    { port: 80, protocol: "tcp", service: "http", state: "open", banner: "nginx 1.24.0", version: "nginx 1.24.0", product: "nginx", extraInfo: "Ubuntu" },
+    { port: 443, protocol: "tcp", service: "https", state: "open", banner: "nginx tls1.3", version: "nginx 1.24.0", product: "nginx" },
+    { port: 22, protocol: "tcp", service: "ssh", state: "open", banner: "OpenSSH_8.4", version: "OpenSSH 8.4", product: "OpenSSH", extraInfo: "protocol 2.0" },
+    { port: 25, protocol: "tcp", service: "smtp", state: "filtered", banner: "" },
+    { port: 3306, protocol: "tcp", service: "mysql", state: "closed", banner: "" },
+  ],
+  osDetection: {
+    osMatches: [
+      {
+        name: "Linux 2.6.32 - 3.10",
+        accuracy: 95,
+        osClasses: [
+          { vendor: "Linux", osFamily: "Linux", osGen: "2.6.X", type: "general purpose", accuracy: 95 },
+        ],
+      },
+    ],
+    deviceType: "general purpose",
+    uptimeSeconds: 2042496,
+    uptimeLastBoot: "Mon Mar 14 10:23:45 2026",
+    tcpSequenceDifficulty: 206,
+    tcpSequenceDescription: "Good luck!",
+    ipIdSequence: "All zeros",
+    networkDistance: 12,
+  },
+  scanStats: {
+    startTime: "Tue Apr 07 09:24:00 2026",
+    endTime: "Tue Apr 07 09:24:12 2026",
+    elapsedSeconds: 12.35,
+    hostsUp: 1,
+    hostsTotal: 1,
+  },
+};
+
 export const MOCK_SCAN_DETAIL: ScanDetail = {
   id: "scan-001",
   domain: "example.com",
@@ -274,13 +315,7 @@ export const MOCK_SCAN_DETAIL: ScanDetail = {
     txt: ["v=spf1 include:_spf.example.com ~all", "google-site-verification=abc123"],
     soa: ["ns.icann.org hostmaster.icann.org 2026031201 7200 3600 1209600 3600"],
   },
-  ports: [
-    { port: 80, protocol: "tcp", service: "http", state: "open", banner: "nginx" },
-    { port: 443, protocol: "tcp", service: "https", state: "open", banner: "nginx tls1.3" },
-    { port: 22, protocol: "tcp", service: "ssh", state: "open", banner: "OpenSSH_8.4" },
-    { port: 25, protocol: "tcp", service: "smtp", state: "filtered", banner: "No banner" },
-    { port: 3306, protocol: "tcp", service: "mysql", state: "closed", banner: "Connection refused" },
-  ],
+  ports: MOCK_PORTS_DETAIL,
   statusCheck: {
     httpStatusCode: 200,
     responseTimeMs: 242,
@@ -492,12 +527,12 @@ export const MOCK_SCAN_DETAIL: ScanDetail = {
   },
   traceroute: {
     hops: [
-      { hop: 1, ip: "192.168.1.1", hostname: "router.local", rttMs: 1.6 },
-      { hop: 2, ip: "10.32.0.1", hostname: null, rttMs: 4.8 },
-      { hop: 3, ip: "100.72.4.1", hostname: "core1.isp.net", rttMs: 8.1 },
-      { hop: 4, ip: "198.18.5.22", hostname: "edge-lax1.isp.net", rttMs: 13.4 },
-      { hop: 5, ip: "203.0.113.44", hostname: "akamai-gw.lax.example", rttMs: 19.7 },
-      { hop: 6, ip: "93.184.216.34", hostname: "example.com", rttMs: 24.1 },
+      { hop: 1, address: "192.168.1.1", ip: "192.168.1.1", hostname: "router.local", rttMs: 1.6 },
+      { hop: 2, address: "10.32.0.1", ip: "10.32.0.1", hostname: undefined, rttMs: 4.8 },
+      { hop: 3, address: "100.72.4.1", ip: "100.72.4.1", hostname: "core1.isp.net", rttMs: 8.1 },
+      { hop: 4, address: "198.18.5.22", ip: "198.18.5.22", hostname: "edge-lax1.isp.net", rttMs: 13.4 },
+      { hop: 5, address: "203.0.113.44", ip: "203.0.113.44", hostname: "akamai-gw.lax.example", rttMs: 19.7 },
+      { hop: 6, address: "93.184.216.34", ip: "93.184.216.34", hostname: "example.com", rttMs: 24.1 },
     ],
     totalHops: 6,
     destinationReached: true,

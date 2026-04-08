@@ -19,7 +19,15 @@ async def test_scan_detail_shows_successes_and_failures_together(
 ) -> None:
     in_memory_scans: dict[UUID, object] = {}
 
-    async def _fake_create_scan(_db, url: str, modules=None, user_id: int = 1):
+    async def _fake_create_scan(
+        _db,
+        url: str,
+        modules=None,
+        user_id: int = 1,
+        enable_port_scan: bool = False,
+        port_scan_profile: str = "quick",
+        acknowledge_scan_authorization: bool = False,
+    ):
         scan = scan_record_factory(
             url=url,
             domain="example.com",
@@ -28,6 +36,9 @@ async def test_scan_detail_shows_successes_and_failures_together(
             total_modules=5,
             completed_modules=0,
         )
+        assert enable_port_scan is False
+        assert port_scan_profile == "quick"
+        assert acknowledge_scan_authorization is False
         in_memory_scans[scan.id] = scan
         return scan
 
@@ -61,7 +72,7 @@ async def test_scan_detail_shows_successes_and_failures_together(
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["whois"]["registrar"] == "Example"
-    assert data["ports"][0]["port"] == 443
+    assert data["ports"]["entries"][0]["port"] == 443
     assert data["moduleErrors"]["features"]["message"] == "upstream timeout"
     assert data["moduleErrors"]["dns"]["message"] == "parse error"
     assert data["securityScore"] is not None

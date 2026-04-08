@@ -13,6 +13,13 @@ type ScanWire = ScanResponse & {
   created_at?: string;
 };
 
+export interface CreateScanOptions {
+  modules?: string[];
+  enablePortScan?: boolean;
+  portScanProfile?: "quick" | "standard" | "deep";
+  acknowledgeScanAuthorization?: boolean;
+}
+
 export type ScanListSortBy =
   | "created_at_desc"
   | "created_at_asc"
@@ -48,11 +55,26 @@ function normalizeScan(scan: ScanWire): ScanResponse {
 
 export async function createScan(
   url: string,
-  options?: { modules?: string[] }
+  options?: CreateScanOptions
 ): Promise<ScanResponse> {
-  const body: { url: string; modules?: string[] } = { url };
+  const body: {
+    url: string;
+    modules?: string[];
+    enablePortScan?: boolean;
+    portScanProfile?: "quick" | "standard" | "deep";
+    acknowledgeScanAuthorization?: boolean;
+  } = { url };
   if (options?.modules && options.modules.length > 0) {
     body.modules = options.modules;
+  }
+  if (typeof options?.enablePortScan === "boolean") {
+    body.enablePortScan = options.enablePortScan;
+  }
+  if (options?.portScanProfile) {
+    body.portScanProfile = options.portScanProfile;
+  }
+  if (typeof options?.acknowledgeScanAuthorization === "boolean") {
+    body.acknowledgeScanAuthorization = options.acknowledgeScanAuthorization;
   }
   const { data } = await apiClient.post<ScanWire>("/scans", body);
   return normalizeScan(data);

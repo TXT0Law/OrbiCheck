@@ -129,7 +129,7 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
         async def flush(self):
             pass
 
-    def _fake_delay(scan_id):
+    def _fake_delay(scan_id, modules_filter=None, scan_options=None):
         return SimpleNamespace(id="task-123")
 
     monkeypatch.setattr(scan_service, "get_scan", _fake_get_scan)
@@ -170,7 +170,7 @@ async def test_rescan_failed_scan_resets_in_place(monkeypatch) -> None:
         async def flush(self):
             pass
 
-    def _fake_delay(scan_id):
+    def _fake_delay(scan_id, modules_filter=None, scan_options=None):
         return SimpleNamespace(id="task-456")
 
     monkeypatch.setattr(scan_service, "get_scan", _fake_get_scan)
@@ -212,7 +212,7 @@ async def test_rescan_deletes_stale_cancel_and_progress_keys(
         async def flush(self):
             pass
 
-    def _fake_delay(scan_id):
+    def _fake_delay(scan_id, modules_filter=None, scan_options=None):
         return SimpleNamespace(id="task-cancel-recovery")
 
     monkeypatch.setattr(scan_service, "get_scan", _fake_get_scan)

@@ -47,7 +47,7 @@ describe("scan API wrappers", () => {
     expect(result.createdAt).toBe("2026-01-01T00:00:00Z");
   });
 
-  it("createScan passes modules when provided", async () => {
+  it("createScan passes modules and port scan toggle when provided", async () => {
     apiClientMock.post.mockResolvedValue({
       data: {
         id: "scan-2",
@@ -65,11 +65,19 @@ describe("scan API wrappers", () => {
       },
     });
 
-    await createScan("https://example.com", { modules: ["ssl", "whois"] });
+    await createScan("https://example.com", {
+      modules: ["ssl", "whois"],
+      enablePortScan: true,
+      portScanProfile: "deep",
+      acknowledgeScanAuthorization: true,
+    });
 
     expect(apiClientMock.post).toHaveBeenCalledWith("/scans", {
       url: "https://example.com",
       modules: ["ssl", "whois"],
+      enablePortScan: true,
+      portScanProfile: "deep",
+      acknowledgeScanAuthorization: true,
     });
   });
 

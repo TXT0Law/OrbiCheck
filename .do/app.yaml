@@ -51,6 +51,9 @@ services:
       - key: SCAN_SERVICE_URL
         value: ${scan-service.PRIVATE_URL}
         scope: RUN_TIME
+      - key: NMAP_SCANNER_URL
+        value: ${scanner.PRIVATE_URL}
+        scope: RUN_TIME
       - key: CORS_ORIGINS
         value: ${frontend.PUBLIC_URL}
         scope: RUN_TIME
@@ -90,6 +93,17 @@ services:
         value: production
         scope: RUN_TIME
 
+  - name: scanner
+    github:
+      repo: TXT0Law/OrbiCheck
+      branch: main
+      deploy_on_push: true
+    source_dir: .
+    dockerfile_path: docker/scanner/Dockerfile
+    internal_ports: [5000]
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+
 workers:
   - name: celery-worker
     github:
@@ -112,6 +126,9 @@ workers:
         type: secret
       - key: SCAN_SERVICE_URL
         value: ${scan-service.PRIVATE_URL}
+        scope: RUN_TIME
+      - key: NMAP_SCANNER_URL
+        value: ${scanner.PRIVATE_URL}
         scope: RUN_TIME
       - key: CELERY_MODE
         value: worker
@@ -141,6 +158,9 @@ workers:
         type: secret
       - key: SCAN_SERVICE_URL
         value: ${scan-service.PRIVATE_URL}
+        scope: RUN_TIME
+      - key: NMAP_SCANNER_URL
+        value: ${scanner.PRIVATE_URL}
         scope: RUN_TIME
       - key: CELERY_MODE
         value: beat

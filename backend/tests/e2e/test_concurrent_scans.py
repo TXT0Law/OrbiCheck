@@ -19,7 +19,15 @@ async def test_multiple_scans_keep_state_isolated(
 ) -> None:
     in_memory_scans: dict[UUID, object] = {}
 
-    async def _fake_create_scan(_db, url: str, modules=None, user_id: int = 1):
+    async def _fake_create_scan(
+        _db,
+        url: str,
+        modules=None,
+        user_id: int = 1,
+        enable_port_scan: bool = False,
+        port_scan_profile: str = "quick",
+        acknowledge_scan_authorization: bool = False,
+    ):
         scan = scan_record_factory(
             url=url,
             domain=url.replace("https://", ""),
@@ -28,6 +36,9 @@ async def test_multiple_scans_keep_state_isolated(
             total_modules=3,
             completed_modules=0,
         )
+        assert enable_port_scan is False
+        assert port_scan_profile == "quick"
+        assert acknowledge_scan_authorization is False
         in_memory_scans[scan.id] = scan
         return scan
 
