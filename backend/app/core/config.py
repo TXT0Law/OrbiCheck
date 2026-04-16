@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     SCAN_SERVICE_URL: str = "http://localhost:4000"
+    NMAP_SCANNER_URL: str | None = None
 
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 

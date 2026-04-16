@@ -3,13 +3,16 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required for production}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required for production}
+      NMAP_SCANNER_URL: ${NMAP_SCANNER_URL:-}
 
   celery-worker:
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required for production}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required for production}
+      NMAP_SCANNER_URL: ${NMAP_SCANNER_URL:-}
 
   celery-beat:
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required for production}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required for production}
+      NMAP_SCANNER_URL: ${NMAP_SCANNER_URL:-}

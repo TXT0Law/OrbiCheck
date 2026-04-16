@@ -11,6 +11,36 @@ class TestScanCreateRequestValidation:
     def test_valid_https_url_passes(self) -> None:
         ScanCreateRequest(url="https://example.com")
 
+    def test_enable_port_scan_defaults_to_false(self) -> None:
+        req = ScanCreateRequest(url="https://example.com")
+        assert req.enable_port_scan is False
+
+    def test_enable_port_scan_accepts_camel_case_input(self) -> None:
+        req = ScanCreateRequest(
+            url="https://example.com",
+            enablePortScan=True,
+            acknowledgeScanAuthorization=True,
+        )
+        assert req.enable_port_scan is True
+
+    def test_port_scan_profile_defaults_to_quick(self) -> None:
+        req = ScanCreateRequest(url="https://example.com")
+        assert req.port_scan_profile == "quick"
+
+    def test_port_scan_requires_authorization_ack(self) -> None:
+        with pytest.raises(ValidationError):
+            ScanCreateRequest(url="https://example.com", enablePortScan=True)
+
+    def test_port_scan_accepts_profile_and_authorization(self) -> None:
+        req = ScanCreateRequest(
+            url="https://example.com",
+            enablePortScan=True,
+            portScanProfile="deep",
+            acknowledgeScanAuthorization=True,
+        )
+        assert req.port_scan_profile == "deep"
+        assert req.acknowledge_scan_authorization is True
+
     def test_valid_http_url_passes(self) -> None:
         ScanCreateRequest(url="http://example.com")
 

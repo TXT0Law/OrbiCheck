@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from app.models.scan import ModuleStatus, ScanStatus
@@ -47,11 +47,23 @@ PRIVATE_HOST_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\.local$", re.IGNORECASE),
     re.compile(r"\.internal$", re.IGNORECASE),
 ]
+PORT_SCAN_PROFILES = frozenset({"quick", "standard", "deep"})
 
 
 class ScanCreateRequest(BaseModel):
     url: str
     modules: list[str] | None = None  # If provided, only run these; otherwise all.
+    enable_port_scan: bool = Field(default=False, alias="enablePortScan")
+    port_scan_profile: str = Field(default="quick", alias="portScanProfile")
+    acknowledge_scan_authorization: bool = Field(
+        default=False,
+        alias="acknowledgeScanAuthorization",
+    )
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
 
     @field_validator("url")
     @classmethod
@@ -93,6 +105,20 @@ class ScanCreateRequest(BaseModel):
 
         validate_url_safety(value)
         return value
+
+    @field_validator("port_scan_profile")
+    @classmethod
+    def validate_port_scan_profile(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in PORT_SCAN_PROFILES:
+            raise ValueError("Invalid port scan profile")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_port_scan_authorization(self):
+        if self.enable_port_scan and self.acknowledge_scan_authorization is not True:
+            raise ValueError("Authorization acknowledgment is required for port scanning")
+        return self
 
 
 class ScanModuleResultResponse(BaseModel):

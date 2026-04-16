@@ -33,7 +33,11 @@ describe("QuickScan", () => {
     fireEvent.click(screen.getByRole("button", { name: "Scan" }));
 
     await waitFor(() => {
-      expect(createScanMock).toHaveBeenCalledWith("https://example.com");
+      expect(createScanMock).toHaveBeenCalledWith("https://example.com", {
+        enablePortScan: true,
+        portScanProfile: "quick",
+        acknowledgeScanAuthorization: true,
+      });
     });
     await waitFor(() => {
       expect(pushMock).toHaveBeenCalledWith("/dashboard/scan/scan-123");

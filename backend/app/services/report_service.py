@@ -37,6 +37,19 @@ def _as_tech_list(value: object) -> list[dict]:
         if isinstance(techs, list):
             return [item for item in techs if isinstance(item, dict)]
     return []
+
+
+def _port_entries(value: object) -> list[dict]:
+    """Normalize ports to entries regardless of legacy or transformed shape."""
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        entries = value.get("entries", [])
+        if isinstance(entries, list):
+            return [item for item in entries if isinstance(item, dict)]
+    return []
+
+
 DANGEROUS_PORTS = {21, 23, 445, 3389}
 PDF_ENABLED_FORMATS = {ReportFormat.PDF, ReportFormat.BOTH}
 MARKDOWN_ENABLED_FORMATS = {ReportFormat.MARKDOWN, ReportFormat.BOTH, ReportFormat.PDF}
@@ -274,7 +287,7 @@ def generate_recommendations(scan_detail: dict, key_findings: list[dict]) -> lis
     recommendations: list[dict] = []
     ssl = scan_detail.get("ssl") or {}
     headers = scan_detail.get("headers") or {}
-    ports = scan_detail.get("ports") or []
+    ports = _port_entries(scan_detail.get("ports"))
     dnssec = scan_detail.get("dnssec") or {}
 
     days_remaining = ssl.get("daysRemaining")
@@ -439,7 +452,7 @@ def render_markdown(report_data: dict) -> str:
     severity = scan["severity"]
     breakdown = (scan.get("securityScoreBreakdown") or {}).get("category_scores", {})
     headers = (detail.get("headers") or {}).get("securityChecks", [])
-    ports = detail.get("ports") or []
+    ports = _port_entries(detail.get("ports"))
     uptime = (report_data.get("monitor") or {}).get("uptime") or {}
     monitor_ssl = (report_data.get("monitor") or {}).get("ssl") or {}
     lines = [
@@ -642,7 +655,7 @@ def render_pdf(report_data: dict) -> bytes:
     severity = scan["severity"]
     breakdown = (scan.get("securityScoreBreakdown") or {}).get("category_scores", {})
     headers = (detail.get("headers") or {}).get("securityChecks", [])
-    ports = detail.get("ports") or []
+    ports = _port_entries(detail.get("ports"))
     pdf.set_font("Helvetica", "B", 20)
     pdf.multi_cell(0, 12, f"Security Assessment Report\n{scan['domain']}")
     pdf.ln(4)

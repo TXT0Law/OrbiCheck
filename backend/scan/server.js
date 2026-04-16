@@ -27,7 +27,7 @@ function getAvailableModules() {
   return [...modules.keys()].sort();
 }
 
-async function runModuleWithFakeReqRes(handlerFn, url) {
+async function runModuleWithFakeReqRes(handlerFn, url, scanOptions = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
 
@@ -38,7 +38,7 @@ async function runModuleWithFakeReqRes(handlerFn, url) {
       }
     };
 
-    const fakeReq = { query: { url } };
+    const fakeReq = { query: { url }, body: { scanOptions } };
     const fakeRes = {
       headersSent: false,
       statusCode: 200,
@@ -135,7 +135,11 @@ export function createApp() {
   });
 
   app.post('/api/scan/batch', async (req, res) => {
-    const { url, modules: requestedModules } = req.body || {};
+    const {
+      url,
+      modules: requestedModules,
+      scanOptions = {},
+    } = req.body || {};
 
     if (!url || typeof url !== 'string') {
       return res.status(400).json({ error: 'Missing required field: url' });
@@ -174,7 +178,7 @@ export function createApp() {
         : MODULE_TIMEOUT_MS;
 
       try {
-        const runPromise = runModuleWithFakeReqRes(handlerFn, url);
+        const runPromise = runModuleWithFakeReqRes(handlerFn, url, scanOptions);
         const output = await withTimeout(runPromise, moduleTimeout, name);
         const success = output.statusCode >= 200 && output.statusCode < 400;
 

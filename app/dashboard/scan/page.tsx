@@ -25,14 +25,36 @@ import { useDeleteAllScans, useDeleteScan, useRescan, useScanList } from "@/lib/
 import { useScanStore } from "@/lib/stores/scan-store";
 import type { UrlGroup } from "@/types/url-group";
 
+const PORTS_MODULE = "ports";
+
 function ScanInputFromQuery({
   onSubmit,
   selectedModules,
   onModulesChange,
+  enablePortScan,
+  onEnablePortScanChange,
+  portScanProfile,
+  onPortScanProfileChange,
+  acknowledgeScanAuthorization,
+  onAcknowledgeScanAuthorizationChange,
 }: {
-  onSubmit: (urls: string[], options?: { modules?: string[] }) => Promise<void>;
+  onSubmit: (
+    urls: string[],
+    options?: {
+      modules?: string[];
+      enablePortScan?: boolean;
+      portScanProfile?: "quick" | "standard" | "deep";
+      acknowledgeScanAuthorization?: boolean;
+    }
+  ) => Promise<void>;
   selectedModules: Set<string>;
   onModulesChange: (modules: Set<string>) => void;
+  enablePortScan: boolean;
+  onEnablePortScanChange: (enabled: boolean) => void;
+  portScanProfile: "quick" | "standard" | "deep";
+  onPortScanProfileChange: (profile: "quick" | "standard" | "deep") => void;
+  acknowledgeScanAuthorization: boolean;
+  onAcknowledgeScanAuthorizationChange: (acknowledged: boolean) => void;
 }) {
   const searchParams = useSearchParams();
   const prefilledUrl = searchParams.get("url") ?? "";
@@ -42,6 +64,12 @@ function ScanInputFromQuery({
       onSubmit={onSubmit}
       selectedModules={selectedModules}
       onModulesChange={onModulesChange}
+      enablePortScan={enablePortScan}
+      onEnablePortScanChange={onEnablePortScanChange}
+      portScanProfile={portScanProfile}
+      onPortScanProfileChange={onPortScanProfileChange}
+      acknowledgeScanAuthorization={acknowledgeScanAuthorization}
+      onAcknowledgeScanAuthorizationChange={onAcknowledgeScanAuthorizationChange}
     />
   );
 }
@@ -63,8 +91,14 @@ export default function ScanPage() {
   const [viewMode, setViewMode] = useState<ScanViewMode>("flat");
   const [editingGroup, setEditingGroup] = useState<UrlGroup | null>(null);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(
-    () => new Set(SCAN_MODULES)
+    () => new Set(SCAN_MODULES.filter((moduleId) => moduleId !== PORTS_MODULE))
   );
+  const [enablePortScan, setEnablePortScan] = useState(false);
+  const [portScanProfile, setPortScanProfile] = useState<
+    "quick" | "standard" | "deep"
+  >("quick");
+  const [acknowledgeScanAuthorization, setAcknowledgeScanAuthorization] =
+    useState(false);
 
   const { mutate: removeScan, isPending: isDeleting } = useDeleteScan();
   const { mutate: removeAllScans, isPending: isDeletingAll } = useDeleteAllScans();
@@ -104,7 +138,12 @@ export default function ScanPage() {
 
   const handleSubmitScans = async (
     urls: string[],
-    options?: { modules?: string[] }
+    options?: {
+      modules?: string[];
+      enablePortScan?: boolean;
+      portScanProfile?: "quick" | "standard" | "deep";
+      acknowledgeScanAuthorization?: boolean;
+    }
   ) => {
     setStartError(null);
     setStartSuccess(null);
@@ -114,6 +153,10 @@ export default function ScanPage() {
       try {
         const scan = await createScan(url, {
           modules: options?.modules && options.modules.length > 0 ? options.modules : undefined,
+          enablePortScan: options?.enablePortScan ?? false,
+          portScanProfile: options?.portScanProfile ?? "quick",
+          acknowledgeScanAuthorization:
+            options?.acknowledgeScanAuthorization ?? false,
         });
         createdScans.push(scan);
       } catch (error) {
@@ -150,6 +193,23 @@ export default function ScanPage() {
   };
 
   const progressValue = progress?.progress ?? 0;
+
+  const handlePortScanChange = useCallback((enabled: boolean) => {
+    setEnablePortScan(enabled);
+    if (!enabled) {
+      setAcknowledgeScanAuthorization(false);
+      setPortScanProfile("quick");
+    }
+    setSelectedModules((currentModules) => {
+      const nextModules = new Set(currentModules);
+      if (enabled) {
+        nextModules.add(PORTS_MODULE);
+      } else {
+        nextModules.delete(PORTS_MODULE);
+      }
+      return nextModules;
+    });
+  }, []);
 
   const mappedScans = (scanList?.scans ?? []).map((scan) => ({
     id: scan.id,
@@ -292,6 +352,12 @@ export default function ScanPage() {
             onSubmit={handleSubmitScans}
             selectedModules={selectedModules}
             onModulesChange={setSelectedModules}
+            enablePortScan={enablePortScan}
+            onEnablePortScanChange={handlePortScanChange}
+            portScanProfile={portScanProfile}
+            onPortScanProfileChange={setPortScanProfile}
+            acknowledgeScanAuthorization={acknowledgeScanAuthorization}
+            onAcknowledgeScanAuthorizationChange={setAcknowledgeScanAuthorization}
           />
         }
       >
@@ -299,6 +365,12 @@ export default function ScanPage() {
           onSubmit={handleSubmitScans}
           selectedModules={selectedModules}
           onModulesChange={setSelectedModules}
+          enablePortScan={enablePortScan}
+          onEnablePortScanChange={handlePortScanChange}
+          portScanProfile={portScanProfile}
+          onPortScanProfileChange={setPortScanProfile}
+          acknowledgeScanAuthorization={acknowledgeScanAuthorization}
+          onAcknowledgeScanAuthorizationChange={setAcknowledgeScanAuthorization}
         />
       </Suspense>
 

@@ -55,7 +55,10 @@ def _get_sync_session() -> Session:
 
 @celery_app.task(name="execute_scan", bind=True, max_retries=1)
 def execute_scan(
-    self, scan_id: str, modules_filter: list[str] | None = None
+    self,
+    scan_id: str,
+    modules_filter: list[str] | None = None,
+    scan_options: dict[str, Any] | None = None,
 ) -> dict:
     """Execute scan modules in batches. If modules_filter is provided, only run those modules."""
     redis = get_redis_sync()
@@ -112,6 +115,11 @@ def execute_scan(
             scan = db.execute(select(Scan).where(Scan.id == uuid.UUID(scan_id))).scalar_one()
             url = scan.url
             validate_url_safety(url)
+            persisted_options = scan.scan_options if isinstance(scan.scan_options, dict) else {}
+            effective_scan_options = {
+                **persisted_options,
+                **(scan_options or {}),
+            }
 
             all_raw_results: dict[str, dict | None] = {}
             selected = (
@@ -168,7 +176,7 @@ def execute_scan(
                     return {"scan_id": scan_id, "status": ScanStatus.CANCELLED.value}
 
                 try:
-                    batch_result = call_scan_batch_sync(url, modules)
+                    batch_result = call_scan_batch_sync(url, modules, effective_scan_options)
                     results = batch_result.get("results", {})
 
                     for module_name, module_result in results.items():

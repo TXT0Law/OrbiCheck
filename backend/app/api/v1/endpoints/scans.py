@@ -91,17 +91,25 @@ async def create_scan(
         request.url,
         request.modules,
         user_id=current_user.id,
+        enable_port_scan=request.enable_port_scan,
+        port_scan_profile=request.port_scan_profile,
+        acknowledge_scan_authorization=request.acknowledge_scan_authorization,
     )
     await db.commit()
     await db.refresh(scan)
 
     scan_id = str(scan.id)
     modules_arg = request.modules if request.modules else None
+    scan_options_arg = {
+        "enablePortScan": request.enable_port_scan,
+        "portScanProfile": request.port_scan_profile,
+        "acknowledgeScanAuthorization": request.acknowledge_scan_authorization,
+    }
 
     if settings.APP_ENV.lower() == "development":
-        background_tasks.add_task(execute_scan.run, scan_id, modules_arg)
+        background_tasks.add_task(execute_scan.run, scan_id, modules_arg, scan_options_arg)
     else:
-        task = execute_scan.delay(scan_id, modules_arg)
+        task = execute_scan.delay(scan_id, modules_arg, scan_options_arg)
         scan.celery_task_id = task.id if task else None
         await db.commit()
         await db.refresh(scan)

@@ -17,17 +17,25 @@ import {
 interface ScanRangeSelectorProps {
   selectedModules: Set<string>;
   onChange: (modules: Set<string>) => void;
+  disabledModules?: Set<string>;
 }
 
 export function ScanRangeSelector({
   selectedModules,
   onChange,
+  disabledModules = new Set(),
 }: ScanRangeSelectorProps) {
-  const totalCount = SCAN_MODULES.length;
+  const selectableModules = SCAN_MODULES.filter(
+    (moduleId) => !disabledModules.has(moduleId)
+  );
+  const totalCount = selectableModules.length;
   const selectedCount = selectedModules.size;
 
   const toggleModule = useCallback(
     (moduleId: string) => {
+      if (disabledModules.has(moduleId)) {
+        return;
+      }
       const next = new Set(selectedModules);
       if (next.has(moduleId)) {
         next.delete(moduleId);
@@ -36,12 +44,12 @@ export function ScanRangeSelector({
       }
       onChange(next);
     },
-    [selectedModules, onChange]
+    [disabledModules, selectedModules, onChange]
   );
 
   const selectAll = useCallback(() => {
-    onChange(new Set(SCAN_MODULES));
-  }, [onChange]);
+    onChange(new Set(selectableModules));
+  }, [onChange, selectableModules]);
 
   const deselectAll = useCallback(() => {
     onChange(new Set());
@@ -51,11 +59,14 @@ export function ScanRangeSelector({
     (batch: readonly string[]) => {
       const next = new Set(selectedModules);
       for (const m of batch) {
+        if (disabledModules.has(m)) {
+          continue;
+        }
         next.add(m);
       }
       onChange(next);
     },
-    [selectedModules, onChange]
+    [disabledModules, selectedModules, onChange]
   );
 
   const deselectBatch = useCallback(
@@ -119,7 +130,12 @@ export function ScanRangeSelector({
                     : batchName === "medium"
                       ? "Medium"
                       : "Heavy";
-                const batchSelected = batch.filter((m) => selectedModules.has(m));
+                const batchSelectable = batch.filter(
+                  (moduleId) => !disabledModules.has(moduleId)
+                );
+                const batchSelected = batchSelectable.filter((m) =>
+                  selectedModules.has(m)
+                );
                 return (
                   <div key={batchName}>
                     <div className="mb-2 flex items-center gap-2">
@@ -129,13 +145,14 @@ export function ScanRangeSelector({
                       <button
                         type="button"
                         onClick={() =>
-                          batchSelected.length === batch.length
-                            ? deselectBatch(batch)
-                            : selectBatch(batch)
+                          batchSelected.length === batchSelectable.length
+                            ? deselectBatch(batchSelectable)
+                            : selectBatch(batchSelectable)
                         }
+                        disabled={batchSelectable.length === 0}
                         className="text-xs text-zinc-600 hover:underline dark:text-zinc-300"
                       >
-                        {batchSelected.length === batch.length
+                        {batchSelected.length === batchSelectable.length
                           ? "Deselect all"
                           : "Select all"}
                       </button>
@@ -144,16 +161,24 @@ export function ScanRangeSelector({
                       {batch.map((moduleId) => (
                         <label
                           key={moduleId}
-                          className="flex cursor-pointer items-center gap-2 rounded py-1 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700/50"
+                          className={`flex items-center gap-2 rounded py-1 text-sm ${
+                            disabledModules.has(moduleId)
+                              ? "cursor-not-allowed text-zinc-400 dark:text-zinc-500"
+                              : "cursor-pointer text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700/50"
+                          }`}
                         >
                           <input
                             type="checkbox"
                             checked={selectedModules.has(moduleId)}
                             onChange={() => toggleModule(moduleId)}
+                            disabled={disabledModules.has(moduleId)}
                             className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
                           />
                           <span>
                             {SCAN_MODULE_LABELS[moduleId] ?? moduleId}
+                            {disabledModules.has(moduleId)
+                              ? " (enable Port Scanning first)"
+                              : ""}
                           </span>
                         </label>
                       ))}

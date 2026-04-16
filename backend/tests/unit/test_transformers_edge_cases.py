@@ -139,8 +139,8 @@ def test_null_safe_transformers_accept_none() -> None:
 
 @pytest.mark.unit
 def test_transform_ports_and_tech_stack_return_empty_lists_for_empty_inputs() -> None:
-    assert transform_ports({}) == []
-    assert transform_ports({"openPorts": None}) == []
+    assert transform_ports({})["entries"] == []
+    assert transform_ports({"openPorts": None})["entries"] == []
     assert transform_tech_stack({}) == []
     assert transform_tech_stack({"technologies": None}) == []
 

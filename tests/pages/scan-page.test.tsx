@@ -145,7 +145,12 @@ describe("scan page", () => {
     await waitFor(() => {
       expect(createScanMock).toHaveBeenCalledWith(
         "https://example.com",
-        expect.objectContaining({ modules: expect.any(Array) })
+        expect.objectContaining({
+          modules: expect.any(Array),
+          enablePortScan: false,
+          portScanProfile: "quick",
+          acknowledgeScanAuthorization: false,
+        })
       );
     });
     await waitFor(() => {
@@ -172,6 +177,23 @@ describe("scan page", () => {
         screen.getByText(/Failed to start scan for.*backend down/)
       ).toBeInTheDocument();
     });
+  });
+
+  it("requires authorization acknowledgment before starting a port scan", async () => {
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Scan target URL"), {
+      target: { value: "example.com" },
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "Port Scanning" }));
+    fireEvent.click(screen.getByRole("button", { name: /start scan/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Please confirm that you are authorized to scan this target")
+      ).toBeInTheDocument();
+    });
+    expect(createScanMock).not.toHaveBeenCalled();
   });
 
   it("shows progress stream error", async () => {

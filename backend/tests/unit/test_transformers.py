@@ -7,6 +7,7 @@ from app.services.transformers import (
     transform_cookies,
     transform_features,
     transform_page_source,
+    transform_ports,
     transform_redirects,
     transform_screenshot,
     transform_traceroute,
@@ -91,11 +92,134 @@ def test_build_scan_detail_returns_renderable_defaults_for_missing_modules():
     detail = build_scan_detail("scan-1", "https://example.com", all_raw_results={})
 
     assert detail["whois"] is not None
-    assert detail["ports"] == []
+    assert detail["ports"]["entries"] == []
     assert detail["redirects"]["hops"] == []
     assert detail["traceroute"]["hops"] == []
     assert detail["features"]["features"] == []
     assert detail["screenshot"]["imageUrl"] == ""
+
+
+@pytest.mark.unit
+def test_transform_ports_maps_all_three_states_and_banners():
+    raw = {
+        "engine": "nmap",
+        "profile": "standard",
+        "method": "nmap -sT -sV -T3 --top-ports 1000",
+        "durationMs": 4567,
+        "startTime": "2026-04-08T00:00:00Z",
+        "endTime": "2026-04-08T00:00:05Z",
+        "detectedTechnologies": ["nginx"],
+        "hostStatus": {"up": True, "latency": 123, "method": "tcp-connect"},
+        "scanSummary": {"notShown": "Not shown: 1 closed ports, 1 filtered ports."},
+        "openPorts": [{"port": 80, "banner": "HTTP/1.1 200 OK\r\nServer: nginx/1.25", "reason": "syn-ack"}],
+        "closedPorts": [{"port": 443, "reason": "conn-refused"}],
+        "filteredPorts": [{"port": 8080, "reason": "no-response"}],
+    }
+
+    data = transform_ports(raw)
+
+    assert data["engine"] == "nmap"
+    assert data["profile"] == "standard"
+    assert data["method"] == "nmap -sT -sV -T3 --top-ports 1000"
+    assert data["durationMs"] == 4567
+    assert data["startTime"] == "2026-04-08T00:00:00Z"
+    assert data["endTime"] == "2026-04-08T00:00:05Z"
+    assert data["detectedTechnologies"] == ["nginx"]
+    assert data["hostStatus"] == {"up": True, "latency": 123.0, "method": "tcp-connect"}
+    assert data["scanSummary"] == {
+        "notShown": "Not shown: 1 closed ports, 1 filtered ports.",
+        "closedCount": None,
+        "filteredCount": None,
+        "totalPortsScanned": None,
+    }
+    assert data["entries"] == [
+        {
+            "port": 80,
+            "protocol": "tcp",
+            "service": "http",
+            "state": "open",
+            "reason": "syn-ack",
+            "banner": "HTTP/1.1 200 OK\r\nServer: nginx/1.25",
+            "version": None,
+            "product": None,
+            "extraInfo": None,
+            "scripts": None,
+        },
+        {
+            "port": 443,
+            "protocol": "tcp",
+            "service": "https",
+            "state": "closed",
+            "reason": "conn-refused",
+            "banner": "",
+            "version": None,
+            "product": None,
+            "extraInfo": None,
+            "scripts": None,
+        },
+        {
+            "port": 8080,
+            "protocol": "tcp",
+            "service": "http-proxy",
+            "state": "filtered",
+            "reason": "no-response",
+            "banner": "",
+            "version": None,
+            "product": None,
+            "extraInfo": None,
+            "scripts": None,
+        },
+    ]
+
+
+@pytest.mark.unit
+def test_transform_ports_accepts_legacy_failed_ports_payload():
+    data = transform_ports({"openPorts": [22], "failedPorts": [25]})
+
+    assert data["entries"][0]["service"] == "ssh"
+    assert data["entries"][0]["state"] == "open"
+    assert data["entries"][0]["reason"] is None
+    assert data["entries"][1]["service"] == "smtp"
+    assert data["entries"][1]["state"] == "closed"
+    assert data["entries"][1]["reason"] is None
+
+
+@pytest.mark.unit
+def test_transform_ports_with_cdn_proxy():
+    raw = {
+        "engine": "native",
+        "profile": "quick",
+        "openPorts": [{"port": 80, "banner": "cloudflare"}],
+        "closedPorts": [],
+        "filteredPorts": [],
+        "behindProxy": True,
+        "proxyProvider": "Cloudflare",
+        "note": "Target appears to be behind a CDN/proxy.",
+    }
+
+    result = transform_ports(raw)
+
+    assert result["behindProxy"] is True
+    assert result["proxyProvider"] == "Cloudflare"
+    assert result["note"] == "Target appears to be behind a CDN/proxy."
+
+
+@pytest.mark.unit
+def test_transform_ports_reads_timing_from_scan_stats_when_top_level_missing():
+    data = transform_ports(
+        {
+            "openPorts": [{"port": 80, "reason": "syn-ack"}],
+            "scanStats": {
+                "startTime": "2026-04-08T00:00:00Z",
+                "endTime": "2026-04-08T00:00:02Z",
+                "elapsedSeconds": 2.0,
+            },
+        }
+    )
+
+    assert data["startTime"] == "2026-04-08T00:00:00Z"
+    assert data["endTime"] == "2026-04-08T00:00:02Z"
+    assert data["scanStats"]["elapsedSeconds"] == 2.0
 
 
 @pytest.mark.unit

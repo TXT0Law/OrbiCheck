@@ -3,16 +3,36 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScanRangeSelector } from "@/components/scan/scan-range-selector";
 import { parseAndValidateUrls, parseUrls } from "@/lib/utils/url-input-sanitizer";
 import { SCAN_MODULES } from "@/lib/constants/scan-modules";
 
+const PORTS_MODULE = "ports";
+const PORT_SCAN_PROFILES = ["quick", "standard", "deep"] as const;
+
 interface ScanInputProps {
-  onSubmit: (urls: string[], options?: { modules?: string[] }) => Promise<void>;
+  onSubmit: (
+    urls: string[],
+    options?: {
+      modules?: string[];
+      enablePortScan?: boolean;
+      portScanProfile?: "quick" | "standard" | "deep";
+      acknowledgeScanAuthorization?: boolean;
+    }
+  ) => Promise<void>;
   selectedModules?: Set<string>;
   onModulesChange?: (modules: Set<string>) => void;
+  enablePortScan?: boolean;
+  onEnablePortScanChange?: (enabled: boolean) => void;
+  portScanProfile?: "quick" | "standard" | "deep";
+  onPortScanProfileChange?: (
+    profile: "quick" | "standard" | "deep"
+  ) => void;
+  acknowledgeScanAuthorization?: boolean;
+  onAcknowledgeScanAuthorizationChange?: (acknowledged: boolean) => void;
   /** Prefill textarea (e.g. from /dashboard/scan?url=…) */
   prefilledUrl?: string;
 }
@@ -21,14 +41,39 @@ export function ScanInput({
   onSubmit,
   selectedModules: controlledModules,
   onModulesChange: controlledOnChange,
+  enablePortScan: controlledEnablePortScan,
+  onEnablePortScanChange: controlledOnEnablePortScanChange,
+  portScanProfile: controlledPortScanProfile,
+  onPortScanProfileChange: controlledOnPortScanProfileChange,
+  acknowledgeScanAuthorization: controlledAcknowledgeScanAuthorization,
+  onAcknowledgeScanAuthorizationChange:
+    controlledOnAcknowledgeScanAuthorizationChange,
   prefilledUrl = "",
 }: ScanInputProps) {
   const [internalModules, setInternalModules] = useState<Set<string>>(
     () => new Set(SCAN_MODULES)
   );
+  const [internalEnablePortScan, setInternalEnablePortScan] = useState(true);
+  const [internalPortScanProfile, setInternalPortScanProfile] = useState<
+    "quick" | "standard" | "deep"
+  >("quick");
+  const [internalAcknowledgeScanAuthorization, setInternalAcknowledgeScanAuthorization] =
+    useState(false);
   const selectedModules = controlledModules ?? internalModules;
   const onModulesChange: (modules: Set<string>) => void =
     controlledOnChange ?? setInternalModules;
+  const enablePortScan = controlledEnablePortScan ?? internalEnablePortScan;
+  const onEnablePortScanChange: (enabled: boolean) => void =
+    controlledOnEnablePortScanChange ?? setInternalEnablePortScan;
+  const portScanProfile = controlledPortScanProfile ?? internalPortScanProfile;
+  const onPortScanProfileChange:
+    (profile: "quick" | "standard" | "deep") => void =
+      controlledOnPortScanProfileChange ?? setInternalPortScanProfile;
+  const acknowledgeScanAuthorization =
+    controlledAcknowledgeScanAuthorization ?? internalAcknowledgeScanAuthorization;
+  const onAcknowledgeScanAuthorizationChange: (acknowledged: boolean) => void =
+    controlledOnAcknowledgeScanAuthorizationChange
+    ?? setInternalAcknowledgeScanAuthorization;
 
   const [inputValue, setInputValue] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -66,10 +111,18 @@ export function ScanInput({
       return;
     }
 
+    if (enablePortScan && !acknowledgeScanAuthorization) {
+      setErrors(["Please confirm that you are authorized to scan this target"]);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await onSubmit(result.urls, {
         modules: Array.from(selectedModules),
+        enablePortScan,
+        portScanProfile,
+        acknowledgeScanAuthorization,
       });
       setInputValue("");
       setErrors([]);
@@ -108,7 +161,81 @@ https://example.org"
       <ScanRangeSelector
         selectedModules={selectedModules}
         onChange={onModulesChange}
+        disabledModules={
+          enablePortScan ? new Set() : new Set([PORTS_MODULE])
+        }
       />
+
+      <div className="space-y-2 rounded-md border border-zinc-300 bg-zinc-50 p-4 dark:border-zinc-600 dark:bg-zinc-800/40">
+        <label className="flex cursor-pointer items-start justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                Port Scanning
+              </span>
+              <Badge
+                variant="outline"
+                className="border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+              >
+                Authorization required
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Scan for open ports on the target host. This performs active TCP
+              connections to common ports.
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="Port Scanning"
+            checked={enablePortScan}
+            onChange={(event) => onEnablePortScanChange(event.target.checked)}
+            className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+          />
+        </label>
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          Only scan hosts you own or have permission to test.
+        </p>
+        {enablePortScan ? (
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+              Scan Depth
+            </label>
+            <select
+              aria-label="Port scan depth"
+              value={portScanProfile}
+              onChange={(event) =>
+                onPortScanProfileChange(
+                  event.target.value as "quick" | "standard" | "deep"
+                )
+              }
+              className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+            >
+              {PORT_SCAN_PROFILES.map((profile) => (
+                <option key={profile} value={profile}>
+                  {profile[0]!.toUpperCase() + profile.slice(1)}
+                </option>
+              ))}
+            </select>
+
+            <label className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+              <input
+                type="checkbox"
+                checked={acknowledgeScanAuthorization}
+                onChange={(event) =>
+                  onAcknowledgeScanAuthorizationChange(event.target.checked)
+                }
+                className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+              />
+              <span>
+                I confirm that I own this host or have explicit authorization to
+                run active port scans against it.
+              </span>
+            </label>
+          </div>
+        ) : null}
+      </div>
 
       {errors.length > 0 && (
         <div className="rounded-md border border-red-300 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950/30">

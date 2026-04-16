@@ -21,7 +21,7 @@ RUN chmod +x /usr/local/bin/backend-entrypoint.sh /usr/local/bin/celery-entrypoi
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=12 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"
 
 CMD ["/usr/local/bin/backend-entrypoint.sh"]
