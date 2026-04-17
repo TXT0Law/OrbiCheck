@@ -40,4 +40,23 @@ describe("TracerouteDetail", () => {
 
     expect(screen.getByText("No hops were returned by traceroute.")).toBeInTheDocument();
   });
+
+  it("wraps long hostnames inside the hops table", () => {
+    const longHostname =
+      "edge-router-xx04-aggregator-iad-04-very-long-fqdn.providernet.example.com";
+
+    render(
+      <TracerouteDetail
+        data={{
+          hops: [{ hop: 7, ip: "203.0.113.42", hostname: longHostname, rttMs: 12.4 }],
+          totalHops: 7,
+          destinationReached: false,
+        }}
+      />,
+    );
+
+    const cell = screen.getByText(longHostname);
+    expect(cell.className).toMatch(/break-all/);
+    expect(cell.className).toMatch(/max-w-\[/);
+  });
 });

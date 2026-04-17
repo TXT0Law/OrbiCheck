@@ -110,7 +110,10 @@ export function QualityDetail({ data }: QualityDetailProps) {
         <CardHeader>
           <CardTitle className="text-lg font-semibold">Lighthouse Scores</CardTitle>
           {(data.requestedUrl || data.finalUrl) && (
-            <p className="text-xs text-muted-foreground">
+            <p
+              className="break-all text-xs text-muted-foreground"
+              title={data.finalUrl || data.requestedUrl}
+            >
               {data.finalUrl || data.requestedUrl}
             </p>
           )}

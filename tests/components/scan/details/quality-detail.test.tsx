@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { QualityDetail } from "@/components/scan/details/quality-detail";
 
+import { LONG_URL } from "./long-value-fixtures";
+
 describe("QualityDetail", () => {
   it("renders lighthouse categories and audits", () => {
     render(
@@ -55,5 +57,24 @@ describe("QualityDetail", () => {
 
     expect(screen.getByText(/Runtime Error:/i)).toBeInTheDocument();
     expect(screen.getByText(/PageSpeed upstream failed/i)).toBeInTheDocument();
+  });
+
+  it("wraps long requested/final URL header without truncation", () => {
+    render(
+      <QualityDetail
+        data={{
+          categories: [{ id: "seo", title: "SEO", score: 0.5, displayScore: 50 }],
+          audits: [],
+          fetchTime: null,
+          requestedUrl: LONG_URL,
+          finalUrl: LONG_URL,
+          runtimeError: null,
+        }}
+      />,
+    );
+
+    const url = screen.getByText(LONG_URL);
+    expect(url.className).toMatch(/break-all/);
+    expect(url.getAttribute("title")).toBe(LONG_URL);
   });
 });

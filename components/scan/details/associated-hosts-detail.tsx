@@ -61,11 +61,11 @@ export function AssociatedHostsDetail({ data }: AssociatedHostsDetailProps) {
           <TableBody>
             {hosts.map((host) => (
               <TableRow key={`${host.hostname}-${host.source}`}>
-                <TableCell className="font-medium">{host.hostname}</TableCell>
+                <TableCell className="max-w-[24rem] break-all font-medium">{host.hostname}</TableCell>
                 <TableCell>
                   <Badge className={`border-transparent ${getSourceBadgeClass(host.source)}`}>{host.source}</Badge>
                 </TableCell>
-                <TableCell>{host.ip ?? "-"}</TableCell>
+                <TableCell className="max-w-[20rem] break-all">{host.ip ?? "-"}</TableCell>
               </TableRow>
             ))}
           </TableBody>

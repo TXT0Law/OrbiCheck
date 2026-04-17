@@ -21,4 +21,34 @@ describe("AssociatedHostsDetail", () => {
     expect(screen.getByText("Hostname")).toBeInTheDocument();
     expect(screen.getByText("www.example.com")).toBeInTheDocument();
   });
+
+  it("wraps long hostname and IP cells inside the table", () => {
+    const longHostname =
+      "very-long-subdomain-host-name-that-might-overflow-the-card-boundary.example.com";
+    const longIp = "2001:0db8:85a3:0000:0000:8a2e:0370:7334";
+
+    render(
+      <AssociatedHostsDetail
+        data={{
+          domain: "example.com",
+          totalFound: 1,
+          hosts: [
+            {
+              hostname: longHostname,
+              source: "certificate",
+              ip: longIp,
+            },
+          ],
+        }}
+      />,
+    );
+
+    const hostnameCell = screen.getByText(longHostname);
+    expect(hostnameCell.className).toMatch(/break-all/);
+    expect(hostnameCell.className).toMatch(/max-w-\[/);
+
+    const ipCell = screen.getByText(longIp);
+    expect(ipCell.className).toMatch(/break-all/);
+    expect(ipCell.className).toMatch(/max-w-\[/);
+  });
 });

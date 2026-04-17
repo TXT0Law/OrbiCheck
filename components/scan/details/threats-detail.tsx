@@ -70,7 +70,9 @@ export function ThreatsDetail({ data }: ThreatsDetailProps) {
                       {entry.listed ? "Listed" : "Clean"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-zinc-600 dark:text-zinc-300">{entry.detail}</TableCell>
+                  <TableCell className="max-w-[36rem] whitespace-normal break-words text-zinc-600 dark:text-zinc-300">
+                    {entry.detail}
+                  </TableCell>
                 </TableRow>
               ))}
               {entries.length === 0 && (

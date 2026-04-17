@@ -42,7 +42,7 @@ export function RobotsTxtDetail({ data }: RobotsTxtDetailProps) {
           <CardTitle className="text-lg font-semibold">Raw Content</CardTitle>
         </CardHeader>
         <CardContent>
-          <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-zinc-50 p-4 text-sm font-mono text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-zinc-50 p-4 text-sm font-mono text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
             {data.rawContent ?? ""}
           </pre>
         </CardContent>
@@ -56,7 +56,7 @@ export function RobotsTxtDetail({ data }: RobotsTxtDetailProps) {
           <CardContent className="space-y-1">
             {allowedPaths.length > 0 ? (
               allowedPaths.map((path) => (
-                <p key={path} className="text-sm text-green-700 dark:text-green-300">
+                <p key={path} className="break-all text-sm text-green-700 dark:text-green-300">
                   {path}
                 </p>
               ))
@@ -73,7 +73,7 @@ export function RobotsTxtDetail({ data }: RobotsTxtDetailProps) {
           <CardContent className="space-y-1">
             {disallowedPaths.length > 0 ? (
               disallowedPaths.map((path) => (
-                <p key={path} className="text-sm text-red-700 dark:text-red-300">
+                <p key={path} className="break-all text-sm text-red-700 dark:text-red-300">
                   {path}
                 </p>
               ))
@@ -91,7 +91,7 @@ export function RobotsTxtDetail({ data }: RobotsTxtDetailProps) {
           </CardHeader>
           <CardContent className="space-y-1">
             {sitemapUrls.map((url) => (
-              <p key={url} className="text-sm text-muted-foreground">
+              <p key={url} className="break-all text-sm text-muted-foreground" title={url}>
                 {url}
               </p>
             ))}

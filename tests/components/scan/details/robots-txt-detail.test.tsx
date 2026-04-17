@@ -46,4 +46,36 @@ describe("RobotsTxtDetail", () => {
     expect(screen.getByText("No allowed paths listed.")).toBeInTheDocument();
     expect(screen.getByText("No disallowed paths listed.")).toBeInTheDocument();
   });
+
+  it("wraps long raw content and sitemap URL entries", () => {
+    const longRawLine = `Disallow: /a/very/long/path/segment/${"x".repeat(200)}`;
+    const longRaw = `User-agent: *\n${longRawLine}\nSitemap: https://example.com/${"y".repeat(150)}/sitemap.xml`;
+    const longSitemap = `https://example.com/sitemaps/${"z".repeat(180)}/index.xml`;
+    const longPath = `/admin/${"q".repeat(160)}`;
+
+    const { container } = render(
+      <RobotsTxtDetail
+        data={{
+          exists: true,
+          rawContent: longRaw,
+          allowedPaths: [],
+          disallowedPaths: [longPath],
+          sitemapUrls: [longSitemap],
+        }}
+      />,
+    );
+
+    const pre = container.querySelector("pre");
+    expect(pre).not.toBeNull();
+    expect(pre!.textContent).toContain(longRawLine);
+    expect(pre!.className).toMatch(/break-all/);
+    expect(pre!.className).toMatch(/whitespace-pre-wrap/);
+
+    const path = screen.getByText(longPath);
+    expect(path.className).toMatch(/break-all/);
+
+    const sitemap = screen.getByText(longSitemap);
+    expect(sitemap.className).toMatch(/break-all/);
+    expect(sitemap.getAttribute("title")).toBe(longSitemap);
+  });
 });

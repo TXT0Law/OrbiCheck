@@ -50,7 +50,7 @@ export function TracerouteDetail({ data }: TracerouteDetailProps) {
                 <TableRow key={`${hop.hop}-${hop.ip}`} className={isDestination ? "bg-green-50/70 dark:bg-green-900/20" : ""}>
                   <TableCell className="font-semibold">{hop.hop}</TableCell>
                   <TableCell>{hop.ip}</TableCell>
-                  <TableCell>
+                  <TableCell className="max-w-[24rem] break-all">
                     {hop.hostname ?? <span className="text-muted-foreground">*</span>}
                   </TableCell>
                   <TableCell>

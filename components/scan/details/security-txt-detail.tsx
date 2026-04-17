@@ -15,7 +15,7 @@ export function SecurityTxtDetail({ data }: SecurityTxtDetailProps) {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm text-muted-foreground">security.txt status:</p>
+        <p className="shrink-0 text-sm text-muted-foreground">security.txt status:</p>
         <Badge
           className={`border-transparent ${
             data.exists
@@ -25,7 +25,7 @@ export function SecurityTxtDetail({ data }: SecurityTxtDetailProps) {
         >
           {data.exists ? "Found" : "Not Found"}
         </Badge>
-        <p className="text-sm text-zinc-600 dark:text-zinc-300">{data.url}</p>
+        <p className="min-w-0 max-w-full break-all text-sm text-zinc-600 dark:text-zinc-300">{data.url}</p>
       </div>
 
       <Card>
@@ -33,7 +33,7 @@ export function SecurityTxtDetail({ data }: SecurityTxtDetailProps) {
           <CardTitle className="text-lg font-semibold">Raw Content</CardTitle>
         </CardHeader>
         <CardContent>
-          <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-zinc-50 p-4 text-sm font-mono text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-zinc-50 p-4 text-sm font-mono text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
             {data.rawContent}
           </pre>
         </CardContent>

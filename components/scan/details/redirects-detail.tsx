@@ -40,7 +40,7 @@ export function RedirectsDetail({ data }: RedirectsDetailProps) {
     <Card>
       <CardHeader>
         <CardTitle className="text-lg font-semibold">Redirect Chain</CardTitle>
-        <p className="text-sm text-muted-foreground">
+        <p className="break-all text-sm text-muted-foreground">
           Total redirects: {data.totalRedirects ?? Math.max(hops.length - 1, 0)} · Final URL: {data.finalUrl || "-"}
         </p>
       </CardHeader>
@@ -52,7 +52,12 @@ export function RedirectsDetail({ data }: RedirectsDetailProps) {
           return (
             <div key={`${hop.url}-${index}`} className={isLast ? "pl-6" : "ml-2 border-l-2 border-zinc-200 pl-4 dark:border-zinc-800"}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="max-w-full truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{hop.url}</p>
+                <p
+                  className="min-w-0 max-w-full break-all text-sm font-semibold text-zinc-900 dark:text-zinc-100"
+                  title={hop.url}
+                >
+                  {hop.url}
+                </p>
                 <Badge className={`border-transparent ${getStatusCodeClass(hop.statusCode)}`}>{hop.statusCode}</Badge>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">{hop.responseTimeMs}ms</p>

@@ -33,29 +33,29 @@ export function SocialTagsDetail({ data }: SocialTagsDetailProps) {
           ) : null}
 
           <div className="space-y-2">
-            <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">og:title</p>
-              <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogTitle)}</p>
+              <p className="mt-1 break-words text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogTitle)}</p>
             </div>
-            <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">og:description</p>
-              <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogDescription)}</p>
+              <p className="mt-1 break-words text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogDescription)}</p>
             </div>
-            <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">og:image</p>
-              <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogImage)}</p>
+              <p className="mt-1 break-all text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogImage)}</p>
             </div>
-            <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">og:url</p>
-              <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogUrl)}</p>
+              <p className="mt-1 break-all text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogUrl)}</p>
             </div>
-            <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">og:type</p>
-              <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogType)}</p>
+              <p className="mt-1 break-words text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogType)}</p>
             </div>
-            <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">og:site_name</p>
-              <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogSiteName)}</p>
+              <p className="mt-1 break-words text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.ogSiteName)}</p>
             </div>
           </div>
         </CardContent>
@@ -66,25 +66,25 @@ export function SocialTagsDetail({ data }: SocialTagsDetailProps) {
           <CardTitle className="text-lg font-semibold">Twitter Card Tags</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+          <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">twitter:card</p>
-            <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterCard)}</p>
+            <p className="mt-1 break-words text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterCard)}</p>
           </div>
-          <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+          <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">twitter:site</p>
-            <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterSite)}</p>
+            <p className="mt-1 break-words text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterSite)}</p>
           </div>
-          <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+          <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">twitter:title</p>
-            <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterTitle)}</p>
+            <p className="mt-1 break-words text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterTitle)}</p>
           </div>
-          <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+          <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">twitter:description</p>
-            <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterDescription)}</p>
+            <p className="mt-1 break-words text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterDescription)}</p>
           </div>
-          <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+          <div className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">twitter:image</p>
-            <p className="mt-1 text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterImage)}</p>
+            <p className="mt-1 break-all text-sm text-zinc-900 dark:text-zinc-100">{valueOrNotSet(data.twitterImage)}</p>
           </div>
         </CardContent>
       </Card>

@@ -58,4 +58,41 @@ describe("CookiesDetail", () => {
 
     expect(screen.getByText("none")).toBeInTheDocument();
   });
+
+  it("wraps long cookie domain and path values inside the table", () => {
+    const longDomain = ".really-long-cookie-domain-name-for-testing-overflow.example.com";
+    const longPath = "/very/deeply/nested/cookie/path/segment/that/should/wrap/within/the/card/boundary";
+    const longExpires = "Thu, 31 Dec 2099 23:59:59 GMT (override-by-server-policy-flag-set)";
+
+    render(
+      <CookiesDetail
+        data={{
+          cookies: [
+            {
+              name: "tracking_session_identifier_for_long_value_test",
+              domain: longDomain,
+              path: longPath,
+              secure: true,
+              httpOnly: true,
+              sameSite: "lax",
+              expires: longExpires,
+            },
+          ],
+          issuesCount: 0,
+        }}
+      />,
+    );
+
+    const domainCell = screen.getByText(longDomain);
+    expect(domainCell.className).toMatch(/break-all/);
+    expect(domainCell.className).toMatch(/max-w-\[/);
+
+    const pathCell = screen.getByText(longPath);
+    expect(pathCell.className).toMatch(/break-all/);
+    expect(pathCell.className).toMatch(/max-w-\[/);
+
+    const expiresCell = screen.getByText(longExpires);
+    expect(expiresCell.className).toMatch(/break-all/);
+    expect(expiresCell.className).toMatch(/max-w-\[/);
+  });
 });

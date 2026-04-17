@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { SitemapDetail } from "@/components/scan/details/sitemap-detail";
 
+import { LONG_URL } from "./long-value-fixtures";
+
 describe("SitemapDetail", () => {
   it("renders summary and sample urls", () => {
     render(
@@ -30,5 +32,24 @@ describe("SitemapDetail", () => {
     );
 
     expect(screen.getByText("No sample URLs available.")).toBeInTheDocument();
+  });
+
+  it("wraps long sample URLs without truncation", () => {
+    render(
+      <SitemapDetail
+        data={{
+          exists: true,
+          url: "https://example.com/sitemap.xml",
+          urlCount: 1,
+          sampleUrls: [LONG_URL],
+        }}
+      />,
+    );
+
+    const sampleEl = screen.getByText(LONG_URL);
+    expect(sampleEl).toBeInTheDocument();
+    expect(sampleEl.className).toMatch(/break-all/);
+    expect(sampleEl.className).not.toMatch(/truncate/);
+    expect(sampleEl.getAttribute("title")).toBe(LONG_URL);
   });
 });

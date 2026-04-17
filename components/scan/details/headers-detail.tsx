@@ -49,8 +49,12 @@ export function HeadersDetail({ data }: HeadersDetailProps) {
                 <TableRow key={check.name}>
                   <TableCell className="font-medium">{check.name}</TableCell>
                   <TableCell>{statusBadge(check)}</TableCell>
-                  <TableCell className="text-zinc-600 dark:text-zinc-300">{check.value ?? "-"}</TableCell>
-                  <TableCell className="text-muted-foreground">{check.recommendation ?? "-"}</TableCell>
+                  <TableCell className="max-w-[28rem] break-all text-zinc-600 dark:text-zinc-300">
+                    {check.value ?? "-"}
+                  </TableCell>
+                  <TableCell className="max-w-[36rem] whitespace-normal break-words text-muted-foreground">
+                    {check.recommendation ?? "-"}
+                  </TableCell>
                 </TableRow>
               ))}
               {securityChecks.length === 0 && (
@@ -72,9 +76,12 @@ export function HeadersDetail({ data }: HeadersDetailProps) {
         <CardContent>
           <div className="grid grid-cols-1 gap-2">
             {Object.entries(responseHeaders).map(([name, value]) => (
-              <div key={name} className="flex flex-wrap justify-between rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
-                <span className="font-medium text-zinc-700 dark:text-zinc-300">{name}</span>
-                <span className="text-muted-foreground">{value}</span>
+              <div
+                key={name}
+                className="flex flex-wrap items-baseline justify-between gap-2 rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+              >
+                <span className="shrink-0 font-medium text-zinc-700 dark:text-zinc-300">{name}</span>
+                <span className="min-w-0 max-w-full break-all text-right text-muted-foreground">{value}</span>
               </div>
             ))}
             {Object.keys(responseHeaders).length === 0 && (

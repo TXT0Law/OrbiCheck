@@ -41,7 +41,11 @@ export function SitemapDetail({ data }: SitemapDetailProps) {
         <CardContent className="space-y-2">
           {sampleUrls.length > 0 ? (
             sampleUrls.map((url) => (
-              <div key={url} className="truncate rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+              <div
+                key={url}
+                className="min-w-0 break-all rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+                title={url}
+              >
                 {url}
               </div>
             ))

@@ -82,7 +82,7 @@ export function SslExtensionsSection({
       <CardHeader>
         <CardTitle>Certificate Extensions</CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -96,7 +96,7 @@ export function SslExtensionsSection({
                 <TableCell className="font-medium">
                   {formatExtensionName(key)}
                 </TableCell>
-                <TableCell className="font-mono text-xs">
+                <TableCell className="max-w-[28rem] break-all font-mono text-xs">
                   {Array.isArray(value)
                     ? value.join(", ")
                     : typeof value === "object"
@@ -124,7 +124,7 @@ export function SslDnsCaaSection({ caa }: { caa?: string[] }) {
         {hasRecords ? (
           <div className="space-y-1">
             {(caa ?? []).map((record, i) => (
-              <p key={i} className="font-mono text-sm">
+              <p key={i} className="break-all font-mono text-sm">
                 {record}
               </p>
             ))}

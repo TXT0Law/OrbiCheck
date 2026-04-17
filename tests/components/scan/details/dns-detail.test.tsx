@@ -1,7 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { DnsDetail } from "@/components/scan/details/dns-detail";
+
+import { LONG_TXT_RECORD } from "./long-value-fixtures";
 
 const FULL_DATA = {
   a: ["93.184.216.34"],
@@ -40,5 +42,27 @@ describe("DnsDetail", () => {
     );
 
     expect(screen.getByText("1.1.1.1")).toBeInTheDocument();
+  });
+
+  it("wraps long TXT record entries instead of overflowing", () => {
+    render(
+      <DnsDetail
+        data={{
+          a: [],
+          aaaa: [],
+          cname: [],
+          mx: [],
+          ns: [],
+          txt: [LONG_TXT_RECORD],
+          soa: [],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "TXT" }));
+
+    const cell = screen.getByText(LONG_TXT_RECORD);
+    expect(cell.className).toMatch(/break-all/);
+    expect(cell.className).toMatch(/min-w-0/);
   });
 });
