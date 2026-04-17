@@ -80,7 +80,8 @@ class TestTransformSslCheck:
         assert result["cipherSuites"] == []
         assert result["vulnerabilities"] == []
         assert result["forwardSecrecy"] is False
-        assert result["hsts"] == {"enabled": False}
+        assert result["hsts"]["enabled"] is False
+        assert result["hsts"]["preloadReady"] is False
 
     def test_ssl_plus_tls_merges_correctly(
         self, ssl_raw_fixture, mozilla_tls_fixture
@@ -110,7 +111,8 @@ class TestTransformSslCheck:
         assert result["protocols"] == []
         assert result["cipherSuites"] == []
         assert result["vulnerabilities"] == []
-        assert result["hsts"] == {"enabled": False}
+        assert result["hsts"]["enabled"] is False
+        assert result["hsts"]["preloadReady"] is False
 
     def test_tls_failure_does_not_affect_ssl_base(self, ssl_raw_fixture):
         """If tls has error data, ssl base fields still work."""

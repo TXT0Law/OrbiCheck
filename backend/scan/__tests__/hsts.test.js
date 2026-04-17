@@ -19,25 +19,38 @@ function createResponseCapture() {
   };
 }
 
-function createHttpsMock({ headers = {}, error = null }) {
+function createHttpsMock({ headers = {}, error = null, triggerTimeout = false }) {
   return {
     default: {
-      request: jest.fn((_url, callback) => {
+      request: jest.fn((_url, _opts, callback) => {
         let errorHandler = () => {};
+        let timeoutHandler = () => {};
         const req = {
           on(event, handler) {
             if (event === 'error') {
               errorHandler = handler;
             }
+            if (event === 'timeout') {
+              timeoutHandler = handler;
+            }
             return req;
           },
           end() {
             process.nextTick(() => {
+              if (triggerTimeout) {
+                timeoutHandler();
+                return;
+              }
               if (error) {
                 errorHandler(error);
                 return;
               }
               callback({ headers });
+            });
+          },
+          destroy(err) {
+            process.nextTick(() => {
+              errorHandler(err);
             });
           },
         };
@@ -66,7 +79,7 @@ describe('hsts module', () => {
     setModulesForTest(new Map());
   });
 
-  it('returns compatible true for preload-ready HSTS headers', async () => {
+  it('returns preloadReady true for preload-ready HSTS headers', async () => {
     const handler = await loadHandlerWithHttps({
       headers: {
         'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
@@ -76,12 +89,16 @@ describe('hsts module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.compatible).toBe(true);
+    expect(response.body.enabled).toBe(true);
+    expect(response.body.preloadReady).toBe(true);
+    expect(response.body.includeSubDomains).toBe(true);
+    expect(response.body.preload).toBe(true);
+    expect(response.body.maxAge).toBe(31536000);
     expect(response.body.hstsHeader).toContain('includeSubDomains');
     expect(response.body.hstsHeader).toContain('preload');
   });
 
-  it('returns incompatible result when HSTS header is missing', async () => {
+  it('returns result when HSTS header is missing', async () => {
     const handler = await loadHandlerWithHttps({
       headers: {},
     });
@@ -89,7 +106,8 @@ describe('hsts module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.compatible).toBe(false);
+    expect(response.body.enabled).toBe(false);
+    expect(response.body.preloadReady).toBe(false);
     expect(response.body.message).toContain('does not serve any HSTS headers');
     expect(response.body.hstsHeader).toBeNull();
   });
@@ -126,5 +144,66 @@ describe('hsts module', () => {
     const modules = await loadModules();
 
     expect(modules.has('hsts')).toBe(true);
+  });
+
+  it('handles lowercase directives (GitHub regression)', async () => {
+    const handler = await loadHandlerWithHttps({
+      headers: {
+        'strict-transport-security': 'max-age=31536000; includesubdomains; preload',
+      },
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.enabled).toBe(true);
+    expect(response.body.preloadReady).toBe(true);
+    expect(response.body.includeSubDomains).toBe(true);
+    expect(response.body.preload).toBe(true);
+    expect(response.body.maxAge).toBe(31536000);
+    expect(response.body.hstsHeader).toContain('includesubdomains');
+  });
+
+  it('reports enabled but not preloadReady for sub-threshold max-age', async () => {
+    const handler = await loadHandlerWithHttps({
+      headers: {
+        'strict-transport-security': 'max-age=300',
+      },
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.enabled).toBe(true);
+    expect(response.body.preloadReady).toBe(false);
+    expect(response.body.maxAge).toBe(300);
+    expect(response.body.hstsHeader).toBe('max-age=300');
+  });
+
+  it('handles quoted max-age and extra whitespace', async () => {
+    const handler = await loadHandlerWithHttps({
+      headers: {
+        'strict-transport-security': 'max-age = "63072000"; includeSubDomains',
+      },
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.enabled).toBe(true);
+    expect(response.body.maxAge).toBe(63072000);
+    expect(response.body.includeSubDomains).toBe(true);
+    expect(response.body.preloadReady).toBe(false);
+  });
+
+  it('returns error payload on request timeout', async () => {
+    const handler = await loadHandlerWithHttps({
+      triggerTimeout: true,
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toBe(JSON.stringify({ error: 'Error making request: Request timed out' }));
   });
 });

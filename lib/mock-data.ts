@@ -385,6 +385,7 @@ export const MOCK_SCAN_DETAIL: ScanDetail = {
   },
   hsts: {
     enabled: true,
+    preloadReady: true,
     maxAge: 31536000,
     includeSubDomains: true,
     preload: true,

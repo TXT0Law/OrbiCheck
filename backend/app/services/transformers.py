@@ -627,27 +627,42 @@ def _extract_hsts(hsts_raw: dict, headers_raw: dict) -> dict:
     """Extract HSTS info from hsts module or headers."""
     try:
         hsts_raw = _ensure_dict(hsts_raw)
-        if hsts_raw.get("compatible") or hsts_raw.get("enabled") or hsts_raw.get("hstsEnabled"):
+        header_str = str(hsts_raw.get("hstsHeader") or "")
+        lower_header = header_str.lower()
+
+        if hsts_raw.get("enabled") or hsts_raw.get("compatible") or hsts_raw.get("hstsEnabled"):
+            max_age = (
+                hsts_raw.get("maxAge")
+                or hsts_raw.get("max_age")
+                or _parse_max_age_from_header(header_str)
+            )
+            enabled = (max_age or 0) > 0
             return {
-                "enabled": True,
-                "maxAge": hsts_raw.get("maxAge") or hsts_raw.get("max_age") or _parse_max_age_from_header(str(hsts_raw.get("hstsHeader", ""))),
-                "preload": "preload" in str(hsts_raw.get("hstsHeader", "")).lower(),
-                "includeSubDomains": "includesubdomains" in str(hsts_raw.get("hstsHeader", "")).lower(),
+                "enabled": enabled,
+                "preloadReady": bool(hsts_raw.get("preloadReady", hsts_raw.get("compatible", False))),
+                "maxAge": max_age,
+                "preload": "preload" in lower_header,
+                "includeSubDomains": "includesubdomains" in lower_header,
             }
 
         headers_raw = _ensure_dict(headers_raw)
         sts_header = headers_raw.get("strict-transport-security", "")
         if not sts_header:
-            return {"enabled": False}
+            return {"enabled": False, "preloadReady": False}
 
+        parsed_max_age = _parse_max_age_from_header(sts_header)
+        sts_lower = sts_header.lower()
+        has_preload = "preload" in sts_lower
+        has_sub = "includesubdomains" in sts_lower
         return {
-            "enabled": True,
-            "maxAge": _parse_max_age_from_header(sts_header),
-            "preload": "preload" in sts_header.lower(),
-            "includeSubDomains": "includesubdomains" in sts_header.lower(),
+            "enabled": (parsed_max_age or 0) > 0,
+            "preloadReady": (parsed_max_age or 0) > 0 and has_preload and has_sub,
+            "maxAge": parsed_max_age,
+            "preload": has_preload,
+            "includeSubDomains": has_sub,
         }
-    except Exception:
-        return {"enabled": False}
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return {"enabled": False, "preloadReady": False}
 
 
 def _check_cn_san_match(base: dict) -> bool:
@@ -1399,13 +1414,30 @@ def transform_tech_stack(raw: dict) -> list[dict]:
 
 
 def transform_hsts(raw: dict) -> dict:
-    """Raw HSTS -> HstsResult."""
-    header = raw.get("hstsHeader", "")
+    """Raw HSTS scanner payload -> HstsResult."""
+    raw = _ensure_dict(raw)
+    header = raw.get("hstsHeader") or ""
+    parsed_max_age = _parse_max_age(header)
+    max_age = raw.get("maxAge")
+    if max_age is None:
+        max_age = parsed_max_age
+
+    if "enabled" in raw:
+        enabled = bool(raw["enabled"])
+    else:
+        enabled = max_age > 0
+
+    preload_ready = bool(raw.get("preloadReady", raw.get("compatible", False)))
+
+    lower_header = header.lower() if header else ""
     return {
-        "enabled": raw.get("compatible", False),
-        "maxAge": _parse_max_age(header),
-        "includeSubDomains": "includesubdomains" in header.lower() if header else False,
-        "preload": "preload" in header.lower() if header else False,
+        "enabled": enabled,
+        "preloadReady": preload_ready,
+        "maxAge": max_age or 0,
+        "includeSubDomains": bool(raw.get("includeSubDomains"))
+            or ("includesubdomains" in lower_header),
+        "preload": bool(raw.get("preload"))
+            or ("preload" in lower_header),
         "rawHeader": header,
     }
 
