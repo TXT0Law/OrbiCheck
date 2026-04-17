@@ -52,7 +52,7 @@ TransformFn = Callable[[dict[str, Any]], Any]
         (transform_ip, {"ip", "country", "hostingProvider"}),
         (transform_quality, {"categories", "audits", "runtimeError"}),
         (transform_whois, {"registrar", "createdAt", "nameservers"}),
-        (transform_hsts, {"enabled", "maxAge", "rawHeader"}),
+        (transform_hsts, {"enabled", "preloadReady", "maxAge", "rawHeader"}),
         (transform_cookies, {"cookies", "issuesCount"}),
         (transform_firewall, {"detected", "provider", "confidence"}),
         (transform_threats, {"entries", "listedCount"}),
@@ -94,7 +94,7 @@ def test_transformers_handle_empty_dict_shapes(
         (transform_ip, {"ip": None}, {"ip", "isp"}),
         (transform_quality, {"success": False, "error": "failed"}, {"categories", "runtimeError"}),
         (transform_whois, {"partial": "data"}, {"registrar", "domainStatus"}),
-        (transform_hsts, {"hstsHeader": None}, {"enabled", "preload"}),
+        (transform_hsts, {"hstsHeader": None}, {"enabled", "preloadReady", "preload"}),
         (transform_cookies, {"key": None}, {"cookies", "issuesCount"}),
         (transform_firewall, {"hasWaf": None}, {"detected", "confidence"}),
         (transform_threats, {"safeBrowsing": None}, {"entries", "listedCount"}),
@@ -154,3 +154,65 @@ def test_transform_ranking_and_carbon_handles_none_and_partial_inputs() -> None:
     assert empty["carbon"]["isGreen"] is False
     assert partial["ranking"]["globalRank"] == 12
     assert partial["carbon"]["isGreen"] is True
+
+
+@pytest.mark.unit
+def test_transform_hsts_new_scanner_payload() -> None:
+    """New scanner payload with explicit enabled/preloadReady/maxAge fields."""
+    result = transform_hsts({
+        "enabled": True,
+        "preloadReady": True,
+        "maxAge": 31536000,
+        "includeSubDomains": True,
+        "preload": True,
+        "hstsHeader": "max-age=31536000; includesubdomains; preload",
+        "message": "Site is compatible with the HSTS preload list!",
+    })
+
+    assert result["enabled"] is True
+    assert result["preloadReady"] is True
+    assert result["maxAge"] == 31536000
+    assert result["includeSubDomains"] is True
+    assert result["preload"] is True
+    assert result["rawHeader"] == "max-age=31536000; includesubdomains; preload"
+
+
+@pytest.mark.unit
+def test_transform_hsts_legacy_payload_compatible_maps_to_preload_ready() -> None:
+    """Legacy payload with only compatible and hstsHeader still produces correct output."""
+    result = transform_hsts({
+        "compatible": True,
+        "hstsHeader": "max-age=31536000; includeSubDomains; preload",
+    })
+
+    assert result["enabled"] is True
+    assert result["preloadReady"] is True
+    assert result["maxAge"] == 31536000
+    assert result["includeSubDomains"] is True
+    assert result["preload"] is True
+
+
+@pytest.mark.unit
+def test_transform_hsts_lowercase_includesubdomains() -> None:
+    """Lowercase includesubdomains in header is parsed correctly."""
+    result = transform_hsts({
+        "hstsHeader": "max-age=63072000; includesubdomains",
+    })
+
+    assert result["enabled"] is True
+    assert result["includeSubDomains"] is True
+    assert result["preload"] is False
+    assert result["preloadReady"] is False
+
+
+@pytest.mark.unit
+def test_transform_hsts_empty_and_missing_payload() -> None:
+    """Empty/missing payload defaults safely."""
+    result_empty = transform_hsts({})
+    result_none = transform_hsts(None)
+
+    for result in (result_empty, result_none):
+        assert result["enabled"] is False
+        assert result["preloadReady"] is False
+        assert result["maxAge"] == 0
+        assert result["rawHeader"] == ""

@@ -1,4 +1,4 @@
-.PHONY: help test test-frontend test-backend test-backend-unit test-backend-integration test-backend-e2e test-osint test-watch test-cov lint lint-frontend lint-backend lint-osint clean-safe db-migrate db-rollback export-openapi
+.PHONY: help test test-frontend test-backend test-backend-unit test-backend-integration test-backend-e2e test-osint test-watch test-cov lint lint-frontend lint-backend lint-osint clean-safe db-migrate db-rollback export-openapi check-harness
 
 .DEFAULT_GOAL := help
 
@@ -52,6 +52,9 @@ test-cov: ## Run all tests with coverage reports
 	pnpm test:cov
 	cd backend && UV_LINK_MODE=copy uv run pytest --cov=app --cov-report=term-missing
 	cd backend/scan && npm run test:cov
+
+check-harness: ## Run all harness CI checks (dependency direction, boundary validation)
+	bash scripts/ci/check-harness.sh
 
 export-openapi: ## Export static OpenAPI schema to docs/openapi.json
 	cd backend && UV_LINK_MODE=copy uv run python ../scripts/dev/export-openapi.py

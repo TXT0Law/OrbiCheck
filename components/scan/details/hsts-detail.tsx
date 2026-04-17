@@ -44,6 +44,20 @@ export function HstsDetail({ data }: HstsDetailProps) {
             </Badge>
           ),
         },
+        {
+          label: "Preload Eligible",
+          value: (
+            <Badge
+              className={`border-transparent ${
+                data.preloadReady
+                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200"
+                  : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+              }`}
+            >
+              {data.preloadReady ? "✓" : "✗"}
+            </Badge>
+          ),
+        },
         { label: "Max Age", value: formatMaxAge(data.maxAge) },
         { label: "Include Sub-Domains", value: data.includeSubDomains ? "✓" : "✗" },
         { label: "Preload", value: data.preload ? "✓" : "✗" },

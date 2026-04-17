@@ -417,6 +417,7 @@ export interface TlsResult {
 
 export interface HstsResult {
   enabled: boolean;
+  preloadReady: boolean;
   maxAge: number;
   includeSubDomains: boolean;
   preload: boolean;
