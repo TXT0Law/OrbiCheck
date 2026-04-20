@@ -131,6 +131,17 @@ from app.utils.url_safety import validate_url_safety
 
 logger = structlog.get_logger(__name__)
 
+# Capabilities for which a *probe* outcome (not just enabled flag) determines
+# `MonitorCheck.success`. When the only enabled capability is in this set and
+# no HTTP probe ran, the SSL probe outcome must drive `check.success`.
+SSL_ONLY_PROBE_REQUIRED: frozenset[str] = frozenset({"ssl_expiry"})
+
+# HTTP methods that conventionally carry a request body. When `content_change`
+# is enabled with one of these the user usually expects the body to be sent;
+# we currently lack a column for it (P1 follow-up — see TODO inside
+# `execute_check`) so we log a hint to surface the gap.
+_BODY_BEARING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH"})
+
 PERIOD_TO_DELTA = {
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
@@ -1497,10 +1508,24 @@ async def execute_check(
         or "content_change" in enabled
         or "visual_change" in enabled
     )
-    if "content_change" in enabled:
-        method = "GET"
-    else:
-        method = monitor.http_method.upper()
+    method = monitor.http_method.upper()
+    if "content_change" in enabled and method == "HEAD":
+        check.error_type = CheckErrorType.UNKNOWN
+        check.error_message = (
+            "content_change capability is incompatible with HTTP method HEAD; "
+            "use GET or POST."
+        )
+        check.success = False
+        run_http = False
+    elif "content_change" in enabled and method in _BODY_BEARING_METHODS:
+        # Monitor model has no http_body column yet; surface the gap for
+        # operators so they understand POST/PUT/PATCH content-change probes
+        # currently send an empty request body.
+        logger.warning(
+            "monitor_content_change_with_method_lacks_body",
+            monitor_id=str(monitor.id),
+            method=method,
+        )
 
     try:
         validate_url_safety(monitor.url)
@@ -1520,6 +1545,10 @@ async def execute_check(
             ) as client:
                 t0 = datetime.now(timezone.utc)
                 if "content_change" in enabled:
+                    # TODO(monitor-http-body): once Monitor.http_body column is
+                    # added, pass `content=monitor.http_body` here for POST/PUT.
+                    # Until then POST/PUT/PATCH send an empty body (a WARNING
+                    # log is emitted above to flag this gap to operators).
                     response = await client.request(method, monitor.url, headers=headers)
                     elapsed_ms = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
                     check.status_code = response.status_code
@@ -1668,6 +1697,29 @@ async def execute_check(
                     probe_time_ms=ssl_result.probe_time_ms,
                 )
 
+    # SSL-only mode: when the only enabled capability requires a probe outcome
+    # (`ssl_expiry`) and no HTTP probe ran, `check.success` must reflect the SSL
+    # probe outcome. Otherwise a failed handshake would silently look "up".
+    ssl_only_mode = (
+        not run_http
+        and "ssl_expiry" in enabled
+        and SSL_ONLY_PROBE_REQUIRED.issuperset(enabled)
+    )
+    if ssl_only_mode:
+        if ssl_result is None:
+            check.success = False
+            if check.error_type is None:
+                check.error_type = CheckErrorType.SSL_ERROR
+            if check.error_message is None:
+                check.error_message = "SSL probe could not complete"
+        else:
+            check.success = bool(ssl_result.success)
+            if not ssl_result.success and check.error_type is None:
+                check.error_type = CheckErrorType.SSL_ERROR
+                check.error_message = (
+                    ssl_result.error_message or "SSL probe failed"
+                )[:500]
+
     if check.success and "visual_change" in enabled:
         if "visual_change" not in evaluated:
             evaluated.append("visual_change")
@@ -1695,22 +1747,42 @@ async def execute_check(
         if check.success and max_ms is not None and check.response_time_ms > max_ms:
             is_degraded = True
 
-    if run_http or check.error_message:
+    if run_http or check.error_message or ssl_only_mode:
         if check.success and not check.error_type:
             monitor.consecutive_failures = 0
         elif not check.success:
             monitor.consecutive_failures = (monitor.consecutive_failures or 0) + 1
 
-    if run_http or check.error_message:
-        monitor.last_status_code = check.status_code
-        monitor.last_response_time_ms = check.response_time_ms
+    if run_http or check.error_message or ssl_only_mode:
+        if run_http:
+            # last_status_code / last_response_time_ms describe the HTTP probe;
+            # don't smear stale HTTP values when only the SSL probe ran.
+            monitor.last_status_code = check.status_code
+            monitor.last_response_time_ms = check.response_time_ms
         if monitor.is_enabled:
-            monitor.status = _determine_status(
-                success=check.success,
-                is_degraded=is_degraded,
-                consecutive_failures=monitor.consecutive_failures or 0,
-                threshold_consecutive=thresholds.consecutive_failures,
-            )
+            if ssl_only_mode and check.success and "ssl_expiry" in enabled:
+                # Probe succeeded — defer to SSL severity-driven status so
+                # near-expiry certs report DEGRADED rather than UP.
+                ssl_th = _ssl_thresholds_from_config(
+                    monitor.capabilities.get("ssl_expiry", {})
+                )
+                warn_d = ssl_th.warn_days_remaining
+                crit_d = ssl_th.critical_days_remaining
+                days = monitor.ssl_expiry_days
+                if days is not None:
+                    if days < 0:
+                        monitor.status = MonitorStatus.DOWN
+                    elif days <= crit_d or days <= warn_d:
+                        monitor.status = MonitorStatus.DEGRADED
+                    else:
+                        monitor.status = MonitorStatus.UP
+            else:
+                monitor.status = _determine_status(
+                    success=check.success,
+                    is_degraded=is_degraded,
+                    consecutive_failures=monitor.consecutive_failures or 0,
+                    threshold_consecutive=thresholds.consecutive_failures,
+                )
     elif monitor.is_enabled and "ssl_expiry" in enabled:
         ssl_th = _ssl_thresholds_from_config(monitor.capabilities.get("ssl_expiry", {}))
         warn_d = ssl_th.warn_days_remaining

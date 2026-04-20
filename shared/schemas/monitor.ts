@@ -144,3 +144,398 @@ export const monitorUpdateSchema = monitorCreateSchema.partial().extend({
 
 export type MonitorCreateInput = z.infer<typeof monitorCreateSchema>;
 export type MonitorUpdateInput = z.infer<typeof monitorUpdateSchema>;
+
+// ============================================================
+// Response schemas — used by frontend `lib/api/monitors.ts` to
+// validate every payload crossing the HTTP / SSE boundary.
+//
+// These intentionally accept legacy snake_case alongside camelCase
+// keys (the frontend `normalizeMonitor` helper folds them after parse)
+// and prefer permissive optional fields over strict shape rejection
+// to avoid bouncing valid responses while a backend migration is in
+// flight. Each schema only describes the response surface the UI
+// actually consumes; ad-hoc extra fields pass through untouched.
+// ============================================================
+
+const PERIOD_VALUES = ["24h", "7d", "30d", "90d"] as const;
+const periodSchema = z.enum(PERIOD_VALUES);
+
+const monitorStatusSchema = z.enum([
+  "up",
+  "down",
+  "degraded",
+  "paused",
+  "pending",
+]);
+
+const checkErrorTypeSchema = z.enum([
+  "timeout",
+  "dns_resolution",
+  "connection_refused",
+  "ssl_error",
+  "http_error",
+  "content_too_large",
+  "unknown",
+]);
+
+const capabilityStatusSchema = z.enum([
+  "healthy",
+  "warning",
+  "critical",
+  "disabled",
+  "pending",
+  "error",
+]);
+
+const httpMethodSchema = z.enum(["GET", "HEAD", "POST"]);
+
+const capabilityStatusSummarySchema = z.object({
+  capability: monitorCapabilityEnum,
+  status: capabilityStatusSchema,
+  lastCheckAt: z.string().nullable(),
+  lastValue: z.string().nullable(),
+  summary: z.string().nullable(),
+});
+
+// Per-capability response config — server may omit nested defaults; accept
+// a permissive object so missing optional sub-fields don't reject payloads.
+const responseAlertPolicySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    cooldownSeconds: z.number().int().min(0).optional(),
+    quietHours: alertQuietHoursSchema.nullable().optional(),
+  })
+  .passthrough();
+
+const responseUptimeCapabilitySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    alert: responseAlertPolicySchema.optional(),
+    thresholds: uptimeThresholdsSchema.partial().optional(),
+    intervalOverrideSeconds: z.number().int().nullable().optional(),
+  })
+  .passthrough();
+
+const responseContentCapabilitySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    alert: responseAlertPolicySchema.optional(),
+    thresholds: contentThresholdsSchema.partial().optional(),
+    intervalOverrideSeconds: z.number().int().nullable().optional(),
+  })
+  .passthrough();
+
+const responseSslCapabilitySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    alert: responseAlertPolicySchema.optional(),
+    thresholds: sslThresholdsSchema.partial().optional(),
+    intervalOverrideSeconds: z.number().int().nullable().optional(),
+  })
+  .passthrough();
+
+const responseVisualCapabilitySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    alert: responseAlertPolicySchema.optional(),
+    thresholds: visualThresholdsSchema.partial().optional(),
+    intervalOverrideSeconds: z.number().int().nullable().optional(),
+  })
+  .passthrough();
+
+const monitorCapabilitiesResponseSchema = z
+  .object({
+    uptime_only: responseUptimeCapabilitySchema.optional(),
+    content_change: responseContentCapabilitySchema.optional(),
+    ssl_expiry: responseSslCapabilitySchema.optional(),
+    visual_change: responseVisualCapabilitySchema.optional(),
+  })
+  .passthrough();
+
+export const monitorResponseSchema = z
+  .object({
+    id: z.string(),
+    displayName: z.string().optional(),
+    display_name: z.string().optional(),
+    url: z.string(),
+    enabledCapabilities: z.array(monitorCapabilityEnum).optional(),
+    enabled_capabilities: z.array(monitorCapabilityEnum).optional(),
+    capabilities: monitorCapabilitiesResponseSchema.optional(),
+    intervalSeconds: z.number().int().optional(),
+    interval_seconds: z.number().int().optional(),
+    httpMethod: httpMethodSchema.optional(),
+    http_method: httpMethodSchema.optional(),
+    expectedStatusCode: z.number().int().nullable().optional(),
+    expected_status_code: z.number().int().nullable().optional(),
+    isEnabled: z.boolean().optional(),
+    is_enabled: z.boolean().optional(),
+    status: monitorStatusSchema.optional(),
+    capabilityStatuses: z.array(capabilityStatusSummarySchema).optional(),
+    capability_statuses: z.array(capabilityStatusSummarySchema).optional(),
+    lastCheckAt: z.string().nullable().optional(),
+    last_check_at: z.string().nullable().optional(),
+    lastStatusCode: z.number().int().nullable().optional(),
+    last_status_code: z.number().int().nullable().optional(),
+    lastResponseTimeMs: z.number().nullable().optional(),
+    last_response_time_ms: z.number().nullable().optional(),
+    lastChangeDetectedAt: z.string().nullable().optional(),
+    last_change_detected_at: z.string().nullable().optional(),
+    sslExpiryDays: z.number().int().nullable().optional(),
+    ssl_expiry_days: z.number().int().nullable().optional(),
+    totalChecks: z.number().int().optional(),
+    total_checks: z.number().int().optional(),
+    uptimePercentage: z.number().nullable().optional(),
+    uptime_percentage: z.number().nullable().optional(),
+    avgResponseTimeMs: z.number().nullable().optional(),
+    avg_response_time_ms: z.number().nullable().optional(),
+    tags: z.array(z.string()).optional(),
+    createdAt: z.string().optional(),
+    created_at: z.string().optional(),
+    updatedAt: z.string().optional(),
+    updated_at: z.string().optional(),
+  })
+  .passthrough();
+
+export const monitorListMetaSchema = z.object({
+  page: z.number().int().min(0),
+  limit: z.number().int().min(0),
+  total: z.number().int().min(0),
+});
+
+export const monitorCheckSchema = z
+  .object({
+    id: z.string(),
+    monitorId: z.string(),
+    checkedAt: z.string(),
+    success: z.boolean(),
+    statusCode: z.number().int().nullable(),
+    responseTimeMs: z.number(),
+    errorType: checkErrorTypeSchema.nullable(),
+    errorMessage: z.string().nullable(),
+    contentHash: z.string().nullable(),
+    contentChanged: z.boolean(),
+    snapshotId: z.string().nullable(),
+    sslDaysRemaining: z.number().int().nullable(),
+    evaluatedCapabilities: z.array(monitorCapabilityEnum).default([]),
+  })
+  .passthrough();
+
+export const monitorBaselineSchema = z
+  .object({
+    snapshotId: z.string(),
+    capturedAt: z.string(),
+    contentHash: z.string(),
+    contentSizeBytes: z.number().int().min(0),
+    contentType: z.string().nullable().optional(),
+    charset: z.string().nullable().optional(),
+    httpStatusCode: z.number().int().nullable().optional(),
+    isBaseline: z.boolean().optional(),
+  })
+  .passthrough();
+
+export const monitorTimeSeriesPointSchema = z
+  .object({
+    timestamp: z.string(),
+    responseTimeMs: z.number().nullable(),
+    statusCode: z.number().int().nullable(),
+    success: z.boolean(),
+  })
+  .passthrough();
+
+const monitorTimeSeriesBucketSchema = z
+  .object({
+    timestamp: z.string(),
+    successRate: z.number(),
+    avgResponseTime: z.number(),
+    minResponseTime: z.number(),
+    maxResponseTime: z.number(),
+    checkCount: z.number().int().min(0),
+  })
+  .passthrough();
+
+export const monitorTimeSeriesDataSchema = z
+  .object({
+    period: periodSchema,
+    resolution: z.string(),
+    points: z.array(monitorTimeSeriesBucketSchema),
+  })
+  .passthrough();
+
+/** Endpoint may return either the aggregated object or a flat list of probes. */
+export const monitorTimeSeriesPayloadSchema = z.union([
+  monitorTimeSeriesDataSchema,
+  z.array(monitorTimeSeriesPointSchema),
+]);
+
+const monitorCurrentStreakSchema = z.object({
+  status: z.string(),
+  since: z.string(),
+  durationSeconds: z.number().int().min(0),
+});
+
+export const monitorUptimeSummarySchema = z
+  .object({
+    period: periodSchema,
+    totalChecks: z.number().int().min(0),
+    successfulChecks: z.number().int().min(0),
+    failedChecks: z.number().int().min(0).optional(),
+    uptimePercentage: z.number(),
+    avgResponseTimeMs: z.number(),
+    p95ResponseTimeMs: z.number(),
+    incidents: z.number().int().min(0),
+    currentStreak: monitorCurrentStreakSchema.optional(),
+    failureDistribution: z.record(z.string(), z.number()).optional(),
+  })
+  .passthrough();
+
+const monitorChangeDiffSummarySchema = z
+  .object({
+    linesAdded: z.number().int().min(0),
+    linesRemoved: z.number().int().min(0),
+    linesChanged: z.number().int().min(0),
+    totalDiffLines: z.number().int().min(0).optional(),
+    changeCategory: z.enum(["small", "medium", "large"]).optional(),
+    diffFingerprint: z.string().optional(),
+    previewLine: z.string().optional(),
+  })
+  .passthrough();
+
+export const monitorChangeSchema = z
+  .object({
+    id: z.string(),
+    monitorId: z.string(),
+    detectedAt: z.string(),
+    previousSnapshotId: z.string(),
+    currentSnapshotId: z.string(),
+    linkedVisualCaptureId: z.string().nullable().optional(),
+    linkedVisualCorrelation: z.enum(["check_id", "time_window"]).nullable().optional(),
+    diffSummary: monitorChangeDiffSummarySchema,
+  })
+  .passthrough();
+
+export const monitorDiffSchema = z
+  .object({
+    changeId: z.string(),
+    previousContent: z.string(),
+    currentContent: z.string(),
+    diffHtml: z.string(),
+    truncated: z.boolean().optional(),
+    originalPreviousLength: z.number().int().min(0).optional(),
+    originalCurrentLength: z.number().int().min(0).optional(),
+    linkedVisualCaptureId: z.string().nullable().optional(),
+    linkedVisualCorrelation: z.enum(["check_id", "time_window"]).nullable().optional(),
+  })
+  .passthrough();
+
+export const monitorVisualCaptureSchema = z
+  .object({
+    id: z.string(),
+    monitorId: z.string(),
+    checkId: z.string().nullable(),
+    capturedAt: z.string(),
+    widthPx: z.number().int().min(0),
+    heightPx: z.number().int().min(0),
+    viewportWidth: z.number().int().min(0),
+    viewportHeight: z.number().int().min(0),
+    fullPage: z.boolean(),
+    perceptualHashHex: z.string().nullable(),
+    dhashAlgo: z.string(),
+  })
+  .passthrough();
+
+const monitorVisualChangeDiffSummarySchema = z
+  .object({
+    hammingDistance: z.number().int().min(0).optional(),
+    similarityPercent: z.number().optional(),
+    perceptualHashAlgo: z.string().optional(),
+    similarityThresholdPercent: z.number().optional(),
+  })
+  .passthrough();
+
+export const monitorVisualChangeSchema = z
+  .object({
+    id: z.string(),
+    monitorId: z.string(),
+    detectedAt: z.string(),
+    previousCaptureId: z.string(),
+    currentCaptureId: z.string(),
+    diffSummary: monitorVisualChangeDiffSummarySchema,
+  })
+  .passthrough();
+
+export const monitorIncidentSchema = z
+  .object({
+    id: z.string(),
+    monitorId: z.string(),
+    capability: monitorCapabilityEnum,
+    type: z.enum([
+      "downtime",
+      "ssl_warning",
+      "ssl_critical",
+      "content_change",
+      "degraded",
+    ]),
+    startedAt: z.string(),
+    resolvedAt: z.string().nullable(),
+    durationSeconds: z.number().int().nullable(),
+    title: z.string(),
+    description: z.string(),
+  })
+  .passthrough();
+
+const sslChainEntrySchema = z
+  .object({
+    subject: z.string().optional(),
+    subjectDn: z.string().optional(),
+    issuer: z.string().optional(),
+    issuerDn: z.string().optional(),
+    validTo: z.string().optional(),
+    validFrom: z.string().optional(),
+  })
+  .passthrough();
+
+/** Raw shape from `GET /monitors/:id/ssl` — `normalizeMonitorSsl` post-processes. */
+export const monitorSslStatusSchema = z
+  .object({
+    issuer: z.unknown().optional(),
+    subject: z.unknown().optional(),
+    validFrom: z.unknown().optional(),
+    validTo: z.unknown().optional(),
+    expiryDate: z.unknown().optional(),
+    daysRemaining: z.number().nullable().optional(),
+    isExpiringSoon: z.boolean().optional(),
+    isExpired: z.boolean().optional(),
+    subjectAlternativeNames: z.array(z.unknown()).optional(),
+    chainSummary: z.array(sslChainEntrySchema).optional(),
+    lastCheckedAt: z.string().nullable().optional(),
+    severityLevel: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * SSE payload from `/api/v1/monitors/live`. Heartbeats omit `id`; the consumer
+ * silently drops anything that doesn't match this shape (must keep the stream
+ * open even on a single malformed frame).
+ */
+export const monitorLiveEventSchema = z
+  .object({
+    id: z.string().optional(),
+    type: z.string().optional(),
+    event: z.string().optional(),
+  })
+  .passthrough();
+
+export type MonitorResponseInput = z.infer<typeof monitorResponseSchema>;
+export type MonitorListMetaInput = z.infer<typeof monitorListMetaSchema>;
+export type MonitorCheckInput = z.infer<typeof monitorCheckSchema>;
+export type MonitorBaselineInput = z.infer<typeof monitorBaselineSchema>;
+export type MonitorTimeSeriesDataInput = z.infer<typeof monitorTimeSeriesDataSchema>;
+export type MonitorTimeSeriesPayloadInput = z.infer<typeof monitorTimeSeriesPayloadSchema>;
+export type MonitorUptimeSummaryInput = z.infer<typeof monitorUptimeSummarySchema>;
+export type MonitorChangeInput = z.infer<typeof monitorChangeSchema>;
+export type MonitorDiffInput = z.infer<typeof monitorDiffSchema>;
+export type MonitorVisualCaptureInput = z.infer<typeof monitorVisualCaptureSchema>;
+export type MonitorVisualChangeInput = z.infer<typeof monitorVisualChangeSchema>;
+export type MonitorIncidentInput = z.infer<typeof monitorIncidentSchema>;
+export type MonitorSslStatusInput = z.infer<typeof monitorSslStatusSchema>;
+export type MonitorLiveEventInput = z.infer<typeof monitorLiveEventSchema>;

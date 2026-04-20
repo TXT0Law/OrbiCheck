@@ -9,6 +9,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useMonitorChecks } from "@/lib/hooks/use-monitors";
+import { formatMilliseconds } from "@/lib/utils/monitor-formatters";
 
 import { MonitorCheckErrorBadge } from "./monitor-check-error-badge";
 
@@ -30,8 +31,8 @@ export function MonitorChecksTable({ monitorId }: MonitorChecksTableProps) {
   }
 
   return (
-    <div className="rounded-md border border-zinc-200 dark:border-zinc-800">
-      <Table>
+    <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800">
+      <Table className="min-w-[640px]">
         <TableHeader>
           <TableRow>
             <TableHead>Time</TableHead>
@@ -50,7 +51,7 @@ export function MonitorChecksTable({ monitorId }: MonitorChecksTableProps) {
               <TableCell className="text-foreground">{c.success ? "Yes" : "No"}</TableCell>
               <TableCell className="tabular-nums text-foreground">{c.statusCode ?? "—"}</TableCell>
               <TableCell className="tabular-nums text-foreground">
-                {Math.round(c.responseTimeMs)} ms
+                {formatMilliseconds(c.responseTimeMs)}
               </TableCell>
               <TableCell>
                 <MonitorCheckErrorBadge errorType={c.errorType} />
