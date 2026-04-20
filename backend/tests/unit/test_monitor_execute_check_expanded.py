@@ -186,19 +186,28 @@ async def test_content_baseline_creates_snapshot(
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_content_forces_get_when_monitor_head(
+async def test_content_change_with_head_method_fails_fast(
     respx_mock: respx.MockRouter,
     public_example_dns,
 ) -> None:
+    """HEAD has no body to hash; content_change must fail fast (Bug 3)."""
     mid = uuid4()
     html = "<p>x</p>"
     mon = _content_mon(mid, last_hash=None, http_method="HEAD")
     db, _ = _db_for_execute(mon)
-    route = respx_mock.get("https://example.com/").mock(
+    get_route = respx_mock.get("https://example.com/").mock(
         return_value=httpx.Response(200, text=html)
     )
-    await execute_check(mid, db, redis=None)
-    assert route.called
+    head_route = respx_mock.head("https://example.com/").mock(
+        return_value=httpx.Response(200)
+    )
+    check = await execute_check(mid, db, redis=None)
+    assert check is not None
+    assert check.success is False
+    assert check.error_type == CheckErrorType.UNKNOWN
+    assert "HEAD" in (check.error_message or "")
+    assert not get_route.called
+    assert not head_route.called
 
 
 @pytest.mark.asyncio

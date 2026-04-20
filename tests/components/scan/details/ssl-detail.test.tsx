@@ -169,4 +169,48 @@ describe("SslDetail", () => {
     expect(screen.getByText("A")).toBeInTheDocument();
     expect(screen.getAllByText(/example\.com/).length).toBeGreaterThan(0);
   });
+
+  it("wraps long subject and issuer DN strings inside the chain table", () => {
+    const longSubject =
+      "CN=very-long-subject-distinguished-name-for-overflow-test.example.com, O=Example Corporation Long Name LLC, OU=Information Security Operations Center Worldwide, L=San Francisco, ST=California, C=US";
+    const longIssuer =
+      "CN=Example Public Trust ECC SHA384 Extended Validation Server CA G3, O=Example Public Trust Services LLC, C=US";
+
+    render(
+      <SslDetail
+        data={{
+          ...FULL_DATA,
+          chainDetails: [
+            { subject: longSubject, issuer: longIssuer, order: 0, isTrusted: true },
+          ],
+        }}
+      />,
+    );
+
+    const subjectCell = screen.getByText(longSubject);
+    expect(subjectCell.className).toMatch(/break-all/);
+    expect(subjectCell.className).toMatch(/max-w-\[/);
+
+    const issuerCell = screen.getByText(longIssuer);
+    expect(issuerCell.className).toMatch(/break-all/);
+    expect(issuerCell.className).toMatch(/max-w-\[/);
+  });
+
+  it("wraps long extension values without overflowing the card", () => {
+    const longBasicConstraints =
+      "CA:FALSE, pathlen:0, very-long-additional-attribute-payload-that-shoud-wrap-within-the-card-bounding-box-for-mobile-viewports-0123456789abcdef0123456789abcdef";
+
+    render(
+      <SslDetail
+        data={{
+          ...FULL_DATA,
+          extensions: { basicConstraints: longBasicConstraints },
+        }}
+      />,
+    );
+
+    const cell = screen.getByText(longBasicConstraints);
+    expect(cell.className).toMatch(/break-all/);
+    expect(cell.className).toMatch(/max-w-\[/);
+  });
 });

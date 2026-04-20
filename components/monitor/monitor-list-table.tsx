@@ -11,6 +11,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import {
+  formatMilliseconds,
+  formatPercent,
+} from "@/lib/utils/monitor-formatters";
 import type { Monitor } from "@/shared/types/monitor";
 import { CAPABILITY_CONFIG } from "@/shared/constants/monitor";
 
@@ -21,16 +25,6 @@ interface MonitorListTableProps {
   monitors: Monitor[];
 }
 
-function formatLatency(ms: number | null) {
-  if (ms == null) return "—";
-  return `${Math.round(ms)} ms`;
-}
-
-function formatUptime(pct: number | null) {
-  if (pct == null) return "—";
-  return `${pct.toFixed(1)}%`;
-}
-
 function formatWhen(iso: string | null) {
   if (!iso) return "Never";
   const d = new Date(iso);
@@ -39,8 +33,8 @@ function formatWhen(iso: string | null) {
 
 export function MonitorListTable({ monitors }: MonitorListTableProps) {
   return (
-    <div className="rounded-lg border-2 border-zinc-200 bg-zinc-50/50 dark:border-zinc-700 dark:bg-zinc-950/30">
-      <Table>
+    <div className="overflow-x-auto rounded-lg border-2 border-zinc-200 bg-zinc-50/50 dark:border-zinc-700 dark:bg-zinc-950/30">
+      <Table className="min-w-[720px]">
         <TableHeader>
           <TableRow className="border-b-2 border-zinc-200 hover:bg-transparent dark:border-zinc-700">
             <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
@@ -80,8 +74,10 @@ export function MonitorListTable({ monitors }: MonitorListTableProps) {
                   {m.displayName}
                 </Link>
               </TableCell>
-              <TableCell className="max-w-[220px] truncate font-mono text-sm text-zinc-700 dark:text-zinc-300">
-                {m.url}
+              <TableCell className="font-mono text-sm text-zinc-700 dark:text-zinc-300">
+                <span className="break-all" title={m.url}>
+                  {m.url}
+                </span>
               </TableCell>
               <TableCell>
                 <div className="flex max-w-[200px] flex-wrap gap-1">
@@ -99,9 +95,9 @@ export function MonitorListTable({ monitors }: MonitorListTableProps) {
                 {formatWhen(m.lastCheckAt)}
               </TableCell>
               <TableCell className="text-zinc-700 dark:text-zinc-300">
-                {formatUptime(m.uptimePercentage)}
+                {formatPercent(m.uptimePercentage, 1)}
               </TableCell>
-              <TableCell>{formatLatency(m.lastResponseTimeMs)}</TableCell>
+              <TableCell>{formatMilliseconds(m.lastResponseTimeMs)}</TableCell>
               <TableCell className="text-right">
                 <MonitorActionsDropdown monitor={m} />
               </TableCell>

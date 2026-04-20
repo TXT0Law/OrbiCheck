@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMonitorChecks } from "@/lib/hooks/use-monitors";
+import { formatPercent } from "@/lib/utils/monitor-formatters";
 import type { CheckErrorType } from "@/shared/types/monitor";
 
 const ERROR_TYPE_LABELS: Record<CheckErrorType, string> = {
@@ -68,8 +69,9 @@ export function MonitorFailureDistribution({ monitorId }: MonitorFailureDistribu
       </CardHeader>
       <CardContent className="space-y-3">
         {sorted.map(([type, count]) => {
-          const pctNum = (count / total) * 100;
-          const pct = pctNum.toFixed(1);
+          const pctNum = total > 0 ? (count / total) * 100 : 0;
+          const pctLabel = formatPercent(pctNum, 1);
+          const fillWidth = Number.isFinite(pctNum) ? Math.max(0, Math.min(100, pctNum)) : 0;
           const label = ERROR_TYPE_LABELS[type as CheckErrorType] ?? type;
           const color = ERROR_TYPE_COLORS[type as CheckErrorType] ?? "bg-gray-400";
           return (
@@ -77,11 +79,14 @@ export function MonitorFailureDistribution({ monitorId }: MonitorFailureDistribu
               <div className="flex items-center justify-between text-sm">
                 <span className="text-zinc-900 dark:text-white">{label}</span>
                 <span className="text-muted-foreground">
-                  {count} ({pct}%)
+                  {count} ({pctLabel})
                 </span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                <div className={`h-full rounded-full ${color}`} style={{ width: `${pctNum}%` }} />
+                <div
+                  className={`h-full rounded-full ${color}`}
+                  style={{ width: `${fillWidth}%` }}
+                />
               </div>
             </div>
           );

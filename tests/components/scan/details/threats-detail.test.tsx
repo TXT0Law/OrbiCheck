@@ -30,4 +30,22 @@ describe("ThreatsDetail", () => {
       screen.getByText("No threat intelligence sources were checked."),
     ).toBeInTheDocument();
   });
+
+  it("wraps long detail strings inside the source table", () => {
+    const longDetail =
+      "Phishing campaign 2025-Q4 targeting financial institutions; reported via PhishTank with reference https://phishtank.org/phish_detail.php?phish_id=1234567890&hash=deadbeef";
+
+    render(
+      <ThreatsDetail
+        data={{
+          entries: [{ source: "phishTank", listed: true, detail: longDetail }],
+          listedCount: 1,
+        }}
+      />,
+    );
+
+    const cell = screen.getByText(longDetail);
+    expect(cell.className).toMatch(/break-words/);
+    expect(cell.className).toMatch(/max-w-\[/);
+  });
 });

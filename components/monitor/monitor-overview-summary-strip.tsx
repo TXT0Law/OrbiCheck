@@ -12,6 +12,12 @@ import {
 
 import { TimeAgo } from "@/components/common/time-ago";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  formatIntervalSeconds,
+  formatMilliseconds,
+  formatPercent,
+  NO_VALUE_PLACEHOLDER,
+} from "@/lib/utils/monitor-formatters";
 
 import { useMonitorDetail } from "./monitor-detail-context";
 import { MonitorStatusBadge } from "./monitor-status-badge";
@@ -43,18 +49,13 @@ function MetricItem({ icon, label, value, subtext }: MetricItemProps) {
 export function MonitorOverviewSummaryStrip() {
   const { monitor } = useMonitorDetail();
 
-  const uptimeDisplay =
-    monitor.uptimePercentage !== null ? `${monitor.uptimePercentage.toFixed(2)}%` : "—";
-
-  const latencyDisplay =
-    monitor.avgResponseTimeMs !== null ? `${Math.round(monitor.avgResponseTimeMs)}ms` : "—";
-
-  const sslDisplay = monitor.sslExpiryDays !== null ? `${monitor.sslExpiryDays} days` : "—";
-
-  const intervalDisplay =
-    monitor.intervalSeconds < 60
-      ? `${monitor.intervalSeconds}s`
-      : `${monitor.intervalSeconds / 60}m`;
+  const uptimeDisplay = formatPercent(monitor.uptimePercentage);
+  const latencyDisplay = formatMilliseconds(monitor.avgResponseTimeMs);
+  const sslDisplay =
+    typeof monitor.sslExpiryDays === "number" && Number.isFinite(monitor.sslExpiryDays)
+      ? `${monitor.sslExpiryDays} days`
+      : NO_VALUE_PLACEHOLDER;
+  const intervalDisplay = formatIntervalSeconds(monitor.intervalSeconds);
 
   return (
     <Card>

@@ -78,4 +78,32 @@ describe("IpDetail", () => {
 
     expect(screen.getByText("1.2.3.4")).toBeInTheDocument();
   });
+
+  it("wraps long IP intelligence values without overflowing the card", () => {
+    const longHost =
+      "us-west-2.compute.internal.very-long-hosting-provider-fqdn.example-cloud.com";
+
+    render(
+      <IpDetail
+        data={{
+          ip: "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+          asn: "AS15169 Google LLC, Mountain View, CA, US",
+          isp: "Example ISP with a long descriptive marketing label",
+          org: "Example Org",
+          country: "United States",
+          countryCode: "US",
+          city: "Mountain View",
+          region: "California",
+          lat: 0,
+          lon: 0,
+          hostingProvider: longHost,
+          isHosting: true,
+          ipType: "datacenter",
+        }}
+      />,
+    );
+
+    const hostingCell = screen.getByText(longHost);
+    expect(hostingCell.className).toMatch(/break-words/);
+  });
 });

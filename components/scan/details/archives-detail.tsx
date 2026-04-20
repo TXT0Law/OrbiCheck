@@ -97,7 +97,8 @@ export function ArchivesDetail({ data }: ArchivesDetailProps) {
                         href={snapshot.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block max-w-[460px] truncate text-zinc-600 underline underline-offset-2 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
+                        title={snapshot.url}
+                        className="block max-w-[460px] break-all text-zinc-600 underline underline-offset-2 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
                       >
                         {snapshot.url}
                       </a>

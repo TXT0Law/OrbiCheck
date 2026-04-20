@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useMonitorChecks } from "@/lib/hooks/use-monitors";
+import { formatMilliseconds } from "@/lib/utils/monitor-formatters";
 import { CAPABILITY_CONFIG } from "@/shared/constants/monitor";
 import type { MonitorCapability, MonitorCheck } from "@/shared/types/monitor";
 
@@ -86,7 +87,7 @@ export function MonitorRecentActivity({ monitorId }: { monitorId: string }) {
         </Link>
       </CardHeader>
       <CardContent className="overflow-x-auto">
-        <Table>
+        <Table className="min-w-[640px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">Status</TableHead>
@@ -116,7 +117,7 @@ export function MonitorRecentActivity({ monitorId }: { monitorId: string }) {
                     </span>
                   ) : null}
                   <span className="font-medium tabular-nums text-foreground">
-                    {Math.round(check.responseTimeMs)} ms
+                    {formatMilliseconds(check.responseTimeMs)}
                   </span>
                 </TableCell>
                 <TableCell>

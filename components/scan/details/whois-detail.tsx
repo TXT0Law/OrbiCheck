@@ -53,11 +53,15 @@ export function WhoisDetail({ data }: WhoisDetailProps) {
             </TableRow>
             <TableRow>
               <TableCell className="font-medium">Nameservers</TableCell>
-              <TableCell>{nameservers.join(", ") || "-"}</TableCell>
+              <TableCell className="max-w-[28rem] whitespace-normal break-words">
+                {nameservers.join(", ") || "-"}
+              </TableCell>
             </TableRow>
             <TableRow>
               <TableCell className="font-medium">Domain Status</TableCell>
-              <TableCell>{domainStatus.join(", ") || "-"}</TableCell>
+              <TableCell className="max-w-[28rem] whitespace-normal break-words">
+                {domainStatus.join(", ") || "-"}
+              </TableCell>
             </TableRow>
           </TableBody>
         </Table>

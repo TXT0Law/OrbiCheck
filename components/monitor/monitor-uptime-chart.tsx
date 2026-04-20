@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMonitorPeriod } from "@/lib/hooks/use-monitor-period";
 import { useMonitorTimeSeries } from "@/lib/hooks/use-monitors";
+import { formatTooltipPercent } from "@/lib/utils/monitor-formatters";
 
 interface MonitorUptimeChartProps {
   monitorId: string;
@@ -76,7 +77,7 @@ export function MonitorUptimeChart({ monitorId }: MonitorUptimeChartProps) {
               labelFormatter={(label) =>
                 typeof label === "string" ? new Date(label).toLocaleString() : String(label)
               }
-              formatter={(value) => [`${Number(value)}%`, "Up"]}
+              formatter={(value) => [formatTooltipPercent(value), "Up"]}
             />
             <Area
               type="stepAfter"

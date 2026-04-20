@@ -48,4 +48,38 @@ describe("WhoisDetail", () => {
 
     expect(screen.getAllByText("—").length).toBeGreaterThan(1);
   });
+
+  it("wraps long nameserver and domain status strings inside table cells", () => {
+    const longNameservers = Array.from(
+      { length: 8 },
+      (_, i) => `ns${i + 1}.very-long-registrar-hostname-example-${i + 1}.com`,
+    );
+    const longStatus = [
+      "clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
+      "serverTransferProhibited https://icann.org/epp#serverTransferProhibited",
+    ];
+
+    render(
+      <WhoisDetail
+        data={{
+          registrar: "MarkMonitor Inc.",
+          createdAt: "1997-09-15",
+          updatedAt: "2024-09-09",
+          expiresAt: "2028-09-14",
+          nameservers: longNameservers,
+          domainStatus: longStatus,
+        }}
+      />,
+    );
+
+    const nsCell = screen.getByText(longNameservers.join(", "));
+    expect(nsCell).toBeInTheDocument();
+    expect(nsCell.className).toMatch(/break-words/);
+    expect(nsCell.className).toMatch(/max-w-\[/);
+
+    const statusCell = screen.getByText(longStatus.join(", "));
+    expect(statusCell).toBeInTheDocument();
+    expect(statusCell.className).toMatch(/break-words/);
+    expect(statusCell.className).toMatch(/max-w-\[/);
+  });
 });

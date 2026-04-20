@@ -49,7 +49,10 @@ export function DnsDetail({ data }: DnsDetailProps) {
               >
                 {values.length > 0 ? (
                   values.map((value) => (
-                    <div key={value} className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+                    <div
+                      key={value}
+                      className="min-w-0 break-all rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+                    >
                       {value}
                     </div>
                   ))

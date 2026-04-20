@@ -1,3 +1,20 @@
+import { z } from "zod";
+
+import {
+  monitorBaselineSchema,
+  monitorChangeSchema,
+  monitorCheckSchema,
+  monitorDiffSchema,
+  monitorIncidentSchema,
+  monitorListMetaSchema,
+  monitorLiveEventSchema,
+  monitorResponseSchema,
+  monitorSslStatusSchema,
+  monitorTimeSeriesPayloadSchema,
+  monitorUptimeSummarySchema,
+  monitorVisualCaptureSchema,
+  monitorVisualChangeSchema,
+} from "@/shared/schemas/monitor";
 import type {
   Monitor,
   MonitorBaseline,
@@ -37,6 +54,67 @@ import {
 } from "./monitors-mock";
 
 const BASE = "/monitors";
+
+const INVALID_RESPONSE_STATUS = 502;
+const INVALID_RESPONSE_CODE = "INVALID_RESPONSE_SHAPE";
+
+/**
+ * Parse `data` against `schema` and throw a structured `ApiError` on failure.
+ * Centralizes boundary validation so every endpoint surfaces the same error
+ * code (`INVALID_RESPONSE_SHAPE`) and the React Query layer can render a
+ * consistent toast instead of letting `NaN` / `undefined` leak into UI state.
+ */
+function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown, context: string): T {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    throw new ApiError(`Invalid ${context} response from server`, {
+      status: INVALID_RESPONSE_STATUS,
+      code: INVALID_RESPONSE_CODE,
+      details: result.error.issues,
+    });
+  }
+  return result.data;
+}
+
+/**
+ * Validate a single object payload then re-narrow to the strict shared
+ * TypeScript type. Zod's inferred type tolerates passthrough keys; the strict
+ * `T` parameter lets callers stay typed without sprinkling explicit `as`
+ * assertions throughout the API client (which would defeat the boundary
+ * validation contract in `lib/AGENTS.md`).
+ */
+function parseSingle<T>(
+  schema: z.ZodTypeAny,
+  raw: unknown,
+  context: string,
+): T {
+  const validated = parseOrThrow(schema as z.ZodType<unknown>, raw, context);
+  return validated as unknown as T;
+}
+
+function parseList<T>(
+  itemSchema: z.ZodTypeAny,
+  raw: unknown,
+  context: string,
+): T[] {
+  const validated = parseOrThrow(
+    z.array(itemSchema as z.ZodType<unknown>),
+    raw,
+    context,
+  );
+  return validated as unknown as T[];
+}
+
+/**
+ * Internal narrow that re-types runtime-validated data into the strict shared
+ * TypeScript shape. Use ONLY after the value has already been validated by a
+ * Zod schema (`parseOrThrow` / `parseSingle` / `parseList`); never on raw
+ * `apiClient` payloads. Centralizing the assertion keeps `lib/AGENTS.md` rule
+ * #5 honest while avoiding scattered explicit assertions at call sites.
+ */
+function castValidated<T>(x: unknown): T {
+  return x as T;
+}
 
 function isMonitorMockMode(): boolean {
   return process.env.NEXT_PUBLIC_MONITOR_USE_MOCK === "1";
@@ -97,12 +175,12 @@ function reconcileMonitorEnabledState(m: Record<string, unknown>): void {
   }
 }
 
-export function normalizeMonitor(m: Monitor | Record<string, unknown>): Monitor {
+export function normalizeMonitor(m: unknown): Monitor {
   const raw =
     typeof m === "object" && m !== null ? (m as Record<string, unknown>) : {};
   const merged = applySnakeCaseAliases(raw);
   reconcileMonitorEnabledState(merged);
-  const base = merged as unknown as Monitor;
+  const base = castValidated<Monitor>(merged);
 
   const capabilities =
     base.capabilities ??
@@ -127,9 +205,14 @@ export function normalizeMonitor(m: Monitor | Record<string, unknown>): Monitor 
   };
 }
 
+function parseMonitor(raw: unknown): Monitor {
+  return normalizeMonitor(parseOrThrow(monitorResponseSchema, raw, "monitor"));
+}
+
 function readMeta(res: object): MonitorListMeta | undefined {
-  if ("meta" in res && res.meta && typeof res.meta === "object") {
-    return res.meta as MonitorListMeta;
+  if ("meta" in res && res.meta !== undefined && res.meta !== null) {
+    const result = monitorListMetaSchema.safeParse(res.meta);
+    if (result.success) return result.data;
   }
   return undefined;
 }
@@ -163,9 +246,10 @@ export async function listMonitors(params?: {
   if (params?.search) query.set("search", params.search);
   if (params?.page) query.set("page", String(params.page));
   if (params?.limit) query.set("limit", String(params.limit));
-  const res = await apiClient.get<Monitor[]>(`${BASE}?${query}`);
+  const res = await apiClient.get<unknown>(`${BASE}?${query}`);
+  const list = parseList<unknown>(monitorResponseSchema, res.data, "monitor list");
   return {
-    data: (res.data as Monitor[]).map(normalizeMonitor),
+    data: list.map(normalizeMonitor),
     meta: readMeta(res as object),
   };
 }
@@ -176,8 +260,8 @@ export async function getMonitor(id: string): Promise<Monitor> {
     if (!m) throw new Error("Monitor not found");
     return normalizeMonitor(m);
   }
-  const { data } = await apiClient.get<Monitor>(`${BASE}/${id}`);
-  return normalizeMonitor(data as Monitor);
+  const { data } = await apiClient.get<unknown>(`${BASE}/${id}`);
+  return parseMonitor(data);
 }
 
 export async function createMonitor(data: MonitorCreateRequest): Promise<Monitor> {
@@ -186,8 +270,8 @@ export async function createMonitor(data: MonitorCreateRequest): Promise<Monitor
     MOCK_MONITORS.unshift(m);
     return m;
   }
-  const { data: created } = await apiClient.post<Monitor>(BASE, data);
-  return normalizeMonitor(created as Monitor);
+  const { data: created } = await apiClient.post<unknown>(BASE, data);
+  return parseMonitor(created);
 }
 
 export async function updateMonitor(
@@ -224,8 +308,8 @@ export async function updateMonitor(
     MOCK_MONITORS[idx] = normalizeMonitor(next);
     return MOCK_MONITORS[idx]!;
   }
-  const { data: updated } = await apiClient.put<Monitor>(`${BASE}/${id}`, data);
-  return normalizeMonitor(updated as Monitor);
+  const { data: updated } = await apiClient.put<unknown>(`${BASE}/${id}`, data);
+  return parseMonitor(updated);
 }
 
 export async function deleteMonitor(id: string): Promise<void> {
@@ -247,8 +331,8 @@ export async function triggerCheck(id: string): Promise<MonitorCheck> {
     if (!m) throw new Error("Monitor not found");
     return mockChecks(id)[0]!;
   }
-  const { data } = await apiClient.post<MonitorCheck>(`${BASE}/${id}/check`);
-  return normalizeCheck(data as MonitorCheck);
+  const { data } = await apiClient.post<unknown>(`${BASE}/${id}/check`);
+  return normalizeCheck(parseSingle<MonitorCheck>(monitorCheckSchema, data, "monitor check"));
 }
 
 /**
@@ -275,9 +359,10 @@ export async function getMonitorChecks(
   if (params?.sort) query.set("sort", params.sort);
   if (params?.page) query.set("page", String(params.page));
   if (params?.limit) query.set("limit", String(params.limit));
-  const res = await apiClient.get<MonitorCheck[]>(`${BASE}/${id}/checks?${query}`);
+  const res = await apiClient.get<unknown>(`${BASE}/${id}/checks?${query}`);
+  const rows = parseList<MonitorCheck>(monitorCheckSchema, res.data, "monitor check list");
   return {
-    data: (res.data as MonitorCheck[]).map(normalizeCheck),
+    data: rows.map(normalizeCheck),
     meta: readMeta(res as object),
   };
 }
@@ -297,10 +382,9 @@ export async function getMonitorContentBaseline(
       isBaseline: true,
     };
   }
-  const { data } = await apiClient.get<MonitorBaseline | null>(
-    `${BASE}/${id}/content/baseline`
-  );
-  return data as MonitorBaseline | null;
+  const { data } = await apiClient.get<unknown>(`${BASE}/${id}/content/baseline`);
+  if (data === null || data === undefined) return null;
+  return parseSingle<MonitorBaseline>(monitorBaselineSchema, data, "monitor baseline");
 }
 
 function normalizeSeriesPayload(
@@ -336,10 +420,13 @@ export async function getMonitorTimeSeries(
   if (isMonitorMockMode()) {
     return normalizeSeriesPayload(period, mockSeries(period));
   }
-  const { data } = await apiClient.get<MonitorTimeSeriesData | MonitorTimeSeriesPoint[]>(
-    `${BASE}/${id}/series?period=${period}`
+  const { data } = await apiClient.get<unknown>(`${BASE}/${id}/series?period=${period}`);
+  const parsed = parseSingle<MonitorTimeSeriesData | MonitorTimeSeriesPoint[]>(
+    monitorTimeSeriesPayloadSchema,
+    data,
+    "monitor time series",
   );
-  return normalizeSeriesPayload(period, data);
+  return normalizeSeriesPayload(period, parsed);
 }
 
 export async function getMonitorUptimeSummary(
@@ -347,10 +434,12 @@ export async function getMonitorUptimeSummary(
   period: "24h" | "7d" | "30d" | "90d"
 ): Promise<MonitorUptimeSummary> {
   if (isMonitorMockMode()) return mockUptimeSummary(period);
-  const { data } = await apiClient.get<MonitorUptimeSummary>(
-    `${BASE}/${id}/uptime?period=${period}`
+  const { data } = await apiClient.get<unknown>(`${BASE}/${id}/uptime?period=${period}`);
+  return parseSingle<MonitorUptimeSummary>(
+    monitorUptimeSummarySchema,
+    data,
+    "monitor uptime summary",
   );
-  return data;
 }
 
 export async function getMonitorChanges(
@@ -383,9 +472,10 @@ export async function getMonitorChanges(
   if (params?.period) query.set("period", params.period);
   if (params?.category) query.set("category", params.category);
   if (params?.sort) query.set("sort", params.sort);
-  const res = await apiClient.get<MonitorChange[]>(`${BASE}/${id}/changes?${query}`);
+  const res = await apiClient.get<unknown>(`${BASE}/${id}/changes?${query}`);
+  const rows = parseList<MonitorChange>(monitorChangeSchema, res.data, "monitor change list");
   return {
-    data: res.data,
+    data: rows,
     meta: readMeta(res as object),
   };
 }
@@ -412,10 +502,13 @@ export async function getMonitorVisualCaptures(
   if (params?.limit) query.set("limit", String(params.limit));
   if (params?.period) query.set("period", params.period);
   if (params?.sort) query.set("sort", params.sort);
-  const res = await apiClient.get<MonitorVisualCapture[]>(
-    `${BASE}/${id}/visual/captures?${query}`
+  const res = await apiClient.get<unknown>(`${BASE}/${id}/visual/captures?${query}`);
+  const rows = parseList<MonitorVisualCapture>(
+    monitorVisualCaptureSchema,
+    res.data,
+    "monitor visual captures",
   );
-  return { data: res.data, meta: readMeta(res as object) };
+  return { data: rows, meta: readMeta(res as object) };
 }
 
 export async function getMonitorVisualChanges(
@@ -435,10 +528,13 @@ export async function getMonitorVisualChanges(
   if (params?.limit) query.set("limit", String(params.limit));
   if (params?.period) query.set("period", params.period);
   if (params?.sort) query.set("sort", params.sort);
-  const res = await apiClient.get<MonitorVisualChange[]>(
-    `${BASE}/${id}/visual/changes?${query}`
+  const res = await apiClient.get<unknown>(`${BASE}/${id}/visual/changes?${query}`);
+  const rows = parseList<MonitorVisualChange>(
+    monitorVisualChangeSchema,
+    res.data,
+    "monitor visual changes",
   );
-  return { data: res.data, meta: readMeta(res as object) };
+  return { data: rows, meta: readMeta(res as object) };
 }
 
 export async function getMonitorDiff(
@@ -455,11 +551,11 @@ export async function getMonitorDiff(
     }
     return mockDiff(changeId);
   }
-  const { data } = await apiClient.get<MonitorDiff>(
+  const { data } = await apiClient.get<unknown>(
     `${BASE}/${monitorId}/changes/${changeId}/diff`,
     { timeout: 180_000 }
   );
-  return data;
+  return parseSingle<MonitorDiff>(monitorDiffSchema, data, "monitor diff");
 }
 
 export async function getMonitorIncidents(
@@ -473,9 +569,10 @@ export async function getMonitorIncidents(
   const query = new URLSearchParams();
   if (params?.page) query.set("page", String(params.page));
   if (params?.limit) query.set("limit", String(params.limit));
-  const res = await apiClient.get<MonitorIncident[]>(`${BASE}/${id}/incidents?${query}`);
+  const res = await apiClient.get<unknown>(`${BASE}/${id}/incidents?${query}`);
+  const rows = parseList<MonitorIncident>(monitorIncidentSchema, res.data, "monitor incidents");
   return {
-    data: res.data as MonitorIncident[],
+    data: rows,
     meta: readMeta(res as object),
   };
 }
@@ -529,8 +626,13 @@ function normalizeMonitorSsl(raw: Record<string, unknown>): MonitorSslStatus {
 
 export async function getMonitorSsl(id: string): Promise<MonitorSslStatus> {
   if (isMonitorMockMode()) return mockSsl();
-  const { data } = await apiClient.get<Record<string, unknown>>(`${BASE}/${id}/ssl`);
-  return normalizeMonitorSsl(data ?? {});
+  const { data } = await apiClient.get<unknown>(`${BASE}/${id}/ssl`);
+  const parsed = parseOrThrow(
+    monitorSslStatusSchema,
+    data ?? {},
+    "monitor ssl status"
+  );
+  return normalizeMonitorSsl(parsed as Record<string, unknown>);
 }
 
 export function subscribeMonitorUpdates(
@@ -538,17 +640,21 @@ export function subscribeMonitorUpdates(
 ): EventSource {
   const es = new EventSource("/api/v1/monitors/live", { withCredentials: true });
   es.onmessage = (event) => {
+    let raw: unknown;
     try {
-      const data = JSON.parse(event.data) as {
-        id?: string;
-        type?: string;
-        event?: string;
-      };
-      if (data.type === "heartbeat" || !data.id) return;
-      onUpdate({ id: data.id, event: data.event });
-    } catch {
-      /* ignore */
+      raw = JSON.parse(event.data);
+    } catch (err) {
+      // Malformed JSON frame: drop silently to keep stream alive.
+      void err;
+      return;
     }
+    const result = monitorLiveEventSchema.safeParse(raw);
+    if (!result.success) {
+      return;
+    }
+    const payload = result.data;
+    if (payload.type === "heartbeat" || !payload.id) return;
+    onUpdate({ id: payload.id, event: payload.event });
   };
   return es;
 }

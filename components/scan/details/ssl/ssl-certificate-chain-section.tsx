@@ -25,9 +25,9 @@ export function SslCertificateChainSection({ data }: { data: SslCheckResult }) {
           {data.chain && data.chain.length > 0 ? (
             <div className="space-y-2">
               {data.chain.map((cert, i) => (
-                <div key={`${cert}-${i}`} className="flex items-center gap-2">
-                  <Badge variant="outline">{i}</Badge>
-                  <span className="text-sm">{cert}</span>
+                <div key={`${cert}-${i}`} className="flex items-start gap-2">
+                  <Badge variant="outline" className="shrink-0">{i}</Badge>
+                  <span className="min-w-0 break-all text-sm">{cert}</span>
                 </div>
               ))}
             </div>
@@ -62,7 +62,7 @@ export function SslCertificateChainSection({ data }: { data: SslCheckResult }) {
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -76,8 +76,8 @@ export function SslCertificateChainSection({ data }: { data: SslCheckResult }) {
             {chainDetails.map((cert) => (
               <TableRow key={cert.order}>
                 <TableCell>{cert.order}</TableCell>
-                <TableCell className="font-mono text-sm">{cert.subject}</TableCell>
-                <TableCell className="font-mono text-sm">{cert.issuer}</TableCell>
+                <TableCell className="max-w-[28rem] break-all font-mono text-sm">{cert.subject}</TableCell>
+                <TableCell className="max-w-[28rem] break-all font-mono text-sm">{cert.issuer}</TableCell>
                 <TableCell>
                   {cert.isTrusted === undefined ? (
                     <Badge variant="outline">N/A</Badge>

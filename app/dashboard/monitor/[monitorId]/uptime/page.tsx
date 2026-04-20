@@ -31,7 +31,7 @@ function MonitorUptimeContent() {
   const td = getMonitorDetailMessages(lang);
   const { monitor } = useMonitorDetail();
   const { period } = useMonitorPeriod();
-  const { data: uptimeData } = useMonitorUptime(monitor.id, period);
+  const { data: uptimeData, isLoading: uptimeLoading } = useMonitorUptime(monitor.id, period);
 
   if (!monitor.enabledCapabilities.includes("uptime_only")) {
     return (
@@ -49,6 +49,10 @@ function MonitorUptimeContent() {
       <MonitorSloTargetBar
         currentUptime={uptimeData?.uptimePercentage ?? null}
         period={period}
+        isLoading={uptimeLoading}
+        // TODO(monitor-slo-target-config): wire `monitor.sloTargetPercent`
+        // (or equivalent capability config) here when the field lands; until
+        // then `DEFAULT_SLO_TARGET` (99.9) is the implicit fallback.
       />
 
       <MonitorUptimeSummary monitorId={monitor.id} />

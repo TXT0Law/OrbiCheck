@@ -85,7 +85,7 @@ export function EmailConfigDetail({ data }: EmailConfigDetailProps) {
               {sortedMxRecords.map((record) => (
                 <TableRow key={`${record.priority}-${record.host}`}>
                   <TableCell className="font-medium">{record.priority}</TableCell>
-                  <TableCell>{record.host}</TableCell>
+                  <TableCell className="max-w-[28rem] break-all">{record.host}</TableCell>
                 </TableRow>
               ))}
               {sortedMxRecords.length === 0 && (
@@ -110,7 +110,7 @@ export function EmailConfigDetail({ data }: EmailConfigDetailProps) {
               <p className="font-medium text-zinc-900 dark:text-zinc-100">SPF</p>
               <Badge className={`border-transparent ${getStatusClass(safe.spf.status)}`}>{safe.spf.status}</Badge>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">{safe.spf.raw}</p>
+            <p className="mt-1 break-all text-sm text-muted-foreground">{safe.spf.raw}</p>
           </div>
 
           <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
@@ -136,8 +136,8 @@ export function EmailConfigDetail({ data }: EmailConfigDetailProps) {
               <p className="font-medium text-zinc-900 dark:text-zinc-100">DMARC</p>
               <Badge className={`border-transparent ${getStatusClass(safe.dmarc.status)}`}>{safe.dmarc.status}</Badge>
             </div>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Policy: {safe.dmarc.policy}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{safe.dmarc.raw}</p>
+            <p className="mt-1 break-all text-sm text-zinc-600 dark:text-zinc-300">Policy: {safe.dmarc.policy}</p>
+            <p className="mt-1 break-all text-sm text-muted-foreground">{safe.dmarc.raw}</p>
           </div>
         </CardContent>
       </Card>

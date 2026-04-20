@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMonitorPeriod } from "@/lib/hooks/use-monitor-period";
 import { useMonitorTimeSeries } from "@/lib/hooks/use-monitors";
+import { formatTooltipMs } from "@/lib/utils/monitor-formatters";
 
 interface MonitorLatencyChartProps {
   monitorId: string;
@@ -75,7 +76,7 @@ export function MonitorLatencyChart({ monitorId }: MonitorLatencyChartProps) {
               labelFormatter={(label) =>
                 typeof label === "string" ? new Date(label).toLocaleString() : String(label)
               }
-              formatter={(value) => [`${Number(value)} ms`, "Latency"]}
+              formatter={(value) => [formatTooltipMs(value), "Latency"]}
             />
             <Line
               type="monotone"

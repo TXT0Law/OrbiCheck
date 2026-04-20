@@ -8,6 +8,7 @@ import uuid
 import redis as redis_sync
 import structlog
 from sqlalchemy import create_engine, delete, select
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -35,10 +36,10 @@ from app.services.visual_retention import _VisCap, plan_visual_capture_ids_to_de
 
 logger = structlog.get_logger(__name__)
 
-_dispatch_engine = None
+_dispatch_engine: Engine | None = None
 
 
-def _get_dispatch_engine():
+def _get_dispatch_engine() -> Engine:
     global _dispatch_engine
     if _dispatch_engine is None:
         database_url = settings.DATABASE_URL.strip()
@@ -153,7 +154,7 @@ def cleanup_monitor_snapshots() -> dict:
     total_visual_changes = 0
     monitors_with_content = 0
     monitors_with_visual = 0
-    with Session(_dispatch_engine) as db:
+    with Session(_get_dispatch_engine()) as db:
         rows = db.execute(select(Monitor.id, Monitor.enabled_capabilities)).all()
         monitor_ids = [
             r[0] for r in rows if r[1] and "content_change" in list(r[1])

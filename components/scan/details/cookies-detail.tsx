@@ -65,9 +65,9 @@ export function CookiesDetail({ data }: CookiesDetailProps) {
 
               return (
                 <TableRow key={`${cookie.name}-${cookie.domain}-${cookie.path}`}>
-                  <TableCell className="font-medium">{cookie.name}</TableCell>
-                  <TableCell>{cookie.domain}</TableCell>
-                  <TableCell>{cookie.path}</TableCell>
+                  <TableCell className="max-w-[20rem] break-all font-medium">{cookie.name}</TableCell>
+                  <TableCell className="max-w-[20rem] break-all">{cookie.domain}</TableCell>
+                  <TableCell className="max-w-[20rem] break-all">{cookie.path}</TableCell>
                   <TableCell>
                     {cookie.secure ? (
                       <>
@@ -111,7 +111,9 @@ export function CookiesDetail({ data }: CookiesDetailProps) {
                       {sameSiteLabel}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-zinc-600 dark:text-zinc-300">{cookie.expires}</TableCell>
+                  <TableCell className="max-w-[20rem] break-all text-zinc-600 dark:text-zinc-300">
+                    {cookie.expires}
+                  </TableCell>
                 </TableRow>
               );
             })}

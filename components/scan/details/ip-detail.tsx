@@ -27,9 +27,9 @@ export function IpDetail({ data }: IpDetailProps) {
             const v = data[row.key];
             const display = v == null || v === "" ? "—" : String(v);
             return (
-              <div key={row.key} className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+              <div key={row.key} className="min-w-0 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">{row.label}</p>
-                <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">{display}</p>
+                <p className="mt-1 break-words text-sm font-medium text-zinc-900 dark:text-zinc-100">{display}</p>
               </div>
             );
           })}
