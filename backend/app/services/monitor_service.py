@@ -33,6 +33,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.schemas.monitor import (
     CapabilityStatusSummary,
     ChainEntrySummary,
+    HttpAuthInputSchema,
+    HttpAuthSummary,
     MonitorBaselineResponse,
     MonitorChangeResponse,
     MonitorCheckResponse,
@@ -50,6 +52,11 @@ from app.api.v1.schemas.monitor import (
     MonitorVisualChangeResponse,
     dump_capabilities_patch,
     validate_capabilities_config,
+)
+from app.core.secrets import (
+    MonitorSecretConfigurationError,
+    decrypt_secret,
+    encrypt_secret,
 )
 from app.core.config import settings
 from app.db.session import async_session_factory
@@ -136,11 +143,112 @@ logger = structlog.get_logger(__name__)
 # no HTTP probe ran, the SSL probe outcome must drive `check.success`.
 SSL_ONLY_PROBE_REQUIRED: frozenset[str] = frozenset({"ssl_expiry"})
 
-# HTTP methods that conventionally carry a request body. When `content_change`
-# is enabled with one of these the user usually expects the body to be sent;
-# we currently lack a column for it (P1 follow-up — see TODO inside
-# `execute_check`) so we log a hint to surface the gap.
+# HTTP methods that conventionally carry a request body. Phase 1.1 added the
+# `Monitor.http_body` column so probes for these methods send the configured
+# payload as-is (size capped at the API boundary in monitor schema).
 _BODY_BEARING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH"})
+
+
+def _encrypt_http_auth_envelope(
+    auth_input: HttpAuthInputSchema | None,
+    existing: dict | None,
+) -> dict | None:
+    """Build the persisted JSONB envelope for ``Monitor.http_auth``.
+
+    Semantics:
+        * ``auth_input`` is ``None``: leave the existing envelope untouched.
+        * ``auth_input.scheme == 'none'``: clear the envelope (returns ``None``).
+        * ``auth_input.token is None`` with bearer/basic scheme: keep the
+          existing ciphertext but allow updating the scheme. Raises if no
+          existing ciphertext is configured.
+        * Otherwise: encrypt ``auth_input.token`` with Fernet.
+    """
+    if auth_input is None:
+        return existing
+    if auth_input.scheme == "none":
+        return None
+    if auth_input.token is None:
+        if not existing or not existing.get("token_ciphertext"):
+            raise ValidationError(
+                code="MONITOR_HTTP_AUTH_TOKEN_REQUIRED",
+                message="httpAuth.token is required when no token is configured",
+            )
+        return {
+            "scheme": auth_input.scheme,
+            "token_ciphertext": existing["token_ciphertext"],
+        }
+    try:
+        ciphertext = encrypt_secret(auth_input.token)
+    except MonitorSecretConfigurationError as exc:
+        raise ValidationError(
+            code="MONITOR_SECRET_KEY_MISSING",
+            message=str(exc),
+        ) from exc
+    return {"scheme": auth_input.scheme, "token_ciphertext": ciphertext}
+
+
+def _http_auth_summary_from_envelope(envelope: dict | None) -> HttpAuthSummary:
+    if not envelope or not isinstance(envelope, dict):
+        return HttpAuthSummary()
+    scheme = str(envelope.get("scheme", "none"))
+    if scheme not in ("none", "bearer", "basic"):
+        scheme = "none"
+    return HttpAuthSummary(
+        scheme=scheme,
+        configured=bool(envelope.get("token_ciphertext")),
+    )
+
+
+def _resolve_http_auth_envelope(envelope: dict | None) -> tuple[str, str | None]:
+    """Decrypt the auth envelope into ``(scheme, plaintext_token | None)``.
+
+    Plaintext is returned only to the caller (probe runner) and MUST NOT be
+    logged, persisted, or returned to the API client.
+    """
+    if not envelope or not isinstance(envelope, dict):
+        return "none", None
+    scheme = str(envelope.get("scheme", "none"))
+    if scheme not in ("bearer", "basic"):
+        return "none", None
+    cipher = envelope.get("token_ciphertext")
+    if not isinstance(cipher, str) or not cipher:
+        return "none", None
+    try:
+        return scheme, decrypt_secret(cipher)
+    except MonitorSecretConfigurationError:
+        logger.error(
+            "monitor_http_auth_decrypt_failed",
+            scheme=scheme,
+            reason="invalid_or_missing_key",
+        )
+        return "none", None
+
+
+def _build_probe_request_headers(monitor: Monitor) -> dict[str, str]:
+    """Compose probe request headers: defaults + custom + Authorization.
+
+    Custom headers are merged last (after default UA) but cannot override
+    forbidden / hop-by-hop headers (validated upstream by Pydantic). The
+    Authorization header (if configured) wins last so the user cannot
+    accidentally shadow it via httpHeaders.
+    """
+    headers: dict[str, str] = {"User-Agent": settings.MONITOR_PROBE_USER_AGENT}
+    custom = monitor.http_headers or {}
+    if isinstance(custom, dict):
+        for name, value in custom.items():
+            if not isinstance(name, str) or not isinstance(value, str):
+                continue
+            headers[name] = value
+    scheme, token = _resolve_http_auth_envelope(monitor.http_auth)
+    if token is not None:
+        if scheme == "bearer":
+            headers["Authorization"] = f"Bearer {token}"
+        elif scheme == "basic":
+            import base64 as _b64
+
+            encoded = _b64.b64encode(token.encode("utf-8")).decode("ascii")
+            headers["Authorization"] = f"Basic {encoded}"
+    return headers
 
 PERIOD_TO_DELTA = {
     "24h": timedelta(hours=24),
@@ -706,6 +814,9 @@ def _monitor_to_response(
         ),
         interval_seconds=m.interval_seconds,
         http_method=m.http_method,
+        http_body=m.http_body,
+        http_headers=dict(m.http_headers) if isinstance(m.http_headers, dict) else None,
+        http_auth=_http_auth_summary_from_envelope(m.http_auth),
         expected_status_code=m.expected_status_code,
         is_enabled=m.is_enabled,
         status=m.status.value,
@@ -789,6 +900,7 @@ async def create_monitor(
         caps = merge_capability_dict(caps, dump_capabilities_patch(data.capabilities))
     caps = validate_capabilities_config(caps)
 
+    http_auth_envelope = _encrypt_http_auth_envelope(data.http_auth, None)
     monitor = Monitor(
         user_id=user_id,
         display_name=data.display_name,
@@ -797,6 +909,9 @@ async def create_monitor(
         capabilities=caps,
         interval_seconds=data.interval_seconds,
         http_method=data.http_method,
+        http_body=data.http_body,
+        http_headers=data.http_headers,
+        http_auth=http_auth_envelope,
         expected_status_code=data.expected_status_code,
         tags=data.tags,
         status=MonitorStatus.PENDING,
@@ -809,6 +924,20 @@ async def create_monitor(
     return _monitor_to_response(monitor)
 
 
+# Phase 1.4: whitelist of sortable columns. Keys are the wire values (camelCase
+# per shared/types/monitor.ts MonitorListSort), values are the SQLAlchemy
+# columns. Restricting to a whitelist prevents arbitrary column injection via
+# the ?sort= query string.
+_LIST_SORT_COLUMNS = {
+    "createdAt": Monitor.created_at,
+    "updatedAt": Monitor.updated_at,
+    "displayName": Monitor.display_name,
+    "lastCheckAt": Monitor.last_check_at,
+    "lastResponseTimeMs": Monitor.last_response_time_ms,
+    "uptimePercentage": Monitor.uptime_percentage,
+}
+
+
 async def list_monitors(
     user_id: int,
     status: str | None,
@@ -816,7 +945,32 @@ async def list_monitors(
     page: int,
     limit: int,
     db: AsyncSession,
+    *,
+    tags: list[str] | None = None,
+    tag_match: str = "any",
+    sort: str | None = None,
+    latency_max_ms: float | None = None,
+    uptime_min_percent: float | None = None,
 ) -> tuple[list[MonitorResponse], dict[str, int]]:
+    """List monitors for ``user_id`` with Phase 1.3 / 1.4 advanced filters.
+
+    Filtering rules:
+      * ``tags`` — list of normalised lowercase tags. ``tag_match='any'`` (default)
+        uses ARRAY overlap; ``tag_match='all'`` uses ARRAY contains. Empty list
+        is treated as "no tag filter".
+      * ``latency_max_ms`` — keep monitors whose ``last_response_time_ms`` is at
+        or below the threshold. Monitors without a recorded latency are
+        excluded so the filter behaves intuitively ("show only fast probes").
+      * ``uptime_min_percent`` — keep monitors with uptime >= threshold
+        (0–100). Monitors with NULL uptime are kept ONLY when the threshold is
+        0 so a brand-new monitor without checks doesn't disappear.
+
+    Sorting:
+      * ``sort`` is parsed as ``"<field>:<asc|desc>"`` against ``_LIST_SORT_COLUMNS``.
+        Unknown fields fall back to ``createdAt:desc`` (the legacy default).
+        NULL handling uses ``nulls_last`` so rows with no last-check data don't
+        push to the top of asc orderings.
+    """
     filters = [Monitor.user_id == user_id]
     if status:
         try:
@@ -830,7 +984,51 @@ async def list_monitors(
             or_(Monitor.display_name.ilike(term), Monitor.url.ilike(term))
         )
 
-    base = select(Monitor).where(and_(*filters)).order_by(Monitor.created_at.desc())
+    if tags:
+        # Normalise here even though the endpoint already lowercases — guards
+        # callers (jobs, internal scripts) that bypass the HTTP boundary.
+        clean = sorted({t.strip().lower() for t in tags if t and t.strip()})
+        if clean:
+            if tag_match == "all":
+                filters.append(Monitor.tags.contains(clean))
+            else:
+                filters.append(Monitor.tags.overlap(clean))
+
+    if latency_max_ms is not None:
+        filters.append(Monitor.last_response_time_ms.isnot(None))
+        filters.append(Monitor.last_response_time_ms <= float(latency_max_ms))
+
+    if uptime_min_percent is not None:
+        threshold = float(uptime_min_percent)
+        if threshold <= 0:
+            # threshold==0 is a no-op; skip the WHERE clause so brand-new
+            # monitors (NULL uptime) still surface.
+            pass
+        else:
+            filters.append(Monitor.uptime_percentage.isnot(None))
+            filters.append(Monitor.uptime_percentage >= threshold)
+
+    sort_field = "createdAt"
+    sort_dir = "desc"
+    if sort:
+        raw_field, _, raw_dir = sort.partition(":")
+        candidate = raw_field.strip()
+        if candidate in _LIST_SORT_COLUMNS:
+            sort_field = candidate
+        d = raw_dir.strip().lower()
+        if d in ("asc", "desc"):
+            sort_dir = d
+    column = _LIST_SORT_COLUMNS[sort_field]
+    order = column.asc() if sort_dir == "asc" else column.desc()
+    # Postgres-specific NULL ordering: keep "no data yet" rows at the bottom
+    # for both directions so they don't dominate the first page.
+    order = order.nulls_last()
+
+    base = (
+        select(Monitor)
+        .where(and_(*filters))
+        .order_by(order, Monitor.id.desc())
+    )
     count_stmt = select(func.count()).select_from(Monitor).where(and_(*filters))
     total = int(await db.scalar(count_stmt) or 0)
 
@@ -875,6 +1073,16 @@ async def update_monitor(
     for field in ("display_name", "interval_seconds", "http_method", "expected_status_code", "tags"):
         if field in payload:
             setattr(m, field, payload[field])
+    if payload.get("clear_http_body"):
+        m.http_body = None
+    elif "http_body" in payload:
+        m.http_body = payload["http_body"]
+    if payload.get("clear_http_headers"):
+        m.http_headers = None
+    elif "http_headers" in payload:
+        m.http_headers = payload["http_headers"]
+    if data.http_auth is not None:
+        m.http_auth = _encrypt_http_auth_envelope(data.http_auth, m.http_auth)
     if "url" in payload:
         m.url = payload["url"]
     if "enabled_capabilities" in payload and payload["enabled_capabilities"] is not None:
@@ -923,6 +1131,109 @@ async def delete_monitor(monitor_id: uuid.UUID, user_id: int, db: AsyncSession) 
     if not m or m.user_id != user_id:
         raise NotFoundError(code="MONITOR_NOT_FOUND", message="Monitor not found")
     await db.delete(m)
+
+
+async def bulk_act_on_monitors(
+    user_id: int,
+    action: str,
+    monitor_ids: list[str],
+    db: AsyncSession,
+) -> tuple[list[str], list[dict]]:
+    """Apply ``action`` to monitors owned by ``user_id``.
+
+    Returns ``(succeeded_ids, failures)`` where each failure is the
+    ``{monitor_id, error_code, message}`` dict consumed by the bulk
+    response schema. Unknown ids and rows owned by other users are
+    rolled into the failure list with ``MONITOR_NOT_FOUND`` so the
+    caller cannot use the bulk endpoint to enumerate ownership.
+    """
+    succeeded: list[str] = []
+    failures: list[dict] = []
+
+    parsed_ids: list[uuid.UUID] = []
+    for raw in monitor_ids:
+        try:
+            parsed_ids.append(uuid.UUID(raw))
+        except (ValueError, TypeError):
+            failures.append(
+                {
+                    "monitor_id": raw,
+                    "error_code": "MONITOR_NOT_FOUND",
+                    "message": "Monitor not found",
+                }
+            )
+
+    rows = []
+    if parsed_ids:
+        result = await db.execute(
+            select(Monitor).where(
+                Monitor.id.in_(parsed_ids), Monitor.user_id == user_id
+            )
+        )
+        rows = list(result.scalars().all())
+    by_id = {str(r.id): r for r in rows}
+
+    for raw in monitor_ids:
+        if raw in (f.get("monitor_id") for f in failures):
+            continue
+        target = by_id.get(raw)
+        if target is None:
+            failures.append(
+                {
+                    "monitor_id": raw,
+                    "error_code": "MONITOR_NOT_FOUND",
+                    "message": "Monitor not found",
+                }
+            )
+            continue
+        try:
+            if action == "pause":
+                target.is_enabled = False
+                target.status = MonitorStatus.PAUSED
+            elif action == "resume":
+                target.is_enabled = True
+                if target.status == MonitorStatus.PAUSED:
+                    target.status = MonitorStatus.PENDING
+            elif action == "enable":
+                target.is_enabled = True
+                if target.status == MonitorStatus.PAUSED:
+                    target.status = MonitorStatus.PENDING
+            elif action == "disable":
+                target.is_enabled = False
+                target.status = MonitorStatus.PAUSED
+            elif action == "delete":
+                await db.delete(target)
+            else:
+                raise ValidationError(
+                    code="MONITOR_BULK_ACTION_INVALID",
+                    message=f"Unsupported action: {action}",
+                )
+            succeeded.append(raw)
+        except AppException as exc:
+            failures.append(
+                {
+                    "monitor_id": raw,
+                    "error_code": exc.code,
+                    "message": exc.message,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - convert to per-row error
+            logger.exception(
+                "monitor_bulk_action_unexpected",
+                monitor_id=raw,
+                action=action,
+            )
+            failures.append(
+                {
+                    "monitor_id": raw,
+                    "error_code": "INTERNAL_ERROR",
+                    "message": str(exc)[:200] or "unexpected error",
+                }
+            )
+
+    if succeeded:
+        await db.flush()
+    return succeeded, failures
 
 
 def _normalize_diff_summary_for_api(raw: dict | None) -> dict[str, int | str]:
@@ -1517,12 +1828,15 @@ async def execute_check(
         )
         check.success = False
         run_http = False
-    elif "content_change" in enabled and method in _BODY_BEARING_METHODS:
-        # Monitor model has no http_body column yet; surface the gap for
-        # operators so they understand POST/PUT/PATCH content-change probes
-        # currently send an empty request body.
-        logger.warning(
-            "monitor_content_change_with_method_lacks_body",
+    elif (
+        "content_change" in enabled
+        and method in _BODY_BEARING_METHODS
+        and not (monitor.http_body or "").strip()
+    ):
+        # Body-bearing method without a configured payload: log once per
+        # check so operators notice the silent empty-body probe.
+        logger.info(
+            "monitor_content_change_method_no_body",
             monitor_id=str(monitor.id),
             method=method,
         )
@@ -1536,7 +1850,12 @@ async def execute_check(
         run_http = False
 
     if run_http:
-        headers = {"User-Agent": settings.MONITOR_PROBE_USER_AGENT}
+        headers = _build_probe_request_headers(monitor)
+        # Plaintext body lives only on `monitor` (loaded from DB this request);
+        # never log it.
+        request_body = (
+            monitor.http_body if method in _BODY_BEARING_METHODS else None
+        )
         try:
             async with httpx.AsyncClient(
                 timeout=settings.MONITOR_REQUEST_TIMEOUT_S,
@@ -1545,11 +1864,12 @@ async def execute_check(
             ) as client:
                 t0 = datetime.now(timezone.utc)
                 if "content_change" in enabled:
-                    # TODO(monitor-http-body): once Monitor.http_body column is
-                    # added, pass `content=monitor.http_body` here for POST/PUT.
-                    # Until then POST/PUT/PATCH send an empty body (a WARNING
-                    # log is emitted above to flag this gap to operators).
-                    response = await client.request(method, monitor.url, headers=headers)
+                    response = await client.request(
+                        method,
+                        monitor.url,
+                        headers=headers,
+                        content=request_body,
+                    )
                     elapsed_ms = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
                     check.status_code = response.status_code
                     check.response_time_ms = elapsed_ms
@@ -1562,7 +1882,12 @@ async def execute_check(
                             monitor, response, check, db, redis
                         )
                 else:
-                    async with client.stream(method, monitor.url, headers=headers) as response:
+                    async with client.stream(
+                        method,
+                        monitor.url,
+                        headers=headers,
+                        content=request_body,
+                    ) as response:
                         check.status_code = response.status_code
                         read_bytes = 0
                         async for chunk in response.aiter_bytes():

@@ -103,6 +103,6 @@ describe("MonitorListTable", () => {
     expect(wrapper?.className).toMatch(/overflow-x-auto/);
 
     const table = container.querySelector("table");
-    expect(table?.className ?? "").toMatch(/min-w-\[720px\]/);
+    expect(table?.className ?? "").toMatch(/min-w-\[760px\]/);
   });
 });

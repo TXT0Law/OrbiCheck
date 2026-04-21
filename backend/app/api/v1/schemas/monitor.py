@@ -21,6 +21,127 @@ from pydantic.alias_generators import to_camel
 ALLOWED_CAPABILITIES = frozenset({"uptime_only", "content_change", "ssl_expiry", "visual_change"})
 QUIET_HOURS_PATTERN = re.compile(r"^\d{2}:\d{2}$")
 
+# 1.1: HTTP request extension limits / policy. Mirrored to the frontend
+# in shared/schemas/monitor.ts; if you change a number, update both sides.
+ALLOWED_HTTP_METHODS: tuple[str, ...] = (
+    "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",
+)
+HTTP_METHODS_WITH_BODY: frozenset[str] = frozenset({"POST", "PUT", "PATCH"})
+MAX_REQUEST_BODY_BYTES: int = 64 * 1024
+MAX_REQUEST_HEADERS_COUNT: int = 32
+MAX_REQUEST_HEADER_NAME_LENGTH: int = 128
+MAX_REQUEST_HEADER_VALUE_LENGTH: int = 4096
+FORBIDDEN_REQUEST_HEADERS: frozenset[str] = frozenset(
+    {
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "upgrade",
+        "proxy-connection",
+        "te",
+        "trailer",
+    }
+)
+ALLOWED_HTTP_AUTH_SCHEMES: tuple[str, ...] = ("none", "bearer", "basic")
+_HEADER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$")
+
+
+def _validate_http_headers(value: dict[str, str] | None) -> dict[str, str] | None:
+    """Validate per-monitor extra HTTP headers (count + name + value caps).
+
+    Returns a normalized dict (header names trimmed, values trimmed).
+    NEVER passes through forbidden headers (Host, Content-Length, etc.).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError("httpHeaders must be an object of string -> string")
+    if len(value) > MAX_REQUEST_HEADERS_COUNT:
+        raise ValueError(
+            f"httpHeaders supports at most {MAX_REQUEST_HEADERS_COUNT} entries"
+        )
+    out: dict[str, str] = {}
+    for raw_name, raw_value in value.items():
+        if not isinstance(raw_name, str) or not isinstance(raw_value, str):
+            raise TypeError("httpHeaders entries must be string -> string")
+        name = raw_name.strip()
+        if not name:
+            raise ValueError("httpHeaders name must be non-empty")
+        if len(name) > MAX_REQUEST_HEADER_NAME_LENGTH:
+            raise ValueError(
+                f"httpHeaders name exceeds {MAX_REQUEST_HEADER_NAME_LENGTH} chars"
+            )
+        if not _HEADER_NAME_PATTERN.match(name):
+            raise ValueError(
+                f"httpHeaders name {name!r} contains invalid characters"
+            )
+        if name.lower() in FORBIDDEN_REQUEST_HEADERS:
+            raise ValueError(
+                f"httpHeaders cannot override reserved header {name!r}"
+            )
+        val = raw_value.strip()
+        if "\n" in val or "\r" in val:
+            raise ValueError("httpHeaders values cannot contain newlines")
+        if len(val) > MAX_REQUEST_HEADER_VALUE_LENGTH:
+            raise ValueError(
+                f"httpHeaders value for {name!r} exceeds "
+                f"{MAX_REQUEST_HEADER_VALUE_LENGTH} chars"
+            )
+        out[name] = val
+    return out
+
+
+def _validate_http_body(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError("httpBody must be a string")
+    encoded = value.encode("utf-8")
+    if len(encoded) > MAX_REQUEST_BODY_BYTES:
+        raise ValueError(
+            f"httpBody exceeds {MAX_REQUEST_BODY_BYTES} bytes"
+        )
+    return value
+
+
+class HttpAuthInputSchema(BaseModel):
+    """Plaintext auth payload accepted on create/update (NEVER stored as-is)."""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True, extra="forbid"
+    )
+
+    scheme: Literal["none", "bearer", "basic"]
+    # `none` clears the existing token; bearer/basic carry the secret.
+    token: str | None = Field(default=None, max_length=4096)
+    # `null` on update means "leave existing token in place"; explicit empty
+    # string is rejected to avoid accidentally storing an empty secret.
+    @model_validator(mode="after")
+    def _check(self) -> "HttpAuthInputSchema":
+        if self.scheme == "none":
+            object.__setattr__(self, "token", None)
+            return self
+        if self.token is None:
+            return self
+        token = self.token
+        if "\n" in token or "\r" in token:
+            raise ValueError("auth token cannot contain newlines")
+        if not token.strip():
+            raise ValueError("auth token cannot be blank")
+        return self
+
+
+class HttpAuthSummary(BaseModel):
+    """Read-side projection that exposes only whether an auth secret exists."""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True, extra="forbid"
+    )
+
+    scheme: Literal["none", "bearer", "basic"] = "none"
+    configured: bool = False
+
 
 def _normalize_capability_keys(data: Any) -> Any:
     if data is None:
@@ -293,6 +414,9 @@ class MonitorCreateRequest(BaseModel):
     capabilities: MonitorCapabilitiesPatchSchema | None = None
     interval_seconds: int = Field(default=300, ge=5, le=3600)
     http_method: str = "GET"
+    http_body: str | None = None
+    http_headers: dict[str, str] | None = None
+    http_auth: HttpAuthInputSchema | None = None
     expected_status_code: int | None = None
     tags: list[str] = Field(default_factory=list)
 
@@ -317,9 +441,27 @@ class MonitorCreateRequest(BaseModel):
     @classmethod
     def method_ok(cls, v: str) -> str:
         u = v.upper()
-        if u not in ("GET", "HEAD", "POST"):
-            raise ValueError("Invalid HTTP method")
+        if u not in ALLOWED_HTTP_METHODS:
+            raise ValueError(f"Invalid HTTP method: {v}")
         return u
+
+    @field_validator("http_body")
+    @classmethod
+    def body_ok(cls, v: str | None) -> str | None:
+        return _validate_http_body(v)
+
+    @field_validator("http_headers")
+    @classmethod
+    def headers_ok(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        return _validate_http_headers(v)
+
+    @model_validator(mode="after")
+    def body_only_for_method_with_body(self) -> "MonitorCreateRequest":
+        if self.http_body and self.http_method not in HTTP_METHODS_WITH_BODY:
+            raise ValueError(
+                f"httpBody not allowed for method {self.http_method}"
+            )
+        return self
 
     @field_validator("tags")
     @classmethod
@@ -341,6 +483,12 @@ class MonitorUpdateRequest(BaseModel):
     capabilities: MonitorCapabilitiesPatchSchema | None = None
     interval_seconds: int | None = None
     http_method: str | None = None
+    http_body: str | None = None
+    http_headers: dict[str, str] | None = None
+    http_auth: HttpAuthInputSchema | None = None
+    # Set to True to clear http_body / http_headers / http_auth on update.
+    clear_http_body: bool = False
+    clear_http_headers: bool = False
     expected_status_code: int | None = None
     is_enabled: bool | None = None
     tags: list[str] | None = None
@@ -372,9 +520,19 @@ class MonitorUpdateRequest(BaseModel):
         if v is None:
             return v
         u = v.upper()
-        if u not in ("GET", "HEAD", "POST"):
-            raise ValueError("Invalid HTTP method")
+        if u not in ALLOWED_HTTP_METHODS:
+            raise ValueError(f"Invalid HTTP method: {v}")
         return u
+
+    @field_validator("http_body")
+    @classmethod
+    def body_ok(cls, v: str | None) -> str | None:
+        return _validate_http_body(v)
+
+    @field_validator("http_headers")
+    @classmethod
+    def headers_ok(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        return _validate_http_headers(v)
 
     @field_validator("tags")
     @classmethod
@@ -410,6 +568,9 @@ class MonitorResponse(BaseModel):
     capability_statuses: list[CapabilityStatusSummary]
     interval_seconds: int
     http_method: str
+    http_body: str | None = None
+    http_headers: dict[str, str] | None = None
+    http_auth: HttpAuthSummary = Field(default_factory=HttpAuthSummary)
     expected_status_code: int | None
     is_enabled: bool
     status: str
@@ -638,3 +799,54 @@ class MonitorSslStatusResponse(BaseModel):
     # Legacy aliases for older clients (same data as subject / not_before / not_after)
     valid_from: str = ""
     valid_to: str = ""
+
+# ── Phase 1.2: bulk operations ────────────────────────────────────────
+BULK_ACTIONS: tuple[str, ...] = ("pause", "resume", "enable", "disable", "delete")
+MAX_BULK_MONITOR_IDS: int = 100
+
+
+class MonitorBulkActionRequest(BaseModel):
+    """Apply ``action`` to up to ``MAX_BULK_MONITOR_IDS`` monitors at once."""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True, extra="forbid"
+    )
+
+    action: Literal["pause", "resume", "enable", "disable", "delete"]
+    monitor_ids: list[str] = Field(min_length=1, max_length=MAX_BULK_MONITOR_IDS)
+
+    @field_validator("monitor_ids")
+    @classmethod
+    def _ids_unique(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for raw in v:
+            mid = (raw or "").strip()
+            if not mid or mid in seen:
+                continue
+            seen.add(mid)
+            out.append(mid)
+        if not out:
+            raise ValueError("monitorIds must contain at least one non-empty id")
+        return out
+
+
+class MonitorBulkActionFailure(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True
+    )
+
+    monitor_id: str
+    error_code: str
+    message: str
+
+
+class MonitorBulkActionResponse(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True
+    )
+
+    action: Literal["pause", "resume", "enable", "disable", "delete"]
+    succeeded: list[str] = Field(default_factory=list)
+    failed: list[MonitorBulkActionFailure] = Field(default_factory=list)
+    requested: int = 0

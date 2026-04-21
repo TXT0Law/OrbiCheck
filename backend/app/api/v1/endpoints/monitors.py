@@ -12,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.schemas.common import SuccessResponse
 from app.api.v1.schemas.monitor import (
     MonitorBaselineResponse,
+    MonitorBulkActionFailure,
+    MonitorBulkActionRequest,
+    MonitorBulkActionResponse,
     MonitorChangeResponse,
     MonitorCheckResponse,
     MonitorCreateRequest,
@@ -75,6 +78,34 @@ async def list_monitors(
     current_user: CurrentUser = Depends(get_current_user),
     status: str | None = Query(None),
     search: str | None = Query(None),
+    # Phase 1.3: repeated tags + tag_match (any|all). FastAPI parses
+    # `?tags=foo&tags=bar` into a list when the type is `list[str]`.
+    tags: list[str] | None = Query(None),
+    tag_match: str = Query(
+        "any",
+        pattern="^(any|all)$",
+        description="Use 'any' for OR-of-tags (default) or 'all' for AND.",
+    ),
+    # Phase 1.4: sort + latency / uptime filters.
+    sort: str | None = Query(
+        None,
+        description=(
+            "Sort spec '<field>:<asc|desc>'. Allowed fields: createdAt, "
+            "updatedAt, displayName, lastCheckAt, lastResponseTimeMs, "
+            "uptimePercentage. Defaults to createdAt:desc."
+        ),
+    ),
+    latency_max_ms: float | None = Query(
+        None,
+        ge=0,
+        description="Keep monitors with last_response_time_ms <= this value.",
+    ),
+    uptime_min_percent: float | None = Query(
+        None,
+        ge=0,
+        le=100,
+        description="Keep monitors with uptime_percentage >= this value.",
+    ),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -86,6 +117,11 @@ async def list_monitors(
         page=page,
         limit=limit,
         db=db,
+        tags=tags,
+        tag_match=tag_match,
+        sort=sort,
+        latency_max_ms=latency_max_ms,
+        uptime_min_percent=uptime_min_percent,
     )
     return SuccessResponse(data=data, meta=meta)
 
@@ -99,6 +135,36 @@ async def create_monitor(
     row = await monitor_service.create_monitor(current_user.id, request, db)
     await db.commit()
     return SuccessResponse(data=row)
+
+@router.post(
+    "/bulk",
+    response_model=SuccessResponse[MonitorBulkActionResponse],
+    summary="Apply an action to many monitors in one request",
+    description=(
+        "Bulk pause/resume/enable/disable/delete. Per-row errors are returned in "
+        "`data.failed` so partial failures don't abort the whole batch."
+    ),
+)
+async def bulk_act_on_monitors(
+    request: MonitorBulkActionRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    succeeded, failures = await monitor_service.bulk_act_on_monitors(
+        current_user.id,
+        request.action,
+        list(request.monitor_ids),
+        db,
+    )
+    if succeeded:
+        await db.commit()
+    payload = MonitorBulkActionResponse(
+        action=request.action,
+        succeeded=succeeded,
+        failed=[MonitorBulkActionFailure(**f) for f in failures],
+        requested=len(request.monitor_ids),
+    )
+    return SuccessResponse(data=payload)
 
 
 @router.get("/{monitor_id}", response_model=SuccessResponse[MonitorResponse])

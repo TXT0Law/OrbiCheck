@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   monitorBaselineSchema,
+  monitorBulkActionResponseSchema,
   monitorChangeSchema,
   monitorCheckSchema,
   monitorDiffSchema,
@@ -14,6 +15,8 @@ import {
   monitorUptimeSummarySchema,
   monitorVisualCaptureSchema,
   monitorVisualChangeSchema,
+  type MonitorBulkAction,
+  type MonitorBulkActionResponseInput,
 } from "@/shared/schemas/monitor";
 import type {
   Monitor,
@@ -217,12 +220,9 @@ function readMeta(res: object): MonitorListMeta | undefined {
   return undefined;
 }
 
-export async function listMonitors(params?: {
-  status?: string;
-  search?: string;
-  page?: number;
-  limit?: number;
-}): Promise<{ data: Monitor[]; meta?: MonitorListMeta }> {
+export async function listMonitors(
+  params?: import("@/shared/types/monitor").MonitorListFilters,
+): Promise<{ data: Monitor[]; meta?: MonitorListMeta }> {
   if (isMonitorMockMode()) {
     let rows = [...MOCK_MONITORS];
     if (params?.status) {
@@ -235,6 +235,30 @@ export async function listMonitors(params?: {
           m.displayName.toLowerCase().includes(q) || m.url.toLowerCase().includes(q)
       );
     }
+    if (params?.tags && params.tags.length > 0) {
+      const requested = params.tags.map((t) => t.trim().toLowerCase()).filter(Boolean);
+      if (requested.length > 0) {
+        const all = params.tagMatch === "all";
+        rows = rows.filter((m) => {
+          const owned = new Set((m.tags ?? []).map((t) => t.toLowerCase()));
+          return all
+            ? requested.every((t) => owned.has(t))
+            : requested.some((t) => owned.has(t));
+        });
+      }
+    }
+    if (params?.latencyMaxMs != null) {
+      const cap = params.latencyMaxMs;
+      rows = rows.filter(
+        (m) => m.lastResponseTimeMs != null && m.lastResponseTimeMs <= cap,
+      );
+    }
+    if (params?.uptimeMinPercent != null && params.uptimeMinPercent > 0) {
+      const floor = params.uptimeMinPercent;
+      rows = rows.filter(
+        (m) => m.uptimePercentage != null && m.uptimePercentage >= floor,
+      );
+    }
     return {
       data: rows.map(normalizeMonitor),
       meta: mockListMeta(rows.length),
@@ -244,6 +268,27 @@ export async function listMonitors(params?: {
   const query = new URLSearchParams();
   if (params?.status) query.set("status", params.status);
   if (params?.search) query.set("search", params.search);
+  if (params?.tags && params.tags.length > 0) {
+    const seen = new Set<string>();
+    for (const raw of params.tags) {
+      const t = raw.trim().toLowerCase();
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      query.append("tags", t);
+    }
+    if (params.tagMatch === "all") {
+      query.set("tag_match", "all");
+    }
+  }
+  if (params?.latencyMaxMs != null) {
+    query.set("latency_max_ms", String(params.latencyMaxMs));
+  }
+  if (params?.uptimeMinPercent != null) {
+    query.set("uptime_min_percent", String(params.uptimeMinPercent));
+  }
+  if (params?.sort) {
+    query.set("sort", `${params.sort.field}:${params.sort.direction}`);
+  }
   if (params?.page) query.set("page", String(params.page));
   if (params?.limit) query.set("limit", String(params.limit));
   const res = await apiClient.get<unknown>(`${BASE}?${query}`);
@@ -319,6 +364,57 @@ export async function deleteMonitor(id: string): Promise<void> {
     return;
   }
   await apiClient.delete(`${BASE}/${id}`);
+}
+
+/** POST /monitors/bulk — apply `action` to many monitors at once. */
+export async function bulkActOnMonitors(
+  action: MonitorBulkAction,
+  monitorIds: string[],
+): Promise<MonitorBulkActionResponseInput> {
+  const ids = Array.from(new Set(monitorIds.map((id) => id.trim()).filter(Boolean)));
+  if (ids.length === 0) {
+    return { action, succeeded: [], failed: [], requested: 0 };
+  }
+  if (isMonitorMockMode()) {
+    const succeeded: string[] = [];
+    const failed: { monitorId: string; errorCode: string; message: string }[] = [];
+    for (const id of ids) {
+      const idx = MOCK_MONITORS.findIndex((x) => x.id === id);
+      if (idx < 0) {
+        failed.push({ monitorId: id, errorCode: "MONITOR_NOT_FOUND", message: "Monitor not found" });
+        continue;
+      }
+      const cur = MOCK_MONITORS[idx]!;
+      switch (action) {
+        case "pause":
+        case "disable":
+          MOCK_MONITORS[idx] = { ...cur, isEnabled: false, status: "paused" };
+          break;
+        case "resume":
+        case "enable":
+          MOCK_MONITORS[idx] = {
+            ...cur,
+            isEnabled: true,
+            status: cur.status === "paused" ? "pending" : cur.status,
+          };
+          break;
+        case "delete":
+          MOCK_MONITORS.splice(idx, 1);
+          break;
+      }
+      succeeded.push(id);
+    }
+    return { action, succeeded, failed, requested: ids.length };
+  }
+  const { data } = await apiClient.post<unknown>(
+    `${BASE}/bulk`,
+    { action, monitorIds: ids },
+  );
+  return parseSingle<MonitorBulkActionResponseInput>(
+    monitorBulkActionResponseSchema,
+    data,
+    "monitor bulk action",
+  );
 }
 
 export async function toggleMonitor(id: string, enabled: boolean): Promise<Monitor> {
