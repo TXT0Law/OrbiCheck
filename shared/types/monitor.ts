@@ -9,6 +9,8 @@ export const MONITOR_CAPABILITIES = [
   "content_change",
   "ssl_expiry",
   "visual_change",
+  "dns_change",
+  "ct_log",
 ] as const;
 
 export type MonitorCapability = (typeof MONITOR_CAPABILITIES)[number];
@@ -178,6 +180,45 @@ export interface SslThresholds {
   criticalDaysRemaining: number;
 }
 
+export const MONITOR_DNS_RECORD_TYPES = [
+  "A",
+  "AAAA",
+  "CNAME",
+  "MX",
+  "NS",
+  "TXT",
+  "CAA",
+] as const;
+export type MonitorDnsRecordType = (typeof MONITOR_DNS_RECORD_TYPES)[number];
+export const MONITOR_MAX_DNS_NAMESERVERS = 8;
+export const MONITOR_MAX_CT_PINNED_SERIALS = 32;
+
+export interface DnsThresholds {
+  /** Subset of MONITOR_DNS_RECORD_TYPES we'll query each cycle. */
+  recordTypes: MonitorDnsRecordType[];
+  /** Optional explicit resolvers (IPv4/IPv6); empty = system default. */
+  nameservers: string[];
+  /** Per-query timeout (seconds, 1-60). */
+  queryTimeoutSeconds: number;
+  /** Emit alerts when the record set changes. */
+  alertOnChange: boolean;
+}
+
+export interface CtLogThresholds {
+  /**
+   * Lower-case hex certificate serial numbers we trust; empty = no pinning.
+   * crt.sh's JSON endpoint returns ``serial_number`` (not the full leaf
+   * certificate), so pinning happens on serial — pinning on SHA-256 would
+   * require an extra HTTP round-trip per entry. RFC 5280 caps serials at
+   * 20 octets (40 hex chars); we accept up to 64 chars for lenience.
+   */
+  pinnedSerials: string[];
+  /** Look back N hours when polling crt.sh (1-720). */
+  lookbackHours: number;
+  /** Emit alerts when a brand new entry is observed. */
+  alertOnNewEntry: boolean;
+}
+
 export interface VisualThresholds {
   /**
    * Minimum similarity (0–100) vs previous capture; below triggers a visual change event.
@@ -197,6 +238,8 @@ export interface CapabilityThresholdsMap {
   content_change: ContentThresholds;
   ssl_expiry: SslThresholds;
   visual_change: VisualThresholds;
+  dns_change: DnsThresholds;
+  ct_log: CtLogThresholds;
 }
 
 // ── Per-Capability Config ──
@@ -260,6 +303,9 @@ export interface Monitor {
   totalChecks: number;
   uptimePercentage: number | null;
   avgResponseTimeMs: number | null;
+  p50ResponseTimeMs?: number | null;
+  p95ResponseTimeMs?: number | null;
+  p99ResponseTimeMs?: number | null;
   tags: string[];
   createdAt: string;
   updatedAt: string;
@@ -416,6 +462,9 @@ export interface MonitorTimeSeriesBucket {
   avgResponseTime: number;
   minResponseTime: number;
   maxResponseTime: number;
+  p50ResponseTime?: number;
+  p95ResponseTime?: number;
+  p99ResponseTime?: number;
   checkCount: number;
 }
 
@@ -432,7 +481,9 @@ export interface MonitorUptimeSummary {
   failedChecks?: number;
   uptimePercentage: number;
   avgResponseTimeMs: number;
+  p50ResponseTimeMs?: number;
   p95ResponseTimeMs: number;
+  p99ResponseTimeMs?: number;
   incidents: number;
   currentStreak?: {
     status: string;
@@ -549,4 +600,84 @@ export interface AlertEvent {
   resolvedAt: string | null;
   acknowledgedAt: string | null;
   acknowledgedBy?: string | null;
+}
+
+// ── Phase 2.2 — DNS records & changes ──
+
+export interface MonitorDnsRecord {
+  id: string;
+  monitorId: string;
+  recordType: MonitorDnsRecordType;
+  values: string[];
+  observedAt: string;
+  lastChangeAt: string | null;
+}
+
+export interface MonitorDnsChange {
+  id: string;
+  monitorId: string;
+  recordType: MonitorDnsRecordType;
+  detectedAt: string;
+  previousValues: string[];
+  currentValues: string[];
+  addedValues: string[];
+  removedValues: string[];
+}
+
+// ── Phase 2.3 — Certificate Transparency entries ──
+
+export interface MonitorCtEntry {
+  id: string;
+  monitorId: string;
+  hostname: string;
+  serialNumber: string;
+  leafSha256: string | null;
+  issuerName: string | null;
+  commonName: string | null;
+  notBefore: string | null;
+  notAfter: string | null;
+  observedAt: string;
+  crtshId: string | null;
+  pinViolation: boolean;
+  alertedAt: string | null;
+}
+
+// ── Phase 2.4 — Maintenance windows ──
+
+export interface MaintenanceWindow {
+  id: string;
+  userId: number;
+  monitorId: string | null;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  suppressAlerts: boolean;
+  suppressProbes: boolean;
+  isEnabled: boolean;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaintenanceWindowCreateRequest {
+  monitorId?: string | null;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  suppressAlerts?: boolean;
+  suppressProbes?: boolean;
+  isEnabled?: boolean;
+  notes?: string | null;
+}
+
+export interface MaintenanceWindowUpdateRequest {
+  monitorId?: string | null;
+  clearMonitorScope?: boolean;
+  title?: string;
+  startsAt?: string;
+  endsAt?: string;
+  suppressAlerts?: boolean;
+  suppressProbes?: boolean;
+  isEnabled?: boolean;
+  notes?: string | null;
 }

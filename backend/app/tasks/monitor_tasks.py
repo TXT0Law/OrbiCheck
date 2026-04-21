@@ -16,6 +16,7 @@ from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.monitor import (
+    MaintenanceWindow,
     Monitor,
     MonitorChange,
     MonitorSnapshot,
@@ -60,10 +61,34 @@ def dispatch_monitor_checks() -> dict:
 
     now = datetime.now(timezone.utc)
     dispatched = 0
+    suppressed = 0
     with Session(_get_dispatch_engine()) as db:
         stmt = select(Monitor).where(Monitor.is_enabled.is_(True))
         monitors = db.scalars(stmt).all()
+        # Phase 2.4: pre-compute maintenance windows that suppress probes so
+        # we issue one query per dispatch tick rather than per monitor.
+        suppress_rows = db.scalars(
+            select(MaintenanceWindow).where(
+                MaintenanceWindow.is_enabled.is_(True),
+                MaintenanceWindow.suppress_probes.is_(True),
+                MaintenanceWindow.starts_at <= now,
+                MaintenanceWindow.ends_at > now,
+            )
+        ).all()
+        suppressed_user_wide: set[int] = set()
+        suppressed_per_monitor: set[uuid.UUID] = set()
+        for window in suppress_rows:
+            if window.monitor_id is None:
+                suppressed_user_wide.add(window.user_id)
+            else:
+                suppressed_per_monitor.add(window.monitor_id)
         for m in monitors:
+            if (
+                m.user_id in suppressed_user_wide
+                or m.id in suppressed_per_monitor
+            ):
+                suppressed += 1
+                continue
             if m.last_check_at is None:
                 due = True
             else:
@@ -75,7 +100,11 @@ def dispatch_monitor_checks() -> dict:
             if due:
                 run_monitor_check.delay(str(m.id))
                 dispatched += 1
-    return {"dispatched": dispatched, "checked_at": now.isoformat()}
+    return {
+        "dispatched": dispatched,
+        "suppressed": suppressed,
+        "checked_at": now.isoformat(),
+    }
 
 
 @celery_app.task(

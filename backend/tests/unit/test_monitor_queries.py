@@ -44,6 +44,9 @@ async def test_get_time_series_returns_buckets() -> None:
         "avg_rt": 50.0,
         "min_rt": 40.0,
         "max_rt": 60.0,
+        "p50_rt": 50.0,
+        "p95_rt": 58.0,
+        "p99_rt": 60.0,
     }
 
     class _Maps:

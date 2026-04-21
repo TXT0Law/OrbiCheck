@@ -1,6 +1,14 @@
 "use client";
 
-import { Activity, Check, FileCode, Image, Shield } from "lucide-react";
+import {
+  Activity,
+  Check,
+  FileCode,
+  Globe,
+  Image,
+  ScrollText,
+  Shield,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { CAPABILITY_CONFIG } from "@/shared/constants/monitor";
@@ -11,6 +19,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   FileCode,
   Shield,
   Image,
+  Globe,
+  ScrollText,
 };
 
 interface MonitorCapabilityToggleGroupProps {

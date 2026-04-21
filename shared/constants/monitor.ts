@@ -58,6 +58,24 @@ export const CAPABILITY_CONFIG = {
     navGroup: "Visual",
     color: "purple",
   },
+  dns_change: {
+    label: "DNS Change",
+    shortLabel: "DNS",
+    description: "Detect changes in A/AAAA/CNAME/MX/NS/TXT/CAA records",
+    icon: "Globe",
+    subRoute: "dns",
+    navGroup: "Network",
+    color: "cyan",
+  },
+  ct_log: {
+    label: "Certificate Transparency",
+    shortLabel: "CT Log",
+    description: "Watch crt.sh for newly issued certificates and pin certificate serials",
+    icon: "ScrollText",
+    subRoute: "ct-log",
+    navGroup: "Security",
+    color: "indigo",
+  },
 } as const satisfies Record<
   MonitorCapability,
   {
@@ -118,6 +136,10 @@ export const MONITOR_SUB_NAV = [
     group: "Visual",
     capability: "visual_change" as MonitorCapability,
   },
+  // NOTE: dns_change / ct_log sub-nav entries are intentionally omitted in
+  // Phase 2a — the corresponding `/dns` and `/ct-log` pages do not exist yet
+  // and would 404. They will be re-added in Phase 2b together with their
+  // page.tsx + components/monitor/monitor-{dns-history,ct-history}.tsx.
   {
     key: "settings",
     label: "Settings",
@@ -193,6 +215,27 @@ export const DEFAULT_CAPABILITIES: MonitorCapabilities = {
       viewportHeight: 720,
       fullPage: false,
       contentCorrelationWindowSeconds: null,
+    },
+    intervalOverrideSeconds: null,
+  },
+  dns_change: {
+    enabled: false,
+    alert: { enabled: true, cooldownSeconds: 600, quietHours: null },
+    thresholds: {
+      recordTypes: ["A", "AAAA", "CNAME"],
+      nameservers: [],
+      queryTimeoutSeconds: 5,
+      alertOnChange: true,
+    },
+    intervalOverrideSeconds: null,
+  },
+  ct_log: {
+    enabled: false,
+    alert: { enabled: true, cooldownSeconds: 3600, quietHours: null },
+    thresholds: {
+      pinnedSerials: [],
+      lookbackHours: 24,
+      alertOnNewEntry: true,
     },
     intervalOverrideSeconds: null,
   },

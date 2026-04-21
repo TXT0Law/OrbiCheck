@@ -58,8 +58,12 @@ def _db() -> tuple[AsyncMock, list[AlertEvent]]:
     db = AsyncMock()
     db.add = MagicMock(side_effect=add_side_effect)
     db.flush = AsyncMock()
+    empty_scalars = SimpleNamespace(all=lambda: [])
     db.execute = AsyncMock(
-        return_value=SimpleNamespace(scalar_one_or_none=lambda: None)
+        return_value=SimpleNamespace(
+            scalar_one_or_none=lambda: None,
+            scalars=lambda: empty_scalars,
+        )
     )
     return db, added
 
@@ -134,8 +138,12 @@ async def test_alert_cooldown_suppresses_repeated_event() -> None:
         suppress_reason=None,
     )
     recent.created_at = datetime.now(timezone.utc)
+    empty_scalars = SimpleNamespace(all=lambda: [])
     db.execute = AsyncMock(
-        return_value=SimpleNamespace(scalar_one_or_none=lambda: recent)
+        return_value=SimpleNamespace(
+            scalar_one_or_none=lambda: recent,
+            scalars=lambda: empty_scalars,
+        )
     )
 
     event = await alert_service.evaluate_and_dispatch_alert(

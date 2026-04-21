@@ -7,6 +7,18 @@ const monitorCapabilityEnum = z.enum([
   MONITOR_CAPABILITIES[1],
   MONITOR_CAPABILITIES[2],
   MONITOR_CAPABILITIES[3],
+  MONITOR_CAPABILITIES[4],
+  MONITOR_CAPABILITIES[5],
+]);
+
+const dnsRecordTypeEnum = z.enum([
+  "A",
+  "AAAA",
+  "CNAME",
+  "MX",
+  "NS",
+  "TXT",
+  "CAA",
 ]);
 
 // ── Alert Policy ──
@@ -73,6 +85,24 @@ const visualThresholdsSchema = z.object({
   contentCorrelationWindowSeconds: z.number().int().min(0).max(86400).nullable().optional(),
 });
 
+const dnsThresholdsSchema = z.object({
+  recordTypes: z.array(dnsRecordTypeEnum).min(1).max(7),
+  nameservers: z.array(z.string().min(1).max(45)).max(8).default([]),
+  queryTimeoutSeconds: z.number().int().min(1).max(60).default(5),
+  alertOnChange: z.boolean().default(true),
+});
+
+const ctLogThresholdsSchema = z.object({
+  // X.509 serial numbers are variable-length hex (RFC 5280 caps at 20 octets,
+  // i.e. 40 hex chars; we accept up to 64 to tolerate non-conformant CAs).
+  pinnedSerials: z
+    .array(z.string().regex(/^[A-Fa-f0-9]{1,64}$/, "Hex certificate serial (1-64 chars)"))
+    .max(32)
+    .default([]),
+  lookbackHours: z.number().int().min(1).max(720).default(24),
+  alertOnNewEntry: z.boolean().default(true),
+});
+
 // ── Per-Capability Config (optional partial patches) ──
 
 const uptimeCapabilitySchema = z.object({
@@ -103,11 +133,27 @@ const visualCapabilitySchema = z.object({
   intervalOverrideSeconds: z.number().int().min(1).max(86400).nullable().optional(),
 });
 
+const dnsCapabilitySchema = z.object({
+  enabled: z.boolean().optional(),
+  alert: capabilityAlertPolicySchema.partial().optional(),
+  thresholds: dnsThresholdsSchema.partial().optional(),
+  intervalOverrideSeconds: z.number().int().min(1).max(86400).nullable().optional(),
+});
+
+const ctCapabilitySchema = z.object({
+  enabled: z.boolean().optional(),
+  alert: capabilityAlertPolicySchema.partial().optional(),
+  thresholds: ctLogThresholdsSchema.partial().optional(),
+  intervalOverrideSeconds: z.number().int().min(1).max(86400).nullable().optional(),
+});
+
 export const monitorCapabilitiesSchema = z.object({
   uptime_only: uptimeCapabilitySchema.optional(),
   content_change: contentCapabilitySchema.optional(),
   ssl_expiry: sslCapabilitySchema.optional(),
   visual_change: visualCapabilitySchema.optional(),
+  dns_change: dnsCapabilitySchema.optional(),
+  ct_log: ctCapabilitySchema.optional(),
 });
 
 // ── HTTP request extension schemas (Phase 1.1) ──
@@ -434,12 +480,32 @@ const responseVisualCapabilitySchema = z
   })
   .passthrough();
 
+const responseDnsCapabilitySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    alert: responseAlertPolicySchema.optional(),
+    thresholds: dnsThresholdsSchema.partial().optional(),
+    intervalOverrideSeconds: z.number().int().nullable().optional(),
+  })
+  .passthrough();
+
+const responseCtCapabilitySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    alert: responseAlertPolicySchema.optional(),
+    thresholds: ctLogThresholdsSchema.partial().optional(),
+    intervalOverrideSeconds: z.number().int().nullable().optional(),
+  })
+  .passthrough();
+
 const monitorCapabilitiesResponseSchema = z
   .object({
     uptime_only: responseUptimeCapabilitySchema.optional(),
     content_change: responseContentCapabilitySchema.optional(),
     ssl_expiry: responseSslCapabilitySchema.optional(),
     visual_change: responseVisualCapabilitySchema.optional(),
+    dns_change: responseDnsCapabilitySchema.optional(),
+    ct_log: responseCtCapabilitySchema.optional(),
   })
   .passthrough();
 
@@ -485,6 +551,12 @@ export const monitorResponseSchema = z
     uptime_percentage: z.number().nullable().optional(),
     avgResponseTimeMs: z.number().nullable().optional(),
     avg_response_time_ms: z.number().nullable().optional(),
+    p50ResponseTimeMs: z.number().nullable().optional(),
+    p50_response_time_ms: z.number().nullable().optional(),
+    p95ResponseTimeMs: z.number().nullable().optional(),
+    p95_response_time_ms: z.number().nullable().optional(),
+    p99ResponseTimeMs: z.number().nullable().optional(),
+    p99_response_time_ms: z.number().nullable().optional(),
     tags: z.array(z.string()).optional(),
     createdAt: z.string().optional(),
     created_at: z.string().optional(),
@@ -546,6 +618,9 @@ const monitorTimeSeriesBucketSchema = z
     avgResponseTime: z.number(),
     minResponseTime: z.number(),
     maxResponseTime: z.number(),
+    p50ResponseTime: z.number().optional(),
+    p95ResponseTime: z.number().optional(),
+    p99ResponseTime: z.number().optional(),
     checkCount: z.number().int().min(0),
   })
   .passthrough();
@@ -578,7 +653,9 @@ export const monitorUptimeSummarySchema = z
     failedChecks: z.number().int().min(0).optional(),
     uptimePercentage: z.number(),
     avgResponseTimeMs: z.number(),
+    p50ResponseTimeMs: z.number().optional(),
     p95ResponseTimeMs: z.number(),
+    p99ResponseTimeMs: z.number().optional(),
     incidents: z.number().int().min(0),
     currentStreak: monitorCurrentStreakSchema.optional(),
     failureDistribution: z.record(z.string(), z.number()).optional(),
@@ -778,4 +855,100 @@ export type MonitorBulkActionRequestInput = z.infer<
 >;
 export type MonitorBulkActionResponseInput = z.infer<
   typeof monitorBulkActionResponseSchema
+>;
+
+// ── Phase 2.2: DNS records / changes ──
+export const monitorDnsRecordSchema = z
+  .object({
+    id: z.string(),
+    monitorId: z.string(),
+    recordType: dnsRecordTypeEnum,
+    values: z.array(z.string()).default([]),
+    observedAt: z.string(),
+    lastChangeAt: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export const monitorDnsChangeSchema = z
+  .object({
+    id: z.string(),
+    monitorId: z.string(),
+    recordType: dnsRecordTypeEnum,
+    detectedAt: z.string(),
+    previousValues: z.array(z.string()).default([]),
+    currentValues: z.array(z.string()).default([]),
+    addedValues: z.array(z.string()).default([]),
+    removedValues: z.array(z.string()).default([]),
+  })
+  .passthrough();
+
+// ── Phase 2.3: CT log entries ──
+export const monitorCtEntrySchema = z
+  .object({
+    id: z.string(),
+    monitorId: z.string(),
+    hostname: z.string(),
+    serialNumber: z.string(),
+    leafSha256: z.string().nullable().optional(),
+    issuerName: z.string().nullable().optional(),
+    commonName: z.string().nullable().optional(),
+    notBefore: z.string().nullable().optional(),
+    notAfter: z.string().nullable().optional(),
+    observedAt: z.string(),
+    crtshId: z.string().nullable().optional(),
+    pinViolation: z.boolean().default(false),
+    alertedAt: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+// ── Phase 2.4: maintenance windows ──
+export const maintenanceWindowSchema = z
+  .object({
+    id: z.string(),
+    userId: z.number().int(),
+    monitorId: z.string().nullable().optional(),
+    title: z.string(),
+    startsAt: z.string(),
+    endsAt: z.string(),
+    suppressAlerts: z.boolean(),
+    suppressProbes: z.boolean(),
+    isEnabled: z.boolean(),
+    notes: z.string().nullable().optional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .passthrough();
+
+export const maintenanceWindowCreateSchema = z.object({
+  title: z.string().min(1).max(120),
+  monitorId: z.string().nullable().optional(),
+  startsAt: z.string(),
+  endsAt: z.string(),
+  suppressAlerts: z.boolean().optional(),
+  suppressProbes: z.boolean().optional(),
+  isEnabled: z.boolean().optional(),
+  notes: z.string().max(500).nullable().optional(),
+});
+
+export const maintenanceWindowUpdateSchema = z.object({
+  title: z.string().min(1).max(120).optional(),
+  monitorId: z.string().nullable().optional(),
+  clearMonitorScope: z.boolean().optional(),
+  startsAt: z.string().optional(),
+  endsAt: z.string().optional(),
+  suppressAlerts: z.boolean().optional(),
+  suppressProbes: z.boolean().optional(),
+  isEnabled: z.boolean().optional(),
+  notes: z.string().max(500).nullable().optional(),
+});
+
+export type MonitorDnsRecordInput = z.infer<typeof monitorDnsRecordSchema>;
+export type MonitorDnsChangeInput = z.infer<typeof monitorDnsChangeSchema>;
+export type MonitorCtEntryInput = z.infer<typeof monitorCtEntrySchema>;
+export type MaintenanceWindowInput = z.infer<typeof maintenanceWindowSchema>;
+export type MaintenanceWindowCreateInput = z.infer<
+  typeof maintenanceWindowCreateSchema
+>;
+export type MaintenanceWindowUpdateInput = z.infer<
+  typeof maintenanceWindowUpdateSchema
 >;

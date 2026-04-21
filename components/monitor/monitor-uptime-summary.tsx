@@ -33,21 +33,35 @@ export function MonitorUptimeSummary({ monitorId }: MonitorUptimeSummaryProps) {
   }
 
   const incidentsValue = Number.isFinite(data.incidents) ? data.incidents : 0;
+  const p50 = data.p50ResponseTimeMs;
+  const p99 = data.p99ResponseTimeMs;
+  const percentileFooter =
+    p50 !== undefined || p99 !== undefined
+      ? [
+          p50 !== undefined ? `p50 ${formatMilliseconds(p50)}` : null,
+          p99 !== undefined ? `p99 ${formatMilliseconds(p99)}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
   const cards = [
     {
       title: "Uptime",
       value: formatPercent(data.uptimePercentage),
       valueClass: "text-emerald-700 dark:text-emerald-400",
+      footer: null as string | null,
     },
     {
       title: "Avg latency",
       value: formatMilliseconds(data.avgResponseTimeMs),
       valueClass: "text-sky-700 dark:text-sky-400",
+      footer: null,
     },
     {
       title: "P95 latency",
       value: formatMilliseconds(data.p95ResponseTimeMs),
       valueClass: "text-violet-700 dark:text-violet-400",
+      footer: percentileFooter,
     },
     {
       title: "Incidents",
@@ -56,6 +70,7 @@ export function MonitorUptimeSummary({ monitorId }: MonitorUptimeSummaryProps) {
         incidentsValue > 0
           ? "text-amber-700 dark:text-amber-400"
           : "text-zinc-900 dark:text-white",
+      footer: null,
     },
   ];
 
@@ -73,6 +88,11 @@ export function MonitorUptimeSummary({ monitorId }: MonitorUptimeSummaryProps) {
           </CardHeader>
           <CardContent>
             <p className={`text-3xl font-bold tabular-nums ${c.valueClass}`}>{c.value}</p>
+            {c.footer ? (
+              <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                {c.footer}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ))}

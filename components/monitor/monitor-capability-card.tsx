@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Activity, FileCode, Image, Shield } from "lucide-react";
+import { Activity, FileCode, Globe, Image, ScrollText, Shield } from "lucide-react";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   FileCode,
   Shield,
   Image,
+  Globe,
+  ScrollText,
 };
 
 function formatRelativeTime(iso: string): string {

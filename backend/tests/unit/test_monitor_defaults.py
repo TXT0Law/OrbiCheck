@@ -12,7 +12,9 @@ def test_capabilities_from_enabled_list_sets_flags() -> None:
     assert caps["uptime_only"]["enabled"] is True
     assert caps["ssl_expiry"]["enabled"] is True
     assert caps["content_change"]["enabled"] is False
-    assert len(CAPABILITY_KEYS) == 4
+    assert caps["dns_change"]["enabled"] is False
+    assert caps["ct_log"]["enabled"] is False
+    assert len(CAPABILITY_KEYS) == 6
 
 
 def test_merge_capability_dict_preserves_structure() -> None:

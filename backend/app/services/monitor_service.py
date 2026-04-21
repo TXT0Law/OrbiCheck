@@ -20,6 +20,7 @@ import json
 import math
 import re
 import ssl
+import statistics
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -87,6 +88,14 @@ from app.services import alert_service
 from app.services.ssl_probe import (
     extract_host_port,
     probe_ssl_async,
+)
+from app.services.dns_monitor_service import (
+    DnsRecordDiff,
+    probe_dns_changes,
+)
+from app.services.ct_log_service import (
+    CtLogProbeResult,
+    probe_ct_log,
 )
 from app.metrics import (
     inc_alert_suppressed,
@@ -776,6 +785,13 @@ def _compute_capability_statuses(
                 status = "healthy"
                 summary = f"{days} days remaining"
                 last_value = str(days)
+        elif cap == "dns_change":
+            # Best-effort summary — full data lives in osint_monitor_dns_records.
+            status = "healthy"
+            summary = "Watching DNS record set"
+        elif cap == "ct_log":
+            status = "healthy"
+            summary = "Watching certificate transparency log"
         else:
             status = "pending"
             summary = "Coming soon"
@@ -829,6 +845,9 @@ def _monitor_to_response(
         consecutive_failures=m.consecutive_failures,
         uptime_percentage=m.uptime_percentage,
         avg_response_time_ms=m.avg_response_time_ms,
+        p50_response_time_ms=m.p50_response_time_ms,
+        p95_response_time_ms=m.p95_response_time_ms,
+        p99_response_time_ms=m.p99_response_time_ms,
         last_success=m.last_success,
         tags=list(m.tags or []),
         created_at=m.created_at,
@@ -1792,6 +1811,92 @@ async def _run_visual_change_capture(
     )
 
 
+def _format_dns_diff_summary(diff: DnsRecordDiff) -> str:
+    parts: list[str] = []
+    if diff.added:
+        parts.append("added " + ", ".join(diff.added[:3]))
+    if diff.removed:
+        parts.append("removed " + ", ".join(diff.removed[:3]))
+    return f"DNS {diff.record_type}: " + ("; ".join(parts) or "no change")
+
+
+async def _run_dns_change_probe(
+    monitor: Monitor,
+    db: AsyncSession,
+    redis: Redis | None,
+) -> list[DnsRecordDiff]:
+    """Resolve DNS records, persist deltas, and dispatch alerts when configured."""
+
+    diffs = await probe_dns_changes(monitor, db)
+    if not diffs:
+        return []
+    cap_cfg = (monitor.capabilities or {}).get("dns_change") or {}
+    thresholds = cap_cfg.get("thresholds") or {}
+    if not thresholds.get("alertOnChange", True):
+        return diffs
+    if redis is None:
+        return diffs
+    for diff in diffs:
+        await alert_service.evaluate_and_dispatch_alert(
+            monitor,
+            "dns_change",
+            "dns_record_change",
+            "warning",
+            f"recordType:{diff.record_type}",
+            _format_dns_diff_summary(diff),
+            db,
+            redis,
+            threshold_config=thresholds,
+        )
+    return diffs
+
+
+async def _run_ct_log_probe(
+    monitor: Monitor,
+    db: AsyncSession,
+    redis: Redis | None,
+) -> CtLogProbeResult:
+    """Poll crt.sh, store new entries, and emit alerts on new / pinned violations."""
+
+    result = await probe_ct_log(monitor, db)
+    if not result.new_entries:
+        return result
+    cap_cfg = (monitor.capabilities or {}).get("ct_log") or {}
+    thresholds = cap_cfg.get("thresholds") or {}
+    alert_on_new = bool(thresholds.get("alertOnNewEntry", True))
+    if redis is None:
+        return result
+    now = datetime.now(timezone.utc)
+    for entry in result.new_entries:
+        if entry.pin_violation:
+            await alert_service.evaluate_and_dispatch_alert(
+                monitor,
+                "ct_log",
+                "ct_pin_violation",
+                "critical",
+                f"serial:{entry.serial_number[:24]}",
+                "Unpinned certificate observed in CT log",
+                db,
+                redis,
+                threshold_config=thresholds,
+            )
+            entry.alerted_at = now
+        elif alert_on_new:
+            await alert_service.evaluate_and_dispatch_alert(
+                monitor,
+                "ct_log",
+                "ct_new_entry",
+                "warning",
+                f"serial:{entry.serial_number[:24]}",
+                f"New CT entry observed (issuer: {entry.issuer_name or 'unknown'})",
+                db,
+                redis,
+                threshold_config=thresholds,
+            )
+            entry.alerted_at = now
+    return result
+
+
 async def execute_check(
     monitor_id: uuid.UUID,
     db: AsyncSession,
@@ -2050,6 +2155,28 @@ async def execute_check(
             evaluated.append("visual_change")
         await _run_visual_change_capture(monitor, check, db, redis)
 
+    if "dns_change" in enabled:
+        evaluated.append("dns_change")
+        try:
+            await _run_dns_change_probe(monitor, db, redis)
+        except Exception as exc:
+            logger.warning(
+                "dns_probe_exception_in_check",
+                monitor_id=str(monitor.id),
+                error=str(exc),
+            )
+
+    if "ct_log" in enabled:
+        evaluated.append("ct_log")
+        try:
+            await _run_ct_log_probe(monitor, db, redis)
+        except Exception as exc:
+            logger.warning(
+                "ct_log_probe_exception_in_check",
+                monitor_id=str(monitor.id),
+                error=str(exc),
+            )
+
     # If user paused while this check was running, read committed is_enabled without
     # refresh() (refresh would discard unflushed SSL / capability updates on monitor).
     still_enabled = await db.scalar(
@@ -2239,6 +2366,34 @@ async def _recompute_rolling_stats(monitor: Monitor, db: AsyncSession) -> None:
     latencies = [r.response_time_ms for r in rows if r.success and r.response_time_ms is not None]
     if latencies:
         monitor.avg_response_time_ms = sum(latencies) / len(latencies)
+        p50, p95, p99 = _compute_latency_percentiles(latencies)
+        monitor.p50_response_time_ms = p50
+        monitor.p95_response_time_ms = p95
+        monitor.p99_response_time_ms = p99
+    else:
+        monitor.p50_response_time_ms = None
+        monitor.p95_response_time_ms = None
+        monitor.p99_response_time_ms = None
+
+
+def _compute_latency_percentiles(
+    samples: list[float],
+) -> tuple[float | None, float | None, float | None]:
+    """Return (p50, p95, p99) over ``samples``.
+
+    Uses ``statistics.quantiles`` with ``n=100`` so we get integer percentile
+    cut points without needing ``numpy``. For very small sample sizes
+    (``len < 2``) ``quantiles`` raises, so we fall back to the single sample.
+    """
+    if not samples:
+        return (None, None, None)
+    if len(samples) == 1:
+        single = float(samples[0])
+        return (single, single, single)
+    sorted_samples = sorted(float(s) for s in samples)
+    cut_points = statistics.quantiles(sorted_samples, n=100, method="inclusive")
+    # quantiles returns 99 cut points: index i is the (i+1)-th percentile.
+    return (cut_points[49], cut_points[94], cut_points[98])
 
 
 async def pause_monitor(
@@ -2360,7 +2515,19 @@ async def get_time_series(
           END AS success_rate,
           COALESCE(AVG(response_time_ms) FILTER (WHERE success), 0.0) AS avg_rt,
           COALESCE(MIN(response_time_ms) FILTER (WHERE success), 0.0) AS min_rt,
-          COALESCE(MAX(response_time_ms) FILTER (WHERE success), 0.0) AS max_rt
+          COALESCE(MAX(response_time_ms) FILTER (WHERE success), 0.0) AS max_rt,
+          COALESCE(
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY response_time_ms)
+              FILTER (WHERE success), 0.0
+          ) AS p50_rt,
+          COALESCE(
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time_ms)
+              FILTER (WHERE success), 0.0
+          ) AS p95_rt,
+          COALESCE(
+            percentile_cont(0.99) WITHIN GROUP (ORDER BY response_time_ms)
+              FILTER (WHERE success), 0.0
+          ) AS p99_rt
         FROM osint_monitor_checks
         WHERE monitor_id = CAST(:mid AS uuid) AND checked_at >= :since
         GROUP BY 1
@@ -2389,18 +2556,26 @@ async def get_time_series(
                 avg_response_time=float(row["avg_rt"] or 0),
                 min_response_time=float(row["min_rt"] or 0),
                 max_response_time=float(row["max_rt"] or 0),
+                p50_response_time=float(row["p50_rt"] or 0),
+                p95_response_time=float(row["p95_rt"] or 0),
+                p99_response_time=float(row["p99_rt"] or 0),
                 check_count=int(row["check_count"] or 0),
             )
         )
     return MonitorTimeSeriesData(period=period, resolution=resolution, points=points)
 
 
-def _p95(values: list[float]) -> float:
+def _percentile(values: list[float], pct: float) -> float:
+    """Nearest-rank percentile in [0, 1]. Returns 0.0 for empty inputs."""
     if not values:
         return 0.0
     s = sorted(values)
-    idx = min(len(s) - 1, max(0, math.ceil(0.95 * len(s)) - 1))
+    idx = min(len(s) - 1, max(0, math.ceil(pct * len(s)) - 1))
     return float(s[idx])
+
+
+def _p95(values: list[float]) -> float:
+    return _percentile(values, 0.95)
 
 
 async def get_uptime_summary(
@@ -2440,7 +2615,9 @@ async def get_uptime_summary(
         failed_checks=failed,
         uptime_percentage=uptime_pct,
         avg_response_time_ms=avg_lat,
-        p95_response_time_ms=_p95(latencies),
+        p50_response_time_ms=_percentile(latencies, 0.5),
+        p95_response_time_ms=_percentile(latencies, 0.95),
+        p99_response_time_ms=_percentile(latencies, 0.99),
         incidents=incidents,
         current_streak=streak,
         failure_distribution=dist,

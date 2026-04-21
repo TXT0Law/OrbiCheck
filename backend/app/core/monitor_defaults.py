@@ -5,7 +5,26 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-CAPABILITY_KEYS = ("uptime_only", "content_change", "ssl_expiry", "visual_change")
+CAPABILITY_KEYS = (
+    "uptime_only",
+    "content_change",
+    "ssl_expiry",
+    "visual_change",
+    "dns_change",
+    "ct_log",
+)
+
+# ── DNS / CT capability defaults (Phase 2.2 / 2.3) ─────────────────────────
+DNS_RECORD_TYPES: tuple[str, ...] = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "CAA")
+DEFAULT_DNS_RECORD_TYPES: tuple[str, ...] = ("A", "AAAA", "CNAME")
+MAX_DNS_RECORD_TYPES: int = len(DNS_RECORD_TYPES)
+MAX_DNS_NAMESERVERS: int = 8
+MAX_CT_PINNED_SERIALS: int = 32
+# X.509 serial numbers are positive integers up to 20 octets (RFC 5280) —
+# i.e. up to 40 hex chars. Allow 64 to be lenient with non-conformant CAs.
+# (Phase 2 originally pinned SHA-256 leaf fingerprints, but crt.sh JSON does
+# NOT return them, so we pin on serial_number — see ct_log_service.py.)
+CT_PIN_SERIAL_PATTERN: str = r"^[A-Fa-f0-9]{1,64}$"
 
 # ── HTTP request extension caps (1.1) ──────────────────────────────────────
 # Mirrored client-side in shared/schemas/monitor.ts; keep in sync when changing.
@@ -65,6 +84,39 @@ DEFAULT_CAPABILITIES: dict[str, Any] = {
             "viewportHeight": 720,
             "fullPage": False,
             "contentCorrelationWindowSeconds": None,
+        },
+        "intervalOverrideSeconds": None,
+    },
+    "dns_change": {
+        "enabled": False,
+        "alert": {"enabled": True, "cooldownSeconds": 600, "quietHours": None},
+        "thresholds": {
+            # Record types to query on each probe cycle (subset of DNS_RECORD_TYPES).
+            "recordTypes": list(DEFAULT_DNS_RECORD_TYPES),
+            # Optional explicit resolvers (IPv4/IPv6); empty list = system default.
+            "nameservers": [],
+            # Resolver timeout per query.
+            "queryTimeoutSeconds": 5,
+            # Alert when a record set changes; first probe is treated as baseline.
+            "alertOnChange": True,
+        },
+        "intervalOverrideSeconds": None,
+    },
+    "ct_log": {
+        "enabled": False,
+        "alert": {"enabled": True, "cooldownSeconds": 3600, "quietHours": None},
+        "thresholds": {
+            # Lower-case hex certificate serial numbers the operator pins. crt.sh
+            # JSON returns serial_number (not the full leaf cert), so pinning on
+            # the SHA-256 fingerprint would require a second HTTP request per
+            # entry — pinning on serial keeps the probe one round-trip.
+            # Empty list = no pinning, only "new certificate observed" is alerted.
+            "pinnedSerials": [],
+            # Maximum age for crt.sh entries to consider in a single poll.
+            # Also doubles as the polling cooldown — see ct_log_service.py.
+            "lookbackHours": 24,
+            # Alert when a new CT entry is observed for the monitor's hostname.
+            "alertOnNewEntry": True,
         },
         "intervalOverrideSeconds": None,
     },
