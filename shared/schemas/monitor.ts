@@ -110,6 +110,138 @@ export const monitorCapabilitiesSchema = z.object({
   visual_change: visualCapabilitySchema.optional(),
 });
 
+// ── HTTP request extension schemas (Phase 1.1) ──
+
+const HTTP_BODY_BEARING_METHODS = new Set(["POST", "PUT", "PATCH"]);
+const HTTP_FORBIDDEN_HEADERS = new Set([
+  "host",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+  "upgrade",
+  "proxy-connection",
+  "te",
+  "trailer",
+]);
+const HTTP_HEADER_NAME_PATTERN = /^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/;
+const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+const MAX_REQUEST_HEADERS_COUNT = 32;
+const MAX_REQUEST_HEADER_NAME_LENGTH = 128;
+const MAX_REQUEST_HEADER_VALUE_LENGTH = 4096;
+
+export const requestHttpMethodSchema = z.enum([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+]);
+
+const httpAuthSchemeSchema = z.enum(["none", "bearer", "basic"]);
+
+export const httpAuthInputSchema = z
+  .object({
+    scheme: httpAuthSchemeSchema,
+    token: z.string().max(4096).nullable().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.scheme === "none") return;
+    if (value.token == null) return;
+    if (!value.token.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Auth token cannot be blank",
+        path: ["token"],
+      });
+    }
+    if (/[\r\n]/.test(value.token)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Auth token cannot contain newlines",
+        path: ["token"],
+      });
+    }
+  });
+
+export const httpAuthSummarySchema = z
+  .object({
+    scheme: httpAuthSchemeSchema,
+    configured: z.boolean(),
+  })
+  .passthrough();
+
+export const httpHeadersSchema = z
+  .record(z.string(), z.string())
+  .superRefine((value, ctx) => {
+    const entries = Object.entries(value);
+    if (entries.length > MAX_REQUEST_HEADERS_COUNT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `httpHeaders supports at most ${MAX_REQUEST_HEADERS_COUNT} entries`,
+      });
+    }
+    for (const [rawName, rawValue] of entries) {
+      const name = rawName.trim();
+      if (!name) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "httpHeaders name must be non-empty",
+          path: [rawName],
+        });
+        continue;
+      }
+      if (name.length > MAX_REQUEST_HEADER_NAME_LENGTH) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `httpHeaders name exceeds ${MAX_REQUEST_HEADER_NAME_LENGTH} chars`,
+          path: [rawName],
+        });
+      }
+      if (!HTTP_HEADER_NAME_PATTERN.test(name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `httpHeaders name "${name}" contains invalid characters`,
+          path: [rawName],
+        });
+      }
+      if (HTTP_FORBIDDEN_HEADERS.has(name.toLowerCase())) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `httpHeaders cannot override reserved header "${name}"`,
+          path: [rawName],
+        });
+      }
+      if (/[\r\n]/.test(rawValue)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "httpHeaders values cannot contain newlines",
+          path: [rawName],
+        });
+      }
+      if (rawValue.length > MAX_REQUEST_HEADER_VALUE_LENGTH) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `httpHeaders value exceeds ${MAX_REQUEST_HEADER_VALUE_LENGTH} chars`,
+          path: [rawName],
+        });
+      }
+    }
+  });
+
+export const httpBodySchema = z
+  .string()
+  .superRefine((value, ctx) => {
+    const bytes = new TextEncoder().encode(value).length;
+    if (bytes > MAX_REQUEST_BODY_BYTES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `httpBody exceeds ${MAX_REQUEST_BODY_BYTES} bytes`,
+      });
+    }
+  });
+
 // ── Create / Update Schemas ──
 
 export const monitorCreateSchema = z.object({
@@ -133,14 +265,65 @@ export const monitorCreateSchema = z.object({
       (v) => (MONITOR_INTERVALS as readonly number[]).includes(v),
       "Invalid interval"
     ),
-  httpMethod: z.enum(["GET", "HEAD", "POST"]).default("GET"),
+  httpMethod: requestHttpMethodSchema.default("GET"),
+  httpBody: httpBodySchema.nullable().optional(),
+  httpHeaders: httpHeadersSchema.nullable().optional(),
+  httpAuth: httpAuthInputSchema.nullable().optional(),
   expectedStatusCode: z.number().int().min(100).max(599).nullable().default(null),
   tags: z.array(z.string().max(50)).max(10).default([]),
+}).superRefine((value, ctx) => {
+  if (value.httpBody && !HTTP_BODY_BEARING_METHODS.has(value.httpMethod)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `httpBody not allowed for method ${value.httpMethod}`,
+      path: ["httpBody"],
+    });
+  }
 });
 
-export const monitorUpdateSchema = monitorCreateSchema.partial().extend({
+// `monitorCreateSchema` is wrapped by superRefine, so re-derive base shape
+// for the partial update schema (zod cannot `.partial()` an effects schema).
+const monitorUpdateBaseShape = z.object({
+  displayName: z.string().min(1).max(100).optional(),
+  url: z
+    .string()
+    .url()
+    .refine((u) => u.startsWith("http://") || u.startsWith("https://"))
+    .optional(),
+  enabledCapabilities: z.array(monitorCapabilityEnum).min(1).optional(),
+  capabilities: monitorCapabilitiesSchema.optional(),
+  intervalSeconds: z
+    .number()
+    .int()
+    .min(5)
+    .max(600)
+    .optional(),
+  httpMethod: requestHttpMethodSchema.optional(),
+  httpBody: httpBodySchema.nullable().optional(),
+  httpHeaders: httpHeadersSchema.nullable().optional(),
+  httpAuth: httpAuthInputSchema.nullable().optional(),
+  clearHttpBody: z.boolean().optional(),
+  clearHttpHeaders: z.boolean().optional(),
+  expectedStatusCode: z.number().int().min(100).max(599).nullable().optional(),
+  tags: z.array(z.string().max(50)).max(10).optional(),
   isEnabled: z.boolean().optional(),
 });
+
+export const monitorUpdateSchema = monitorUpdateBaseShape.superRefine(
+  (value, ctx) => {
+    if (
+      value.httpBody &&
+      value.httpMethod &&
+      !HTTP_BODY_BEARING_METHODS.has(value.httpMethod)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `httpBody not allowed for method ${value.httpMethod}`,
+        path: ["httpBody"],
+      });
+    }
+  }
+);
 
 export type MonitorCreateInput = z.infer<typeof monitorCreateSchema>;
 export type MonitorUpdateInput = z.infer<typeof monitorUpdateSchema>;
@@ -187,7 +370,15 @@ const capabilityStatusSchema = z.enum([
   "error",
 ]);
 
-const httpMethodSchema = z.enum(["GET", "HEAD", "POST"]);
+const httpMethodSchema = z.enum([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+]);
 
 const capabilityStatusSummarySchema = z.object({
   capability: monitorCapabilityEnum,
@@ -265,6 +456,12 @@ export const monitorResponseSchema = z
     interval_seconds: z.number().int().optional(),
     httpMethod: httpMethodSchema.optional(),
     http_method: httpMethodSchema.optional(),
+    httpBody: z.string().nullable().optional(),
+    http_body: z.string().nullable().optional(),
+    httpHeaders: z.record(z.string(), z.string()).nullable().optional(),
+    http_headers: z.record(z.string(), z.string()).nullable().optional(),
+    httpAuth: httpAuthSummarySchema.optional(),
+    http_auth: httpAuthSummarySchema.optional(),
     expectedStatusCode: z.number().int().nullable().optional(),
     expected_status_code: z.number().int().nullable().optional(),
     isEnabled: z.boolean().optional(),
@@ -539,3 +736,46 @@ export type MonitorVisualChangeInput = z.infer<typeof monitorVisualChangeSchema>
 export type MonitorIncidentInput = z.infer<typeof monitorIncidentSchema>;
 export type MonitorSslStatusInput = z.infer<typeof monitorSslStatusSchema>;
 export type MonitorLiveEventInput = z.infer<typeof monitorLiveEventSchema>;
+
+// ── Phase 1.2: bulk action schemas (must match backend) ──
+export const MONITOR_BULK_ACTIONS = [
+  "pause",
+  "resume",
+  "enable",
+  "disable",
+  "delete",
+] as const;
+export type MonitorBulkAction = (typeof MONITOR_BULK_ACTIONS)[number];
+export const MONITOR_BULK_MAX_IDS = 100;
+
+export const monitorBulkActionRequestSchema = z.object({
+  action: z.enum(MONITOR_BULK_ACTIONS),
+  monitorIds: z
+    .array(z.string().min(1))
+    .min(1)
+    .max(MONITOR_BULK_MAX_IDS),
+});
+
+export const monitorBulkActionFailureSchema = z
+  .object({
+    monitorId: z.string(),
+    errorCode: z.string(),
+    message: z.string(),
+  })
+  .passthrough();
+
+export const monitorBulkActionResponseSchema = z
+  .object({
+    action: z.enum(MONITOR_BULK_ACTIONS),
+    succeeded: z.array(z.string()).default([]),
+    failed: z.array(monitorBulkActionFailureSchema).default([]),
+    requested: z.number().int().min(0).default(0),
+  })
+  .passthrough();
+
+export type MonitorBulkActionRequestInput = z.infer<
+  typeof monitorBulkActionRequestSchema
+>;
+export type MonitorBulkActionResponseInput = z.infer<
+  typeof monitorBulkActionResponseSchema
+>;

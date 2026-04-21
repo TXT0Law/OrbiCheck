@@ -52,6 +52,11 @@ class Settings(BaseSettings):
         "OrbiCheck-Monitor/1.0 (+https://github.com/TXT0Law/OrbiCheck)"
     )
     MONITOR_MANUAL_CHECK_COOLDOWN_SECONDS: int = 10
+    # Fernet 32-byte url-safe base64 key for encrypting per-monitor HTTP auth
+    # tokens (see backend/app/core/secrets.py). Empty default lets unit tests
+    # boot without secrets; encrypt/decrypt path validates and panics on first
+    # use if the value is missing or malformed.
+    MONITOR_SECRET_ENCRYPTION_KEY: str = ""
     # Prevents overlapping scheduled checks when probe duration > interval (slow targets).
     MONITOR_CHECK_LOCK_TTL_SECONDS: int = 900
     MONITOR_SSE_HEARTBEAT_SECONDS: float = 25.0
@@ -103,7 +108,7 @@ class Settings(BaseSettings):
     MONITOR_MAX_VISUAL_CHANGES_PER_MONITOR: int = 500
     MONITOR_MAX_VISUAL_CHANGE_AGE_DAYS: int = 90
     MONITOR_MIN_RETAINED_VISUAL_CHANGES: int = 20
-    # Nearest visual capture search for content ↔ screenshot linking (fallback to check_id).
+    # Nearest visual capture search for content / screenshot linking (fallback to check_id).
     CONTENT_VISUAL_CORRELATION_WINDOW_SECONDS: int = 120
 
     # Content thresholds / categories (also used by content_change_helpers)
@@ -126,7 +131,7 @@ class Settings(BaseSettings):
     MONITOR_DIFF_FINGERPRINT_MAX_UNIFIED_CHARS: int = 200_000
     # P3: max regex replace rules per monitor (capabilities JSON).
     MONITOR_NORMALIZATION_CUSTOM_RULES_MAX: int = 10
-    # P3: future rendered-DOM / headless pipeline — must stay off unless explicitly enabled.
+    # P3: future rendered-DOM / headless pipeline. Must stay off unless explicitly enabled.
     MONITOR_RENDERED_DOM_PIPELINE_ENABLED: bool = False
     # Optional CSS selector extraction for content_change (BeautifulSoup; server-side HTML only).
     CONTENT_SELECTOR_EXTRACTION_ENABLED: bool = False

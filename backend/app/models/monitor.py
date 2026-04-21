@@ -5,6 +5,16 @@ NOTE: Primary keys in this module are UUID (PostgreSQL UUID type).
 MonitorChange foreign keys to snapshots use columns ``previous_snapshot_id`` and
 ``current_snapshot_id`` (SET NULL on snapshot delete). The HTTP API serializes
 these as ``snapshotBeforeId`` / ``snapshotAfterId`` (see Pydantic schemas).
+
+HTTP request extensions (1.1):
+    * ``http_body`` is a UTF-8 text payload (size capped via Pydantic; see
+      ``app.core.monitor_defaults.MAX_REQUEST_BODY_BYTES``).
+    * ``http_headers`` is a JSONB ``dict[str, str]`` (validated for forbidden
+      header names + count + value length on the API boundary; never Host /
+      Content-Length etc.).
+    * ``http_auth`` is a JSONB envelope ``{"scheme": "...", "token_ciphertext":
+      "..."}`` containing a Fernet-encrypted secret. Plaintext NEVER lands in
+      the DB or logs (see ``app.core.secrets``).
 """
 
 from __future__ import annotations
@@ -68,6 +78,13 @@ class Monitor(Base):
     enabled_capabilities: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False)
     interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     http_method: Mapped[str] = mapped_column(String(10), nullable=False, default="GET")
+    # 1.1: optional UTF-8 request body (size enforced at API boundary).
+    http_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 1.1: optional dict[str,str] of additional headers (lowercased name guard at API).
+    http_headers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # 1.1: encrypted auth envelope {"scheme": "bearer"|"basic", "token_ciphertext": "<fernet>"}.
+    # Plaintext lives only in process memory at probe time; never logged.
+    http_auth: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     expected_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     status: Mapped[MonitorStatus] = mapped_column(

@@ -6,9 +6,11 @@ import {
 } from "@tanstack/react-query";
 
 import * as monitorsApi from "@/lib/api/monitors";
+import type { MonitorBulkAction } from "@/shared/schemas/monitor";
 import type {
   Monitor,
   MonitorCreateRequest,
+  MonitorListFilters,
   MonitorListMeta,
   MonitorUpdateRequest,
 } from "@/shared/types/monitor";
@@ -42,17 +44,12 @@ export const monitorKeys = {
     [...monitorKeys.detail(id), "visualChanges", params ?? {}] as const,
 };
 
-export function useMonitors(filters?: {
-  status?: string;
-  search?: string;
-  page?: number;
-  limit?: number;
-}, options?: {
+export function useMonitors(filters?: MonitorListFilters, options?: {
   staleTime?: number;
   refetchInterval?: number | false;
 }) {
   return useQuery({
-    queryKey: monitorKeys.list(filters ?? {}),
+    queryKey: monitorKeys.list((filters ?? {}) as Record<string, unknown>),
     queryFn: () => monitorsApi.listMonitors(filters),
     staleTime: options?.staleTime ?? 30_000,
     refetchInterval: options?.refetchInterval,
@@ -252,6 +249,33 @@ export function useToggleMonitor() {
         }
       );
       void queryClient.invalidateQueries({ queryKey: monitorKeys.lists() });
+    },
+  });
+}
+
+/**
+ * Phase 1.2 — bulk operations.
+ *
+ * Returns the structured `{ succeeded, failed, requested }` envelope so the
+ * caller (action bar) can show partial-success toasts. We invalidate the list
+ * AND every detail page on success because the action may have flipped
+ * `isEnabled` / `status` for many monitors at once.
+ */
+export function useBulkActOnMonitors() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      action,
+      monitorIds,
+    }: {
+      action: MonitorBulkAction;
+      monitorIds: string[];
+    }) => monitorsApi.bulkActOnMonitors(action, monitorIds),
+    onSuccess: (_response, variables) => {
+      void queryClient.invalidateQueries({ queryKey: monitorKeys.lists() });
+      for (const id of variables.monitorIds) {
+        void queryClient.invalidateQueries({ queryKey: monitorKeys.detail(id) });
+      }
     },
   });
 }

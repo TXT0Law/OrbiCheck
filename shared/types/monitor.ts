@@ -33,7 +33,52 @@ export type CapabilityStatus =
   | "pending"
   | "error";
 
-export type MonitorHttpMethod = "GET" | "HEAD" | "POST";
+export type MonitorHttpMethod =
+  | "GET"
+  | "HEAD"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE"
+  | "OPTIONS";
+
+/** HTTP request extension limits — keep in sync with backend monitor_defaults. */
+export const MONITOR_HTTP_BODY_BEARING_METHODS = [
+  "POST",
+  "PUT",
+  "PATCH",
+] as const;
+export const MONITOR_HTTP_MAX_BODY_BYTES = 64 * 1024;
+export const MONITOR_HTTP_MAX_HEADERS_COUNT = 32;
+export const MONITOR_HTTP_MAX_HEADER_VALUE_LENGTH = 4096;
+export const MONITOR_HTTP_MAX_HEADER_NAME_LENGTH = 128;
+export const MONITOR_HTTP_FORBIDDEN_HEADERS: ReadonlySet<string> =
+  new Set([
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "upgrade",
+    "proxy-connection",
+    "te",
+    "trailer",
+  ]);
+
+/** Auth scheme for the per-monitor HTTP probe; "none" clears the secret. */
+export type HttpAuthScheme = "none" | "bearer" | "basic";
+
+/** Plaintext payload accepted on create/update; never echoed back. */
+export interface HttpAuthInput {
+  scheme: HttpAuthScheme;
+  /** ``null`` keeps the existing token (update only); required for new bearer/basic. */
+  token: string | null;
+}
+
+/** Read-side projection used in MonitorResponse — exposes only metadata. */
+export interface HttpAuthSummary {
+  scheme: HttpAuthScheme;
+  configured: boolean;
+}
 
 export type CheckErrorType =
   | "timeout"
@@ -195,6 +240,12 @@ export interface Monitor {
   /** Global default interval (capabilities may override) */
   intervalSeconds: number;
   httpMethod: MonitorHttpMethod;
+  /** Phase 1.1: optional UTF-8 body for POST/PUT/PATCH probes. */
+  httpBody?: string | null;
+  /** Phase 1.1: extra request headers (validated server-side). */
+  httpHeaders?: Record<string, string> | null;
+  /** Phase 1.1: read-only projection — actual token never leaves backend. */
+  httpAuth?: HttpAuthSummary;
   expectedStatusCode: number | null;
   isEnabled: boolean;
   /** Aggregated status across all enabled capabilities */
@@ -402,6 +453,10 @@ export interface MonitorCreateRequest {
   capabilities?: Partial<MonitorCapabilities>;
   intervalSeconds: number;
   httpMethod: MonitorHttpMethod;
+  /** Phase 1.1 */
+  httpBody?: string | null;
+  httpHeaders?: Record<string, string> | null;
+  httpAuth?: HttpAuthInput | null;
   expectedStatusCode: number | null;
   tags: string[];
 }
@@ -413,6 +468,13 @@ export interface MonitorUpdateRequest {
   capabilities?: Partial<MonitorCapabilities>;
   intervalSeconds?: number;
   httpMethod?: MonitorHttpMethod;
+  /** Phase 1.1 */
+  httpBody?: string | null;
+  httpHeaders?: Record<string, string> | null;
+  httpAuth?: HttpAuthInput | null;
+  /** Set true to drop the stored body / headers without supplying a replacement. */
+  clearHttpBody?: boolean;
+  clearHttpHeaders?: boolean;
   expectedStatusCode?: number | null;
   isEnabled?: boolean;
   tags?: string[];
@@ -422,6 +484,41 @@ export interface MonitorListMeta {
   page: number;
   limit: number;
   total: number;
+}
+
+// ── Phase 1.3 / 1.4: list filters & sort (mirror backend list_monitors) ──
+
+/** ``any`` (default) overlaps the tag set; ``all`` requires every tag to be present. */
+export type MonitorTagMatch = "any" | "all";
+
+/** Whitelisted sort fields — keep in sync with `_LIST_SORT_COLUMNS` in monitor_service.py. */
+export const MONITOR_LIST_SORT_FIELDS = [
+  "createdAt",
+  "updatedAt",
+  "displayName",
+  "lastCheckAt",
+  "lastResponseTimeMs",
+  "uptimePercentage",
+] as const;
+export type MonitorListSortField = (typeof MONITOR_LIST_SORT_FIELDS)[number];
+export type MonitorListSortDirection = "asc" | "desc";
+
+/** Encoded as `<field>:<direction>` on the wire for the `?sort=` query param. */
+export interface MonitorListSort {
+  field: MonitorListSortField;
+  direction: MonitorListSortDirection;
+}
+
+export interface MonitorListFilters {
+  status?: string;
+  search?: string;
+  tags?: string[];
+  tagMatch?: MonitorTagMatch;
+  latencyMaxMs?: number | null;
+  uptimeMinPercent?: number | null;
+  sort?: MonitorListSort | null;
+  page?: number;
+  limit?: number;
 }
 
 export interface MonitorIncident {

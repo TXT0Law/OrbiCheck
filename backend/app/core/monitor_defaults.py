@@ -7,6 +7,26 @@ from typing import Any
 
 CAPABILITY_KEYS = ("uptime_only", "content_change", "ssl_expiry", "visual_change")
 
+# ── HTTP request extension caps (1.1) ──────────────────────────────────────
+# Mirrored client-side in shared/schemas/monitor.ts; keep in sync when changing.
+MAX_REQUEST_BODY_BYTES: int = 64 * 1024
+MAX_REQUEST_HEADERS_COUNT: int = 32
+MAX_REQUEST_HEADER_VALUE_LENGTH: int = 4096
+MAX_REQUEST_HEADER_NAME_LENGTH: int = 128
+FORBIDDEN_REQUEST_HEADERS: frozenset[str] = frozenset(
+    {
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "upgrade",
+        "proxy-connection",
+        "te",
+        "trailer",
+    }
+)
+ALLOWED_HTTP_AUTH_SCHEMES: frozenset[str] = frozenset({"none", "bearer", "basic"})
+
 DEFAULT_CAPABILITIES: dict[str, Any] = {
     "uptime_only": {
         "enabled": False,
