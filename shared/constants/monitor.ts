@@ -136,10 +136,22 @@ export const MONITOR_SUB_NAV = [
     group: "Visual",
     capability: "visual_change" as MonitorCapability,
   },
-  // NOTE: dns_change / ct_log sub-nav entries are intentionally omitted in
-  // Phase 2a — the corresponding `/dns` and `/ct-log` pages do not exist yet
-  // and would 404. They will be re-added in Phase 2b together with their
-  // page.tsx + components/monitor/monitor-{dns-history,ct-history}.tsx.
+  {
+    key: "dns_change",
+    label: "DNS",
+    href: "/dns",
+    icon: "Globe",
+    group: "DNS & Certs",
+    capability: "dns_change" as MonitorCapability,
+  },
+  {
+    key: "ct_log",
+    label: "CT Log",
+    href: "/ct-log",
+    icon: "ScrollText",
+    group: "DNS & Certs",
+    capability: "ct_log" as MonitorCapability,
+  },
   {
     key: "settings",
     label: "Settings",

@@ -1,4 +1,4 @@
-"""Phase 2.4 — Maintenance window CRUD endpoints."""
+"""Phase 2.4 / 2b — Maintenance window CRUD endpoints."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.common import SuccessResponse
 from app.api.v1.schemas.monitor import (
+    MaintenanceRecurrenceSpec,
     MaintenanceWindowCreateRequest,
     MaintenanceWindowResponse,
     MaintenanceWindowUpdateRequest,
@@ -22,6 +23,11 @@ router = APIRouter(prefix="/maintenance-windows", tags=["maintenance-windows"])
 
 
 def _to_response(row: MaintenanceWindow) -> MaintenanceWindowResponse:
+    rec = (
+        MaintenanceRecurrenceSpec.model_validate(row.recurrence)
+        if row.recurrence
+        else None
+    )
     return MaintenanceWindowResponse(
         id=str(row.id),
         user_id=row.user_id,
@@ -33,6 +39,8 @@ def _to_response(row: MaintenanceWindow) -> MaintenanceWindowResponse:
         suppress_probes=row.suppress_probes,
         is_enabled=row.is_enabled,
         notes=row.notes,
+        recurrence=rec,
+        tag_scope=list(row.tag_scope) if row.tag_scope else None,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -89,6 +97,8 @@ async def create_window(
             suppress_probes=payload.suppress_probes,
             notes=payload.notes,
             db=db,
+            recurrence=payload.recurrence,
+            tag_scope=payload.tag_scope,
         )
         if not payload.is_enabled:
             row.is_enabled = False
@@ -111,25 +121,47 @@ async def update_window(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    monitor_arg: object = ...
+    UNSET: object = ...
+    monitor_arg: object = UNSET
     if payload.clear_monitor_scope:
         monitor_arg = None
     elif payload.monitor_id is not None:
         monitor_arg = _parse_optional_uuid(payload.monitor_id)
+
+    rec_arg: object = UNSET
+    if payload.clear_recurrence:
+        rec_arg = None
+    elif payload.recurrence is not None:
+        rec_arg = payload.recurrence
+
+    tag_arg: object = UNSET
+    if payload.clear_tag_scope:
+        tag_arg = None
+    elif payload.tag_scope is not None:
+        tag_arg = payload.tag_scope
+
     try:
-        row = await maintenance_window_service.update_window(
-            window_id=window_id,
-            user_id=current_user.id,
-            db=db,
-            title=payload.title,
-            starts_at=payload.starts_at,
-            ends_at=payload.ends_at,
-            suppress_alerts=payload.suppress_alerts,
-            suppress_probes=payload.suppress_probes,
-            is_enabled=payload.is_enabled,
-            notes=payload.notes,
-            monitor_id=monitor_arg,
-        )
+        # ``...`` from the endpoint corresponds to the service-layer "unset"
+        # sentinel; service handles the rest.
+        kwargs = {
+            "window_id": window_id,
+            "user_id": current_user.id,
+            "db": db,
+            "title": payload.title,
+            "starts_at": payload.starts_at,
+            "ends_at": payload.ends_at,
+            "suppress_alerts": payload.suppress_alerts,
+            "suppress_probes": payload.suppress_probes,
+            "is_enabled": payload.is_enabled,
+            "notes": payload.notes,
+        }
+        if monitor_arg is not UNSET:
+            kwargs["monitor_id"] = monitor_arg
+        if rec_arg is not UNSET:
+            kwargs["recurrence"] = rec_arg
+        if tag_arg is not UNSET:
+            kwargs["tag_scope"] = tag_arg
+        row = await maintenance_window_service.update_window(**kwargs)
     except ValueError as exc:
         raise ValidationError(
             code="MAINT_WINDOW_INVALID_RANGE", message=str(exc)

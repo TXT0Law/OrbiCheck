@@ -901,7 +901,23 @@ export const monitorCtEntrySchema = z
   })
   .passthrough();
 
-// ── Phase 2.4: maintenance windows ──
+// ── Phase 2.4 / 2b: maintenance windows ──
+export const maintenanceRecurrenceSchema = z
+  .object({
+    freq: z.enum(["daily", "weekly"]),
+    byWeekday: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
+    untilAt: z.string().nullable().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.freq === "weekly" && value.byWeekday && value.byWeekday.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "weekly recurrence with empty byWeekday is ambiguous",
+        path: ["byWeekday"],
+      });
+    }
+  });
+
 export const maintenanceWindowSchema = z
   .object({
     id: z.string(),
@@ -914,6 +930,8 @@ export const maintenanceWindowSchema = z
     suppressProbes: z.boolean(),
     isEnabled: z.boolean(),
     notes: z.string().nullable().optional(),
+    recurrence: maintenanceRecurrenceSchema.nullable().optional(),
+    tagScope: z.array(z.string()).nullable().optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -928,6 +946,8 @@ export const maintenanceWindowCreateSchema = z.object({
   suppressProbes: z.boolean().optional(),
   isEnabled: z.boolean().optional(),
   notes: z.string().max(500).nullable().optional(),
+  recurrence: maintenanceRecurrenceSchema.nullable().optional(),
+  tagScope: z.array(z.string().min(1).max(50)).max(20).nullable().optional(),
 });
 
 export const maintenanceWindowUpdateSchema = z.object({
@@ -940,6 +960,10 @@ export const maintenanceWindowUpdateSchema = z.object({
   suppressProbes: z.boolean().optional(),
   isEnabled: z.boolean().optional(),
   notes: z.string().max(500).nullable().optional(),
+  recurrence: maintenanceRecurrenceSchema.nullable().optional(),
+  clearRecurrence: z.boolean().optional(),
+  tagScope: z.array(z.string().min(1).max(50)).max(20).nullable().optional(),
+  clearTagScope: z.boolean().optional(),
 });
 
 export type MonitorDnsRecordInput = z.infer<typeof monitorDnsRecordSchema>;

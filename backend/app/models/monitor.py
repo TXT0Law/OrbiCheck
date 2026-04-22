@@ -474,6 +474,16 @@ class MaintenanceWindow(Base):
         Boolean, nullable=False, default=True
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Phase 2b: optional RRULE-lite spec; when NULL the window is one-shot.
+    # Validated at the API boundary as `{"freq": "daily"|"weekly",
+    # "byWeekday": [0..6], "untilAt": ISO8601}`.
+    recurrence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Phase 2b: when set, the window only applies to monitors whose `tags`
+    # array intersects with this list. Empty/NULL keeps the legacy "all
+    # monitors of this user" semantics.
+    tag_scope: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String(50)), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

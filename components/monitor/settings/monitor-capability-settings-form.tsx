@@ -13,6 +13,8 @@ import type {
 } from "@/shared/types/monitor";
 
 import { MonitorContentThresholdsForm } from "./monitor-content-thresholds-form";
+import { MonitorCtLogThresholdsForm } from "./monitor-ct-log-thresholds-form";
+import { MonitorDnsThresholdsForm } from "./monitor-dns-thresholds-form";
 import { MonitorSslThresholdsForm } from "./monitor-ssl-thresholds-form";
 import { MonitorUptimeThresholdsForm } from "./monitor-uptime-thresholds-form";
 import { MonitorVisualThresholdsForm } from "./monitor-visual-thresholds-form";
@@ -180,6 +182,18 @@ export function MonitorCapabilitySettingsForm({
         ) : null}
         {capability === "visual_change" ? (
           <MonitorVisualThresholdsForm
+            value={thresholds as never}
+            onChange={setThresholds as never}
+          />
+        ) : null}
+        {capability === "dns_change" ? (
+          <MonitorDnsThresholdsForm
+            value={thresholds as never}
+            onChange={setThresholds as never}
+          />
+        ) : null}
+        {capability === "ct_log" ? (
+          <MonitorCtLogThresholdsForm
             value={thresholds as never}
             onChange={setThresholds as never}
           />

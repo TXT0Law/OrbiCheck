@@ -1071,7 +1071,35 @@ class MonitorCtEntryResponse(BaseModel):
     alerted_at: datetime | None = None
 
 
-# ── Phase 2.4 — Maintenance window CRUD ──────────────────────────────
+# ── Phase 2.4 / 2b — Maintenance window CRUD + recurrence ────────────
+
+
+# RRULE-lite: only daily/weekly are supported in Phase 2b. ``byWeekday`` is
+# only meaningful for ``weekly`` (0=Monday … 6=Sunday, matching
+# ``datetime.weekday()``). ``untilAt`` is an inclusive upper bound on
+# occurrence start — beyond that the window stops repeating.
+class MaintenanceRecurrenceSpec(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True, extra="forbid"
+    )
+
+    freq: Literal["daily", "weekly"]
+    by_weekday: list[int] | None = Field(default=None, max_length=7)
+    until_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "MaintenanceRecurrenceSpec":
+        if self.by_weekday is not None:
+            for day in self.by_weekday:
+                if day < 0 or day > 6:
+                    raise ValueError("byWeekday entries must be in [0, 6]")
+            # Dedupe + sort for stable storage
+            self.by_weekday = sorted(set(self.by_weekday))
+        if self.freq == "daily" and self.by_weekday:
+            # Daily recurrences ignore byWeekday — drop it instead of erroring
+            # so the UI can keep the value cached.
+            self.by_weekday = None
+        return self
 
 
 class MaintenanceWindowResponse(BaseModel):
@@ -1087,6 +1115,8 @@ class MaintenanceWindowResponse(BaseModel):
     suppress_probes: bool
     is_enabled: bool
     notes: str | None = None
+    recurrence: MaintenanceRecurrenceSpec | None = None
+    tag_scope: list[str] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -1104,11 +1134,16 @@ class MaintenanceWindowCreateRequest(BaseModel):
     suppress_probes: bool = False
     is_enabled: bool = True
     notes: str | None = Field(default=None, max_length=500)
+    recurrence: MaintenanceRecurrenceSpec | None = None
+    tag_scope: list[str] | None = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def _range_ok(self) -> "MaintenanceWindowCreateRequest":
         if self.ends_at <= self.starts_at:
             raise ValueError("endsAt must be after startsAt")
+        if self.tag_scope is not None:
+            cleaned = sorted({t.strip() for t in self.tag_scope if t.strip()})
+            self.tag_scope = cleaned or None
         return self
 
 
@@ -1126,3 +1161,14 @@ class MaintenanceWindowUpdateRequest(BaseModel):
     suppress_probes: bool | None = None
     is_enabled: bool | None = None
     notes: str | None = Field(default=None, max_length=500)
+    recurrence: MaintenanceRecurrenceSpec | None = None
+    clear_recurrence: bool = False
+    tag_scope: list[str] | None = Field(default=None, max_length=20)
+    clear_tag_scope: bool = False
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "MaintenanceWindowUpdateRequest":
+        if self.tag_scope is not None:
+            cleaned = sorted({t.strip() for t in self.tag_scope if t.strip()})
+            self.tag_scope = cleaned or None
+        return self

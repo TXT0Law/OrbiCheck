@@ -642,7 +642,18 @@ export interface MonitorCtEntry {
   alertedAt: string | null;
 }
 
-// ── Phase 2.4 — Maintenance windows ──
+// ── Phase 2.4 / 2b — Maintenance windows ──
+
+/** RRULE-lite recurrence spec stored on a maintenance window. */
+export type MaintenanceRecurrenceFreq = "daily" | "weekly";
+
+export interface MaintenanceRecurrenceSpec {
+  freq: MaintenanceRecurrenceFreq;
+  /** Allowed weekdays (0=Mon … 6=Sun). Only meaningful for `weekly`. */
+  byWeekday?: number[] | null;
+  /** Inclusive ISO timestamp; recurrence stops after this. */
+  untilAt?: string | null;
+}
 
 export interface MaintenanceWindow {
   id: string;
@@ -655,6 +666,9 @@ export interface MaintenanceWindow {
   suppressProbes: boolean;
   isEnabled: boolean;
   notes: string | null;
+  recurrence: MaintenanceRecurrenceSpec | null;
+  /** When non-empty, only monitors with intersecting tags are matched. */
+  tagScope: string[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -668,6 +682,8 @@ export interface MaintenanceWindowCreateRequest {
   suppressProbes?: boolean;
   isEnabled?: boolean;
   notes?: string | null;
+  recurrence?: MaintenanceRecurrenceSpec | null;
+  tagScope?: string[] | null;
 }
 
 export interface MaintenanceWindowUpdateRequest {
@@ -680,4 +696,8 @@ export interface MaintenanceWindowUpdateRequest {
   suppressProbes?: boolean;
   isEnabled?: boolean;
   notes?: string | null;
+  recurrence?: MaintenanceRecurrenceSpec | null;
+  clearRecurrence?: boolean;
+  tagScope?: string[] | null;
+  clearTagScope?: boolean;
 }
