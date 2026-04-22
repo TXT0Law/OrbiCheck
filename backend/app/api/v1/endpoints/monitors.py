@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.common import SuccessResponse
 from app.api.v1.schemas.monitor import (
+    MaintenanceRecurrenceSpec,
+    MaintenanceWindowResponse,
     MonitorBaselineResponse,
     MonitorBulkActionFailure,
     MonitorBulkActionRequest,
@@ -18,7 +20,10 @@ from app.api.v1.schemas.monitor import (
     MonitorChangeResponse,
     MonitorCheckResponse,
     MonitorCreateRequest,
+    MonitorCtEntryResponse,
     MonitorDiffResponse,
+    MonitorDnsChangeResponse,
+    MonitorDnsRecordResponse,
     MonitorResponse,
     MonitorSslStatusResponse,
     MonitorTimeSeriesData,
@@ -30,7 +35,12 @@ from app.api.v1.schemas.monitor import (
 from app.core.config import settings
 from app.core.deps import CurrentUser, get_current_user, get_db, get_redis
 from app.core.exceptions import AppException
-from app.services import monitor_service
+from app.services import (
+    ct_log_service,
+    dns_monitor_service,
+    maintenance_window_service,
+    monitor_service,
+)
 
 router = APIRouter(prefix="/monitors", tags=["monitors"])
 
@@ -594,3 +604,169 @@ async def get_ssl_status(
     if live:
         await db.commit()
     return SuccessResponse(data=data)
+
+
+# ── Phase 2.2 — DNS change ────────────────────────────────────────────
+
+
+def _dns_record_to_response(row) -> MonitorDnsRecordResponse:
+    return MonitorDnsRecordResponse(
+        id=str(row.id),
+        monitor_id=str(row.monitor_id),
+        record_type=row.record_type,
+        values=list(row.values or []),
+        observed_at=row.observed_at,
+        last_change_at=row.last_change_at,
+    )
+
+
+def _dns_change_to_response(row) -> MonitorDnsChangeResponse:
+    return MonitorDnsChangeResponse(
+        id=str(row.id),
+        monitor_id=str(row.monitor_id),
+        record_type=row.record_type,
+        detected_at=row.detected_at,
+        previous_values=list(row.previous_values or []),
+        current_values=list(row.current_values or []),
+        added_values=list(row.added_values or []),
+        removed_values=list(row.removed_values or []),
+    )
+
+
+@router.get(
+    "/{monitor_id}/dns/records",
+    response_model=SuccessResponse[list[MonitorDnsRecordResponse]],
+)
+async def list_dns_records(
+    monitor_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await monitor_service.get_monitor(monitor_id, current_user.id, db)
+    rows = await dns_monitor_service.list_dns_records(monitor_id, db)
+    return SuccessResponse(data=[_dns_record_to_response(r) for r in rows])
+
+
+@router.get(
+    "/{monitor_id}/dns/changes",
+    response_model=SuccessResponse[list[MonitorDnsChangeResponse]],
+)
+async def list_dns_changes(
+    monitor_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await monitor_service.get_monitor(monitor_id, current_user.id, db)
+    offset = (page - 1) * limit
+    rows = await dns_monitor_service.list_dns_changes(
+        monitor_id, db, limit=limit, offset=offset
+    )
+    return SuccessResponse(data=[_dns_change_to_response(r) for r in rows])
+
+
+# ── Phase 2.3 — CT log ────────────────────────────────────────────────
+
+
+def _ct_entry_to_response(row) -> MonitorCtEntryResponse:
+    return MonitorCtEntryResponse(
+        id=str(row.id),
+        monitor_id=str(row.monitor_id),
+        hostname=row.hostname,
+        serial_number=row.serial_number,
+        leaf_sha256=row.leaf_sha256,
+        issuer_name=row.issuer_name,
+        common_name=row.common_name,
+        not_before=row.not_before,
+        not_after=row.not_after,
+        observed_at=row.observed_at,
+        crtsh_id=row.crtsh_id,
+        pin_violation=row.pin_violation,
+        alerted_at=row.alerted_at,
+    )
+
+
+@router.get(
+    "/{monitor_id}/ct/entries",
+    response_model=SuccessResponse[list[MonitorCtEntryResponse]],
+)
+async def list_ct_entries(
+    monitor_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await monitor_service.get_monitor(monitor_id, current_user.id, db)
+    offset = (page - 1) * limit
+    rows = await ct_log_service.list_ct_entries(
+        monitor_id, db, limit=limit, offset=offset
+    )
+    return SuccessResponse(data=[_ct_entry_to_response(r) for r in rows])
+
+
+# ── Phase 2b — Active maintenance windows for a monitor ──────────────
+
+
+@router.get(
+    "/{monitor_id}/maintenance/active",
+    response_model=SuccessResponse[list[MaintenanceWindowResponse]],
+)
+async def list_active_maintenance_windows(
+    monitor_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return maintenance windows currently in effect for this monitor.
+
+    The monitor detail page uses this to render an "in maintenance" banner
+    and short-circuit alerting expectations.
+    """
+    monitor = await monitor_service.get_monitor(monitor_id, current_user.id, db)
+    summaries = await maintenance_window_service.list_active_windows(
+        current_user.id,
+        monitor_id,
+        db,
+        monitor_tags=list(monitor.tags or []),
+    )
+    if not summaries:
+        return SuccessResponse(data=[])
+    rows = await maintenance_window_service.list_windows_for_user(
+        current_user.id,
+        db,
+        monitor_id=monitor_id,
+        include_disabled=False,
+    )
+    by_id = {row.id: row for row in rows}
+    out: list[MaintenanceWindowResponse] = []
+    for summary in summaries:
+        row = by_id.get(summary.id)
+        if row is None:
+            continue
+        rec = (
+            MaintenanceRecurrenceSpec.model_validate(row.recurrence)
+            if row.recurrence
+            else None
+        )
+        out.append(
+            MaintenanceWindowResponse(
+                id=str(row.id),
+                user_id=row.user_id,
+                monitor_id=str(row.monitor_id) if row.monitor_id else None,
+                title=row.title,
+                # Surface the *occurrence* range (recurrence-aware) so the UI
+                # can show "ends at 03:00" instead of the original date.
+                starts_at=summary.starts_at,
+                ends_at=summary.ends_at,
+                suppress_alerts=row.suppress_alerts,
+                suppress_probes=row.suppress_probes,
+                is_enabled=row.is_enabled,
+                notes=row.notes,
+                recurrence=rec,
+                tag_scope=list(row.tag_scope) if row.tag_scope else None,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+        )
+    return SuccessResponse(data=out)

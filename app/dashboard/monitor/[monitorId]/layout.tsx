@@ -1,3 +1,4 @@
+import { MonitorActiveMaintenanceBanner } from "@/components/monitor/monitor-active-maintenance-banner";
 import { MonitorDetailHeader } from "@/components/monitor/monitor-detail-header";
 import { MonitorDetailProvider } from "@/components/monitor/monitor-detail-context";
 import { MonitorSubNav } from "@/components/monitor/monitor-sub-nav";
@@ -15,6 +16,7 @@ export default function MonitorDetailLayout({ children, params }: MonitorDetailL
         <div className="md:pl-[260px]">
           <div className="space-y-6 p-4 md:p-8">
             <MonitorDetailHeader />
+            <MonitorActiveMaintenanceBanner monitorId={params.monitorId} />
             <main>{children}</main>
           </div>
         </div>

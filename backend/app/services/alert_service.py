@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.exceptions import NotFoundError
 from app.models.alert_event import AlertEvent
 from app.models.monitor import Monitor
+from app.services.maintenance_window_service import is_alert_suppressed
 from app.services.user_notification_settings import (
     dispatch_alert_email,
     dispatch_monitor_webhook,
@@ -247,6 +248,25 @@ async def evaluate_and_dispatch_alert(
             dispatched_channels=[],
             suppressed=True,
             suppress_reason="alert_disabled",
+        )
+        return None
+
+    active_window = await is_alert_suppressed(
+        monitor.user_id, monitor.id, db, at=current_time
+    )
+    if active_window is not None:
+        await _create_alert_event(
+            monitor=monitor,
+            capability=capability,
+            event_type=event_type,
+            severity=severity,
+            actual_value=actual_value,
+            message=message,
+            db=db,
+            threshold_config=threshold_snapshot,
+            dispatched_channels=[],
+            suppressed=True,
+            suppress_reason=f"maintenance_window:{active_window.id}",
         )
         return None
 

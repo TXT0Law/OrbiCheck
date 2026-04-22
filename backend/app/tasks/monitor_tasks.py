@@ -16,6 +16,7 @@ from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.monitor import (
+    MaintenanceWindow,
     Monitor,
     MonitorChange,
     MonitorSnapshot,
@@ -30,6 +31,10 @@ from app.services.change_retention import (
     plan_consecutive_duplicate_fingerprint_deletions,
 )
 from app.services.content_change_helpers import get_effective_dedup_window_seconds
+from app.services.maintenance_window_service import (
+    matches_tag_scope,
+    occurrence_at,
+)
 from app.services.monitor_service import execute_check
 from app.services.snapshot_retention import _Snap, plan_snapshot_ids_to_delete
 from app.services.visual_retention import _VisCap, plan_visual_capture_ids_to_delete
@@ -53,6 +58,33 @@ def _get_dispatch_engine() -> Engine:
     return _dispatch_engine
 
 
+def _is_probe_suppressed_sync(
+    monitor: Monitor,
+    user_windows,
+    now,
+) -> bool:
+    """Synchronous parity wrapper for ``is_probe_suppressed``.
+
+    Mirrors the recurrence + tag-scope evaluation in
+    ``maintenance_window_service.list_active_windows`` so the Celery dispatch
+    task (which runs in a sync ``Session``) does not have to spin up an async
+    runtime per tick. Returns ``True`` as soon as one matching, currently
+    occurring, suppress-probes window is found.
+    """
+    if not user_windows:
+        return False
+    monitor_tags = list(monitor.tags or [])
+    for window in user_windows:
+        if window.monitor_id is not None and window.monitor_id != monitor.id:
+            continue
+        if not matches_tag_scope(window, monitor_tags):
+            continue
+        if occurrence_at(window, now) is None:
+            continue
+        return True
+    return False
+
+
 @celery_app.task(name="app.tasks.monitor_tasks.dispatch_monitor_checks")
 def dispatch_monitor_checks() -> dict:
     """Enqueue checks for enabled monitors whose interval has elapsed."""
@@ -60,10 +92,34 @@ def dispatch_monitor_checks() -> dict:
 
     now = datetime.now(timezone.utc)
     dispatched = 0
+    suppressed = 0
     with Session(_get_dispatch_engine()) as db:
         stmt = select(Monitor).where(Monitor.is_enabled.is_(True))
         monitors = db.scalars(stmt).all()
+        # Phase 2b: pull every enabled probe-suppressing window then evaluate
+        # recurrence + tag_scope in Python so the dispatcher honors the same
+        # rules as ``maintenance_window_service.list_active_windows`` /
+        # ``alert_service.is_alert_suppressed``. The legacy SQL filter
+        # ``starts_at <= now AND ends_at > now`` ignored recurring occurrences
+        # past day 1 and treated every user-wide window as "suppress all
+        # monitors", which made tag-scoped windows over-suppress.
+        candidate_windows = db.scalars(
+            select(MaintenanceWindow).where(
+                MaintenanceWindow.is_enabled.is_(True),
+                MaintenanceWindow.suppress_probes.is_(True),
+            )
+        ).all()
+        # Group by user once so the per-monitor inner loop stays small even
+        # when a user has many windows.
+        windows_by_user: dict[int, list[MaintenanceWindow]] = {}
+        for w in candidate_windows:
+            windows_by_user.setdefault(w.user_id, []).append(w)
         for m in monitors:
+            if _is_probe_suppressed_sync(
+                m, windows_by_user.get(m.user_id, ()), now
+            ):
+                suppressed += 1
+                continue
             if m.last_check_at is None:
                 due = True
             else:
@@ -75,7 +131,11 @@ def dispatch_monitor_checks() -> dict:
             if due:
                 run_monitor_check.delay(str(m.id))
                 dispatched += 1
-    return {"dispatched": dispatched, "checked_at": now.isoformat()}
+    return {
+        "dispatched": dispatched,
+        "suppressed": suppressed,
+        "checked_at": now.isoformat(),
+    }
 
 
 @celery_app.task(

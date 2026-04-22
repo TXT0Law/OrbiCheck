@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 import {
   monitorBaselineSchema,
   monitorBulkActionResponseSchema,
@@ -43,6 +41,7 @@ import {
 } from "@/lib/utils/monitor-capabilities";
 
 import { ApiError, apiClient } from "./client";
+import { parseList, parseOrThrow, parseSingle } from "./_validate";
 import {
   MOCK_MONITORS,
   buildMonitorFromCreateRequest,
@@ -57,56 +56,6 @@ import {
 } from "./monitors-mock";
 
 const BASE = "/monitors";
-
-const INVALID_RESPONSE_STATUS = 502;
-const INVALID_RESPONSE_CODE = "INVALID_RESPONSE_SHAPE";
-
-/**
- * Parse `data` against `schema` and throw a structured `ApiError` on failure.
- * Centralizes boundary validation so every endpoint surfaces the same error
- * code (`INVALID_RESPONSE_SHAPE`) and the React Query layer can render a
- * consistent toast instead of letting `NaN` / `undefined` leak into UI state.
- */
-function parseOrThrow<T>(schema: z.ZodType<T>, data: unknown, context: string): T {
-  const result = schema.safeParse(data);
-  if (!result.success) {
-    throw new ApiError(`Invalid ${context} response from server`, {
-      status: INVALID_RESPONSE_STATUS,
-      code: INVALID_RESPONSE_CODE,
-      details: result.error.issues,
-    });
-  }
-  return result.data;
-}
-
-/**
- * Validate a single object payload then re-narrow to the strict shared
- * TypeScript type. Zod's inferred type tolerates passthrough keys; the strict
- * `T` parameter lets callers stay typed without sprinkling explicit `as`
- * assertions throughout the API client (which would defeat the boundary
- * validation contract in `lib/AGENTS.md`).
- */
-function parseSingle<T>(
-  schema: z.ZodTypeAny,
-  raw: unknown,
-  context: string,
-): T {
-  const validated = parseOrThrow(schema as z.ZodType<unknown>, raw, context);
-  return validated as unknown as T;
-}
-
-function parseList<T>(
-  itemSchema: z.ZodTypeAny,
-  raw: unknown,
-  context: string,
-): T[] {
-  const validated = parseOrThrow(
-    z.array(itemSchema as z.ZodType<unknown>),
-    raw,
-    context,
-  );
-  return validated as unknown as T[];
-}
 
 /**
  * Internal narrow that re-types runtime-validated data into the strict shared
@@ -146,6 +95,9 @@ const MONITOR_FIELD_ALIASES: Record<string, string> = {
   totalChecks: "total_checks",
   uptimePercentage: "uptime_percentage",
   avgResponseTimeMs: "avg_response_time_ms",
+  p50ResponseTimeMs: "p50_response_time_ms",
+  p95ResponseTimeMs: "p95_response_time_ms",
+  p99ResponseTimeMs: "p99_response_time_ms",
   createdAt: "created_at",
   updatedAt: "updated_at",
   capabilityStatuses: "capability_statuses",

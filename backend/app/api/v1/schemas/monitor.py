@@ -18,8 +18,28 @@ from pydantic import (
 )
 from pydantic.alias_generators import to_camel
 
-ALLOWED_CAPABILITIES = frozenset({"uptime_only", "content_change", "ssl_expiry", "visual_change"})
+ALLOWED_CAPABILITIES = frozenset(
+    {
+        "uptime_only",
+        "content_change",
+        "ssl_expiry",
+        "visual_change",
+        "dns_change",
+        "ct_log",
+    }
+)
 QUIET_HOURS_PATTERN = re.compile(r"^\d{2}:\d{2}$")
+# Phase 2.2 / 2.3 limits — kept here so the backend stays the source of truth.
+DNS_RECORD_TYPES: tuple[str, ...] = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "CAA")
+DEFAULT_DNS_RECORD_TYPES: tuple[str, ...] = ("A", "AAAA", "CNAME")
+MAX_DNS_NAMESERVERS: int = 8
+MAX_CT_PINNED_SERIALS: int = 32
+# crt.sh exposes certificate serial numbers (variable length hex, RFC 5280 caps
+# them at 20 octets / 40 hex chars). We allow up to 64 hex chars to be lenient.
+CT_PIN_SERIAL_PATTERN = re.compile(r"^[a-fA-F0-9]{1,64}$")
+IP_ADDRESS_PATTERN = re.compile(
+    r"^(?:[0-9]{1,3}(?:\.[0-9]{1,3}){3}|[0-9A-Fa-f:]+)$"
+)
 
 # 1.1: HTTP request extension limits / policy. Mirrored to the frontend
 # in shared/schemas/monitor.ts; if you change a number, update both sides.
@@ -352,6 +372,145 @@ class VisualCapabilityConfigUpdateSchema(PerCapabilityConfigUpdateSchema):
     thresholds: VisualThresholdsUpdateSchema | None = None
 
 
+def _validate_dns_record_types(value: list[str]) -> list[str]:
+    if not value:
+        raise ValueError("recordTypes must include at least one entry")
+    if len(value) > len(DNS_RECORD_TYPES):
+        raise ValueError("Too many DNS record types")
+    seen: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str):
+            raise TypeError("recordTypes entries must be strings")
+        upper = raw.strip().upper()
+        if upper not in DNS_RECORD_TYPES:
+            raise ValueError(f"Unsupported DNS record type: {raw}")
+        if upper not in seen:
+            seen.append(upper)
+    return seen
+
+
+def _validate_nameservers(value: list[str]) -> list[str]:
+    if len(value) > MAX_DNS_NAMESERVERS:
+        raise ValueError(
+            f"nameservers supports at most {MAX_DNS_NAMESERVERS} entries"
+        )
+    out: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str):
+            raise TypeError("nameservers entries must be strings")
+        ns = raw.strip()
+        if not ns:
+            continue
+        if not IP_ADDRESS_PATTERN.match(ns):
+            raise ValueError(f"Invalid nameserver address: {raw}")
+        if ns not in out:
+            out.append(ns)
+    return out
+
+
+def _validate_pinned_serials(value: list[str]) -> list[str]:
+    if len(value) > MAX_CT_PINNED_SERIALS:
+        raise ValueError(
+            f"pinnedSerials supports at most {MAX_CT_PINNED_SERIALS} entries"
+        )
+    out: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str):
+            raise TypeError("pinnedSerials entries must be strings")
+        norm = raw.strip().lower().replace(":", "")
+        if not CT_PIN_SERIAL_PATTERN.match(norm):
+            raise ValueError(f"Invalid certificate serial number: {raw}")
+        if norm not in out:
+            out.append(norm)
+    return out
+
+
+class DnsThresholdsSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+
+    record_types: list[str] = Field(default_factory=lambda: list(DEFAULT_DNS_RECORD_TYPES))
+    nameservers: list[str] = Field(default_factory=list)
+    query_timeout_seconds: int = Field(default=5, ge=1, le=60)
+    alert_on_change: bool = True
+
+    @field_validator("record_types")
+    @classmethod
+    def record_types_ok(cls, v: list[str]) -> list[str]:
+        return _validate_dns_record_types(v)
+
+    @field_validator("nameservers")
+    @classmethod
+    def nameservers_ok(cls, v: list[str]) -> list[str]:
+        return _validate_nameservers(v)
+
+
+class DnsThresholdsUpdateSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+
+    record_types: list[str] | None = None
+    nameservers: list[str] | None = None
+    query_timeout_seconds: int | None = Field(default=None, ge=1, le=60)
+    alert_on_change: bool | None = None
+
+    @field_validator("record_types")
+    @classmethod
+    def record_types_ok(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        return _validate_dns_record_types(v)
+
+    @field_validator("nameservers")
+    @classmethod
+    def nameservers_ok(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        return _validate_nameservers(v)
+
+
+class CtThresholdsSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+
+    pinned_serials: list[str] = Field(default_factory=list)
+    lookback_hours: int = Field(default=24, ge=1, le=720)
+    alert_on_new_entry: bool = True
+
+    @field_validator("pinned_serials")
+    @classmethod
+    def pinned_ok(cls, v: list[str]) -> list[str]:
+        return _validate_pinned_serials(v)
+
+
+class CtThresholdsUpdateSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+
+    pinned_serials: list[str] | None = None
+    lookback_hours: int | None = Field(default=None, ge=1, le=720)
+    alert_on_new_entry: bool | None = None
+
+    @field_validator("pinned_serials")
+    @classmethod
+    def pinned_ok(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        return _validate_pinned_serials(v)
+
+
+class DnsCapabilityConfigSchema(PerCapabilityConfigSchema):
+    thresholds: DnsThresholdsSchema = Field(default_factory=DnsThresholdsSchema)
+
+
+class DnsCapabilityConfigUpdateSchema(PerCapabilityConfigUpdateSchema):
+    thresholds: DnsThresholdsUpdateSchema | None = None
+
+
+class CtCapabilityConfigSchema(PerCapabilityConfigSchema):
+    thresholds: CtThresholdsSchema = Field(default_factory=CtThresholdsSchema)
+
+
+class CtCapabilityConfigUpdateSchema(PerCapabilityConfigUpdateSchema):
+    thresholds: CtThresholdsUpdateSchema | None = None
+
+
 class MonitorCapabilitiesSchema(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
@@ -359,6 +518,8 @@ class MonitorCapabilitiesSchema(BaseModel):
     content_change: ContentCapabilityConfigSchema
     ssl_expiry: SslCapabilityConfigSchema
     visual_change: VisualCapabilityConfigSchema
+    dns_change: DnsCapabilityConfigSchema = Field(default_factory=DnsCapabilityConfigSchema)
+    ct_log: CtCapabilityConfigSchema = Field(default_factory=CtCapabilityConfigSchema)
 
     @model_validator(mode="before")
     @classmethod
@@ -373,6 +534,8 @@ class MonitorCapabilitiesPatchSchema(BaseModel):
     content_change: ContentCapabilityConfigUpdateSchema | None = None
     ssl_expiry: SslCapabilityConfigUpdateSchema | None = None
     visual_change: VisualCapabilityConfigUpdateSchema | None = None
+    dns_change: DnsCapabilityConfigUpdateSchema | None = None
+    ct_log: CtCapabilityConfigUpdateSchema | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -583,6 +746,9 @@ class MonitorResponse(BaseModel):
     consecutive_failures: int
     uptime_percentage: float | None
     avg_response_time_ms: float | None
+    p50_response_time_ms: float | None = None
+    p95_response_time_ms: float | None = None
+    p99_response_time_ms: float | None = None
     last_success: bool | None = None
     tags: list[str]
     created_at: datetime
@@ -708,6 +874,9 @@ class MonitorTimeSeriesBucket(BaseModel):
     avg_response_time: float
     min_response_time: float
     max_response_time: float
+    p50_response_time: float = 0.0
+    p95_response_time: float = 0.0
+    p99_response_time: float = 0.0
     check_count: int
 
 
@@ -760,7 +929,9 @@ class MonitorUptimeSummaryResponse(BaseModel):
     failed_checks: int
     uptime_percentage: float
     avg_response_time_ms: float
+    p50_response_time_ms: float = 0.0
     p95_response_time_ms: float
+    p99_response_time_ms: float = 0.0
     incidents: int
     current_streak: MonitorCurrentStreak | None = None
     failure_distribution: MonitorFailureDistribution
@@ -850,3 +1021,154 @@ class MonitorBulkActionResponse(BaseModel):
     succeeded: list[str] = Field(default_factory=list)
     failed: list[MonitorBulkActionFailure] = Field(default_factory=list)
     requested: int = 0
+
+
+# ── Phase 2.2 — DNS change responses ──────────────────────────────────
+
+
+class MonitorDnsRecordResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    monitor_id: str
+    record_type: str
+    values: list[str]
+    observed_at: datetime
+    last_change_at: datetime | None = None
+
+
+class MonitorDnsChangeResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    monitor_id: str
+    record_type: str
+    detected_at: datetime
+    previous_values: list[str]
+    current_values: list[str]
+    added_values: list[str]
+    removed_values: list[str]
+
+
+# ── Phase 2.3 — CT log responses ──────────────────────────────────────
+
+
+class MonitorCtEntryResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    monitor_id: str
+    hostname: str
+    serial_number: str
+    leaf_sha256: str | None = None
+    issuer_name: str | None = None
+    common_name: str | None = None
+    not_before: datetime | None = None
+    not_after: datetime | None = None
+    observed_at: datetime
+    crtsh_id: str | None = None
+    pin_violation: bool = False
+    alerted_at: datetime | None = None
+
+
+# ── Phase 2.4 / 2b — Maintenance window CRUD + recurrence ────────────
+
+
+# RRULE-lite: only daily/weekly are supported in Phase 2b. ``byWeekday`` is
+# only meaningful for ``weekly`` (0=Monday … 6=Sunday, matching
+# ``datetime.weekday()``). ``untilAt`` is an inclusive upper bound on
+# occurrence start — beyond that the window stops repeating.
+class MaintenanceRecurrenceSpec(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True, extra="forbid"
+    )
+
+    freq: Literal["daily", "weekly"]
+    by_weekday: list[int] | None = Field(default=None, max_length=7)
+    until_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "MaintenanceRecurrenceSpec":
+        if self.by_weekday is not None:
+            for day in self.by_weekday:
+                if day < 0 or day > 6:
+                    raise ValueError("byWeekday entries must be in [0, 6]")
+            # Dedupe + sort for stable storage
+            self.by_weekday = sorted(set(self.by_weekday))
+        if self.freq == "daily" and self.by_weekday:
+            # Daily recurrences ignore byWeekday — drop it instead of erroring
+            # so the UI can keep the value cached.
+            self.by_weekday = None
+        return self
+
+
+class MaintenanceWindowResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    user_id: int
+    monitor_id: str | None = None
+    title: str
+    starts_at: datetime
+    ends_at: datetime
+    suppress_alerts: bool
+    suppress_probes: bool
+    is_enabled: bool
+    notes: str | None = None
+    recurrence: MaintenanceRecurrenceSpec | None = None
+    tag_scope: list[str] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MaintenanceWindowCreateRequest(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True, extra="forbid"
+    )
+
+    monitor_id: str | None = None
+    title: str = Field(min_length=1, max_length=120)
+    starts_at: datetime
+    ends_at: datetime
+    suppress_alerts: bool = True
+    suppress_probes: bool = False
+    is_enabled: bool = True
+    notes: str | None = Field(default=None, max_length=500)
+    recurrence: MaintenanceRecurrenceSpec | None = None
+    tag_scope: list[str] | None = Field(default=None, max_length=20)
+
+    @model_validator(mode="after")
+    def _range_ok(self) -> "MaintenanceWindowCreateRequest":
+        if self.ends_at <= self.starts_at:
+            raise ValueError("endsAt must be after startsAt")
+        if self.tag_scope is not None:
+            cleaned = sorted({t.strip() for t in self.tag_scope if t.strip()})
+            self.tag_scope = cleaned or None
+        return self
+
+
+class MaintenanceWindowUpdateRequest(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel, populate_by_name=True, extra="forbid"
+    )
+
+    monitor_id: str | None = None
+    clear_monitor_scope: bool = False
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    suppress_alerts: bool | None = None
+    suppress_probes: bool | None = None
+    is_enabled: bool | None = None
+    notes: str | None = Field(default=None, max_length=500)
+    recurrence: MaintenanceRecurrenceSpec | None = None
+    clear_recurrence: bool = False
+    tag_scope: list[str] | None = Field(default=None, max_length=20)
+    clear_tag_scope: bool = False
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "MaintenanceWindowUpdateRequest":
+        if self.tag_scope is not None:
+            cleaned = sorted({t.strip() for t in self.tag_scope if t.strip()})
+            self.tag_scope = cleaned or None
+        return self
