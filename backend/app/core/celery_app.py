@@ -18,7 +18,12 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    imports=["app.tasks.scan_tasks", "app.tasks.monitor_tasks", "app.tasks.report_tasks"],
+    imports=[
+        "app.tasks.scan_tasks",
+        "app.tasks.monitor_tasks",
+        "app.tasks.report_tasks",
+        "app.tasks.notification_tasks",
+    ],
     beat_schedule={
         "dispatch-monitor-checks": {
             "task": "app.tasks.monitor_tasks.dispatch_monitor_checks",
@@ -27,6 +32,10 @@ celery_app.conf.update(
         "cleanup-monitor-snapshots": {
             "task": "app.tasks.monitor_tasks.cleanup_monitor_snapshots",
             "schedule": crontab(hour=3, minute=0),
+        },
+        "retry-notification-dispatch": {
+            "task": "app.tasks.notification_tasks.retry_notification_dispatch",
+            "schedule": 60.0,
         },
     },
 )

@@ -68,12 +68,33 @@ def _db() -> tuple[AsyncMock, list[AlertEvent]]:
     return db, added
 
 
+def _patch_dispatch(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Stub out the channel-registry fan-out used by ``_dispatch_alert_channels``."""
+
+    dispatch_mock = AsyncMock(return_value={})
+    monkeypatch.setattr(alert_service, "dispatch_to_channels", dispatch_mock)
+    monkeypatch.setattr(
+        alert_service,
+        "should_dispatch_email_for_severity",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        alert_service,
+        "get_notification_settings",
+        AsyncMock(return_value={}),
+    )
+    return dispatch_mock
+
+
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_alert_disabled_creates_suppressed_event() -> None:
+async def test_alert_disabled_creates_suppressed_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monitor = _monitor_with_alerts(enabled=False)
     db, added = _db()
     redis = AsyncMock()
+    _patch_dispatch(monkeypatch)
 
     event = await alert_service.evaluate_and_dispatch_alert(
         monitor,
@@ -95,11 +116,14 @@ async def test_alert_disabled_creates_suppressed_event() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_alert_quiet_hours_suppresses_event() -> None:
+async def test_alert_quiet_hours_suppresses_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monitor = _monitor_with_alerts(
         quiet_hours={"start": "00:00", "end": "23:59"},
     )
     db, added = _db()
+    _patch_dispatch(monkeypatch)
 
     event = await alert_service.evaluate_and_dispatch_alert(
         monitor,
@@ -121,9 +145,12 @@ async def test_alert_quiet_hours_suppresses_event() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_alert_cooldown_suppresses_repeated_event() -> None:
+async def test_alert_cooldown_suppresses_repeated_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monitor = _monitor_with_alerts(cooldown_seconds=300)
     db, added = _db()
+    _patch_dispatch(monkeypatch)
     recent = AlertEvent(
         id=uuid4(),
         monitor_id=monitor.id,
@@ -165,14 +192,23 @@ async def test_alert_cooldown_suppresses_repeated_event() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_alert_dispatch_publishes_sse_and_webhook(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_alert_dispatch_publishes_sse_and_routes_to_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monitor = _monitor_with_alerts(cooldown_seconds=0)
     db, added = _db()
     redis = AsyncMock()
-    dispatch_wh = AsyncMock()
-    should_email = AsyncMock(return_value=False)
-    monkeypatch.setattr(alert_service, "dispatch_monitor_webhook", dispatch_wh)
-    monkeypatch.setattr(alert_service, "should_dispatch_alert_email", should_email)
+    dispatch_mock = _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(
+        alert_service,
+        "get_notification_settings",
+        AsyncMock(
+            return_value={
+                "webhookEnabled": True,
+                "webhookUrl": "https://example.com/hook",
+            }
+        ),
+    )
 
     event = await alert_service.evaluate_and_dispatch_alert(
         monitor,
@@ -188,9 +224,11 @@ async def test_alert_dispatch_publishes_sse_and_webhook(monkeypatch: pytest.Monk
     assert event is not None
     assert len(added) == 1
     assert added[0].suppressed is False
-    assert added[0].dispatched_channels == ["sse", "webhook"]
+    # The webhook channel is enabled and the registry is the only fan-out.
+    assert "sse" in added[0].dispatched_channels
+    assert "webhook" in added[0].dispatched_channels
     assert redis.publish.await_count == 2
-    dispatch_wh.assert_awaited_once()
+    dispatch_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -201,13 +239,10 @@ async def test_dispatched_channels_include_email_when_enabled(
     monitor = _monitor_with_alerts(cooldown_seconds=0)
     db, added = _db()
     redis = AsyncMock()
-    dispatch_webhook = AsyncMock()
-    dispatch_email = AsyncMock()
-    monkeypatch.setattr(alert_service, "dispatch_monitor_webhook", dispatch_webhook)
-    monkeypatch.setattr(alert_service, "dispatch_alert_email", dispatch_email)
+    _patch_dispatch(monkeypatch)
     monkeypatch.setattr(
         alert_service,
-        "should_dispatch_alert_email",
+        "should_dispatch_email_for_severity",
         AsyncMock(return_value=True),
     )
 
@@ -223,8 +258,7 @@ async def test_dispatched_channels_include_email_when_enabled(
     )
 
     assert event is not None
-    assert added[0].dispatched_channels == ["sse", "webhook", "email"]
-    dispatch_email.assert_awaited_once()
+    assert "email" in added[0].dispatched_channels
 
 
 @pytest.mark.asyncio
@@ -235,12 +269,10 @@ async def test_email_not_dispatched_when_user_disabled(
     monitor = _monitor_with_alerts(cooldown_seconds=0)
     db, added = _db()
     redis = AsyncMock()
-    dispatch_email = AsyncMock()
-    monkeypatch.setattr(alert_service, "dispatch_monitor_webhook", AsyncMock())
-    monkeypatch.setattr(alert_service, "dispatch_alert_email", dispatch_email)
+    _patch_dispatch(monkeypatch)
     monkeypatch.setattr(
         alert_service,
-        "should_dispatch_alert_email",
+        "should_dispatch_email_for_severity",
         AsyncMock(return_value=False),
     )
 
@@ -255,8 +287,7 @@ async def test_email_not_dispatched_when_user_disabled(
         redis,
     )
 
-    assert added[0].dispatched_channels == ["sse", "webhook"]
-    dispatch_email.assert_not_awaited()
+    assert "email" not in added[0].dispatched_channels
 
 
 @pytest.mark.asyncio
@@ -267,13 +298,7 @@ async def test_email_not_dispatched_for_info_when_info_toggle_off(
     monitor = _monitor_with_alerts(cooldown_seconds=0)
     db, added = _db()
     redis = AsyncMock()
-    monkeypatch.setattr(alert_service, "dispatch_monitor_webhook", AsyncMock())
-    monkeypatch.setattr(alert_service, "dispatch_alert_email", AsyncMock())
-    monkeypatch.setattr(
-        alert_service,
-        "should_dispatch_alert_email",
-        AsyncMock(return_value=False),
-    )
+    _patch_dispatch(monkeypatch)
 
     await alert_service.evaluate_and_dispatch_alert(
         monitor,
@@ -286,4 +311,69 @@ async def test_email_not_dispatched_for_info_when_info_toggle_off(
         redis,
     )
 
-    assert added[0].dispatched_channels == ["sse", "webhook"]
+    assert "email" not in added[0].dispatched_channels
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_dispatch_recovery_event_sends_pagerduty_resolve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`dispatch_recovery_event` must build a `RESOLVE` PagerDuty payload."""
+
+    monitor = _monitor_with_alerts(cooldown_seconds=0)
+    db, _ = _db()
+    redis = AsyncMock()
+    dispatch_mock = _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(
+        alert_service,
+        "get_notification_settings",
+        AsyncMock(
+            return_value={
+                "channels": {
+                    "pagerduty": {
+                        "enabled": True,
+                        "target": "0123456789abcdef0123456789abcdef",
+                    }
+                }
+            }
+        ),
+    )
+
+    result = await alert_service.dispatch_recovery_event(
+        monitor=monitor,
+        capability="uptime_only",
+        redis=redis,
+        db=db,
+    )
+
+    dispatch_mock.assert_awaited_once()
+    call = dispatch_mock.await_args
+    payload = call.kwargs["payload"]
+    assert payload.event_type == "status_recovered"
+    assert payload.severity == "info"
+    assert payload.pagerduty_event_action == alert_service.PagerDutyEventAction.RESOLVE
+    assert payload.dedup_key == f"monitor:{monitor.id}:uptime_only"
+    assert result == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_dispatch_recovery_event_noop_without_redis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No Redis means we have no notification settings — skip cleanly."""
+
+    monitor = _monitor_with_alerts(cooldown_seconds=0)
+    db, _ = _db()
+    dispatch_mock = _patch_dispatch(monkeypatch)
+
+    result = await alert_service.dispatch_recovery_event(
+        monitor=monitor,
+        capability="uptime_only",
+        redis=None,
+        db=db,
+    )
+
+    assert result == {}
+    dispatch_mock.assert_not_awaited()

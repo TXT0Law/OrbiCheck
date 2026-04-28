@@ -15,6 +15,16 @@ from app.models.scan import ModuleStatus, ScanStatus
 
 
 class _FakeDbSession:
+    """Bare-bones session double for endpoint tests.
+
+    Only mocks methods we hit during request handling: ``execute``, ``commit``,
+    ``rollback``, ``refresh``, plus the ``add``/``flush`` pair the Phase 3
+    notification dispatch log uses to record a pending row.
+    """
+
+    def __init__(self) -> None:
+        self._added: list[object] = []
+
     async def execute(self, *args, **kwargs):
         return None
 
@@ -25,6 +35,21 @@ class _FakeDbSession:
         return None
 
     async def refresh(self, _obj) -> None:
+        return None
+
+    def add(self, obj: object) -> None:
+        from app.models.notification_dispatch import NotificationDispatchLog
+
+        if isinstance(obj, NotificationDispatchLog):
+            if obj.id is None:
+                obj.id = uuid4()
+            if obj.status is None:
+                obj.status = "pending"
+            if obj.attempts is None:
+                obj.attempts = 0
+        self._added.append(obj)
+
+    async def flush(self) -> None:
         return None
 
 
@@ -112,7 +137,7 @@ def _noop_monitor_webhook_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
 
     monkeypatch.setattr(
-        "app.services.monitor_service.dispatch_monitor_webhook",
+        "app.services.monitor_service.publish_monitor_lifecycle_webhook",
         AsyncMock(),
     )
 

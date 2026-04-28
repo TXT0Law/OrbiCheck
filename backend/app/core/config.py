@@ -72,6 +72,23 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "OrbiCheck Alerts"
     SMTP_USE_TLS: bool = True
     EMAIL_DISPATCH_ENABLED: bool = False
+    # ── Phase 3: notification channel adapter framework ────────────────
+    # Public-facing base URL used to render "Open Monitor" deep-links inside
+    # Slack/Discord/Teams cards and PagerDuty event payloads. Falls back to
+    # the first CORS origin so dev environments work out of the box.
+    PUBLIC_BASE_URL: str = ""
+    # Per-channel HTTP timeout (seconds). Each channel adapter is best-effort
+    # and individually wrapped — so a single slow integration cannot starve
+    # the others.
+    NOTIFICATION_CHANNEL_TIMEOUT_S: float = 8.0
+    # Retry queue: bounded exponential backoff for failed channel deliveries.
+    # The Celery task ``retry_notification_dispatch`` picks ``status=failed``
+    # rows whose ``next_attempt_at <= now`` and re-runs the adapter.
+    NOTIFICATION_DISPATCH_MAX_ATTEMPTS: int = 5
+    NOTIFICATION_RETRY_BASE_DELAY_S: float = 30.0
+    NOTIFICATION_RETRY_MAX_DELAY_S: float = 1800.0
+    # PagerDuty Events API v2 endpoint. Override for testing only.
+    PAGERDUTY_EVENTS_API_URL: str = "https://events.pagerduty.com/v2/enqueue"
     # When True, FastAPI runs a 10s loop that executes due monitor checks in-process.
     # Use when Celery worker+beat are not running (e.g. manual uvicorn). quickstart/start.sh
     # sets MONITOR_INLINE_DISPATCH=0 when it starts Celery, and 1 when Celery is disabled.
