@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import json
 import logging
@@ -14,15 +13,21 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.alert import AlertEventResponse
-from app.core.config import settings
+from app.core.config import settings as settings_module
 from app.core.exceptions import NotFoundError
 from app.models.alert_event import AlertEvent
-from app.models.monitor import Monitor
+from app.models.monitor import Monitor, MonitorStatus
 from app.services.maintenance_window_service import is_alert_suppressed
+from app.services.notification_channels import (
+    PagerDutyEventAction,
+)
+from app.services.notification_channels.registry import (
+    build_alert_payload,
+    dispatch_to_channels,
+)
 from app.services.user_notification_settings import (
-    dispatch_alert_email,
-    dispatch_monitor_webhook,
-    should_dispatch_alert_email,
+    get_notification_settings,
+    should_dispatch_email_for_severity,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,13 +147,14 @@ async def _create_alert_event(
     return event
 
 
-async def _dispatch_alert_channels(
+async def _publish_sse_event(
     *,
     redis: Redis | None,
     monitor: Monitor,
     event: AlertEvent,
-    dispatch_email: bool = False,
 ) -> None:
+    if redis is None:
+        return
     payload = {
         "alertId": str(event.id),
         "monitorId": str(monitor.id),
@@ -161,37 +167,57 @@ async def _dispatch_alert_channels(
         "suppressReason": event.suppress_reason,
         "createdAt": _coerce_utc(event.created_at).isoformat() if event.created_at else None,
     }
-    if redis is not None:
-        wire = json.dumps({"event": "alert_event", "data": payload})
-        await redis.publish(f"monitor:{monitor.id}:events", wire)
-        await redis.publish(
-            _user_live_channel(monitor.user_id),
-            json.dumps(
-                {
-                    "event": "alert_event",
-                    "monitorId": str(monitor.id),
-                    "data": payload,
-                }
-            ),
-        )
+    wire = json.dumps({"event": "alert_event", "data": payload})
+    await redis.publish(f"monitor:{monitor.id}:events", wire)
+    await redis.publish(
+        _user_live_channel(monitor.user_id),
+        json.dumps(
+            {
+                "event": "alert_event",
+                "monitorId": str(monitor.id),
+                "data": payload,
+            }
+        ),
+    )
 
-    side_tasks: list[asyncio.Task] = []
-    loop = asyncio.get_running_loop()
-    if settings.MONITOR_WEBHOOK_DISPATCH_ENABLED:
-        side_tasks.append(
-            loop.create_task(
-                dispatch_monitor_webhook(monitor.user_id, monitor.id, "alert_event", payload)
-            )
-        )
-    if dispatch_email:
-        side_tasks.append(
-            loop.create_task(dispatch_alert_email(monitor.user_id, monitor, event))
-        )
-    if side_tasks:
-        results = await asyncio.gather(*side_tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, Exception):
-                logger.warning("alert_channel_dispatch_error: %s", result)
+
+async def _dispatch_alert_channels(
+    *,
+    redis: Redis | None,
+    monitor: Monitor,
+    event: AlertEvent,
+    db: AsyncSession,
+) -> dict[str, Any]:
+    """Fan-out an alert to every Phase 3 channel via the registry.
+
+    Returns the per-channel dispatch result map (used by tests + observability).
+    """
+
+    await _publish_sse_event(redis=redis, monitor=monitor, event=event)
+
+    user_settings = (
+        await get_notification_settings(redis, monitor.user_id)
+        if redis is not None
+        else {}
+    )
+    payload = build_alert_payload(
+        monitor=monitor,
+        event=event,
+        severity=event.severity,
+        capability=event.capability,
+        event_type=event.event_type,
+        message=event.message,
+        actual_value=event.actual_value,
+        threshold_config=event.threshold_config,
+    )
+    return await dispatch_to_channels(
+        user_id=monitor.user_id,
+        monitor=monitor,
+        event=event,
+        payload=payload,
+        user_settings=user_settings,
+        db=db,
+    )
 
 
 async def _latest_unsuppressed_alert(
@@ -215,6 +241,44 @@ async def _latest_unsuppressed_alert(
         .limit(1)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def _planned_dispatched_channels(
+    *, user_id: int, severity: str, redis: Redis | None
+) -> list[str]:
+    """Compute the ``dispatched_channels`` value persisted on AlertEvent.
+
+    The value is stored before the actual fan-out so the cooldown query and
+    the dashboard timeline can reference it without re-querying Redis. The
+    alert pipeline always includes ``"sse"`` (real-time push), then projects
+    every channel whose user-config opts in for this severity.
+    """
+
+    out: list[str] = ["sse"]
+    if redis is not None:
+        user_settings = await get_notification_settings(redis, user_id)
+        if (
+            settings_module.MONITOR_WEBHOOK_DISPATCH_ENABLED
+            and bool(user_settings.get("webhookEnabled"))
+            and bool((user_settings.get("webhookUrl") or "").strip())
+        ):
+            out.append("webhook")
+        for channel_id in ("slack", "discord", "teams", "pagerduty"):
+            cfg = (user_settings.get("channels") or {}).get(channel_id) or {}
+            if not cfg.get("enabled"):
+                continue
+            target = (cfg.get("target") or "").strip()
+            if not target:
+                continue
+            allowed = cfg.get("severityFilter") or ["critical", "warning"]
+            if severity in allowed or channel_id == "pagerduty":
+                out.append(channel_id)
+    if (
+        "email" not in out
+        and await should_dispatch_email_for_severity(user_id, severity, redis=redis)
+    ):
+        out.append("email")
+    return out
 
 
 async def evaluate_and_dispatch_alert(
@@ -327,17 +391,9 @@ async def evaluate_and_dispatch_alert(
         )
         return None
 
-    dispatch_email = await should_dispatch_alert_email(
-        monitor.user_id,
-        severity,
-        redis=redis,
+    dispatched_channels = await _planned_dispatched_channels(
+        user_id=monitor.user_id, severity=severity, redis=redis
     )
-
-    dispatched_channels = ["sse"]
-    if settings.MONITOR_WEBHOOK_DISPATCH_ENABLED:
-        dispatched_channels.append("webhook")
-    if dispatch_email:
-        dispatched_channels.append("email")
     event = await _create_alert_event(
         monitor=monitor,
         capability=capability,
@@ -355,9 +411,47 @@ async def evaluate_and_dispatch_alert(
         redis=redis,
         monitor=monitor,
         event=event,
-        dispatch_email=dispatch_email,
+        db=db,
     )
     return event
+
+
+async def dispatch_recovery_event(
+    *,
+    monitor: Monitor,
+    capability: str,
+    redis: Redis | None,
+    db: AsyncSession,
+) -> dict[str, Any]:
+    """Fire ``resolve`` events into channels that support deduplicated
+    incidents (currently PagerDuty).
+
+    Called from ``monitor_service`` when a monitor transitions back from
+    DOWN/DEGRADED to UP. Re-uses the same ``dedup_key = monitor:{id}:{cap}``
+    so PagerDuty closes the open incident instead of creating a new one.
+    """
+
+    if redis is None:
+        return {}
+    user_settings = await get_notification_settings(redis, monitor.user_id)
+    payload = build_alert_payload(
+        monitor=monitor,
+        event=None,
+        severity="info",
+        capability=capability,
+        event_type="status_recovered",
+        message=f"{monitor.display_name} has recovered",
+        actual_value=str(MonitorStatus.UP.value),
+        pagerduty_event_action=PagerDutyEventAction.RESOLVE,
+    )
+    return await dispatch_to_channels(
+        user_id=monitor.user_id,
+        monitor=monitor,
+        event=None,
+        payload=payload,
+        user_settings=user_settings,
+        db=db,
+    )
 
 
 async def list_alert_events_for_user(

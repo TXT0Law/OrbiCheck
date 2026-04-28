@@ -1,23 +1,29 @@
-"""Per-user notification settings (Redis) and optional webhook dispatch for monitor events."""
+"""Per-user notification settings (Redis-backed) — channel-agnostic store.
+
+Phase 3: this module is now the single source of truth for user-facing
+notification configuration. Channel dispatch lives entirely under
+``app.services.notification_channels`` (registry + adapter framework).
+
+Legacy "free function" dispatch helpers (``dispatch_monitor_webhook`` /
+``dispatch_alert_email`` / ``schedule_*``) used to live here; they were
+removed once every caller routed through the channel registry. The DoD
+``grep`` check enforces that no caller outside ``notification_channels/``
+references those identifiers.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import uuid
 from typing import Any
 
-import httpx
 from redis.asyncio import Redis
 
 from app.core.config import settings
-from app.models.alert_event import AlertEvent
-from app.models.monitor import Monitor
-from app.services import email_service
 
 logger = logging.getLogger(__name__)
 
+# ── Top-level (legacy) settings ────────────────────────────────────────
 DEFAULT_SETTINGS: dict[str, Any] = {
     "webhookUrl": None,
     "webhookEnabled": False,
@@ -27,21 +33,92 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "emailOnCritical": True,
     "emailOnWarning": True,
     "emailOnInfo": False,
+    # Phase 3: per-channel sub-config (nested for forward compatibility).
+    "channels": {
+        "slack": {
+            "enabled": False,
+            "target": None,
+            "severityFilter": ["critical", "warning"],
+            "options": {},
+        },
+        "discord": {
+            "enabled": False,
+            "target": None,
+            "severityFilter": ["critical", "warning"],
+            "options": {},
+        },
+        "teams": {
+            "enabled": False,
+            "target": None,
+            "severityFilter": ["critical", "warning"],
+            "options": {},
+        },
+        "pagerduty": {
+            "enabled": False,
+            "target": None,
+            "severityFilter": ["critical", "warning"],
+            "options": {},
+        },
+    },
 }
+
+PHASE3_CHANNEL_KEYS: tuple[str, ...] = ("slack", "discord", "teams", "pagerduty")
+ALLOWED_SEVERITY_FILTER: frozenset[str] = frozenset(
+    {"critical", "warning", "info"}
+)
 
 
 def _redis_key(user_id: int) -> str:
     return f"orbicheck:user:{user_id}:notification_settings"
 
 
+def _normalize_channel_block(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raw = {}
+    target = raw.get("target")
+    if isinstance(target, str):
+        target = target.strip() or None
+    elif target is None:
+        target = None
+    else:
+        target = str(target) or None
+
+    raw_filter = raw.get("severityFilter")
+    if not isinstance(raw_filter, list):
+        raw_filter = ["critical", "warning"]
+    cleaned = [s for s in raw_filter if s in ALLOWED_SEVERITY_FILTER]
+    if not cleaned:
+        cleaned = ["critical", "warning"]
+    options = raw.get("options")
+    if not isinstance(options, dict):
+        options = {}
+    return {
+        "enabled": bool(raw.get("enabled")),
+        "target": target,
+        "severityFilter": cleaned,
+        "options": options,
+    }
+
+
+def _normalize_channels(raw: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(raw, dict):
+        raw = {}
+    out: dict[str, dict[str, Any]] = {}
+    for key in PHASE3_CHANNEL_KEYS:
+        out[key] = _normalize_channel_block(raw.get(key))
+    return out
+
+
 def normalize_notification_settings(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Reduce arbitrary input to the canonical settings shape stored in Redis."""
+
     if not raw:
-        return dict(DEFAULT_SETTINGS)
+        return _deep_copy_default()
     url = raw.get("webhookUrl")
     if url is not None and not isinstance(url, str):
         url = str(url) if url else None
-    if url == "":
-        url = None
+    if isinstance(url, str):
+        url = url.strip() or None
     email = raw.get("emailAddress")
     if email is not None and not isinstance(email, str):
         email = str(email) if email else None
@@ -56,19 +133,26 @@ def normalize_notification_settings(raw: dict[str, Any] | None) -> dict[str, Any
         "emailOnCritical": bool(raw.get("emailOnCritical", True)),
         "emailOnWarning": bool(raw.get("emailOnWarning", True)),
         "emailOnInfo": bool(raw.get("emailOnInfo", False)),
+        "channels": _normalize_channels(raw.get("channels")),
     }
+
+
+def _deep_copy_default() -> dict[str, Any]:
+    """Defensive deep-copy so callers never mutate the module-level default."""
+
+    return json.loads(json.dumps(DEFAULT_SETTINGS))
 
 
 async def get_notification_settings(redis: Redis, user_id: int) -> dict[str, Any]:
     raw = await redis.get(_redis_key(user_id))
     if not raw:
-        return dict(DEFAULT_SETTINGS)
+        return _deep_copy_default()
     try:
         parsed = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        return dict(DEFAULT_SETTINGS)
+        return _deep_copy_default()
     if not isinstance(parsed, dict):
-        return dict(DEFAULT_SETTINGS)
+        return _deep_copy_default()
     return normalize_notification_settings(parsed)
 
 
@@ -88,12 +172,18 @@ def _severity_email_enabled(cfg: dict[str, Any], severity: str) -> bool:
     return bool(cfg.get("emailOnInfo", False))
 
 
-async def should_dispatch_alert_email(
+async def should_dispatch_email_for_severity(
     user_id: int,
     severity: str,
     redis: Redis | None = None,
 ) -> bool:
-    """Resolve whether the user's email settings allow dispatch for this severity."""
+    """Resolve whether the user's email settings allow dispatch for ``severity``.
+
+    Kept as a separate helper so the ``alert_service`` cooldown / metadata
+    code can still report ``email`` in ``dispatched_channels`` without
+    actually invoking the channel adapter.
+    """
+
     if not settings.EMAIL_DISPATCH_ENABLED:
         return False
 
@@ -101,132 +191,11 @@ async def should_dispatch_alert_email(
     redis_client = redis or Redis.from_url(settings.REDIS_URL, decode_responses=True)
     try:
         cfg = await get_notification_settings(redis_client, user_id)
-        return bool(cfg.get("emailEnabled")) and bool(cfg.get("emailAddress")) and _severity_email_enabled(
-            cfg, severity
+        return (
+            bool(cfg.get("emailEnabled"))
+            and bool(cfg.get("emailAddress"))
+            and _severity_email_enabled(cfg, severity)
         )
     finally:
         if owns_redis:
             await redis_client.aclose()
-
-
-async def dispatch_monitor_webhook(
-    user_id: int,
-    monitor_id: uuid.UUID,
-    event_name: str,
-    payload: dict[str, Any],
-) -> None:
-    """POST monitor event to user-configured webhook URL (best-effort, own Redis client)."""
-    if not settings.MONITOR_WEBHOOK_DISPATCH_ENABLED:
-        return
-
-    redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
-    try:
-        raw = await redis.get(_redis_key(user_id))
-        if not raw:
-            return
-        try:
-            cfg = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return
-        if not isinstance(cfg, dict):
-            return
-        cfg = normalize_notification_settings(cfg)
-        if not cfg["webhookEnabled"] or not cfg["monitorEventsEnabled"]:
-            return
-        url = (cfg.get("webhookUrl") or "").strip()
-        if not url:
-            return
-
-        body = {
-            "source": "orbicheck-monitor",
-            "monitorId": str(monitor_id),
-            "event": event_name,
-            "data": payload,
-        }
-        async with httpx.AsyncClient(timeout=settings.MONITOR_WEBHOOK_TIMEOUT_S) as client:
-            response = await client.post(url, json=body)
-            response.raise_for_status()
-    except httpx.HTTPError as exc:
-        logger.warning(
-            "monitor_webhook_http_error user_id=%s event=%s error=%s",
-            user_id,
-            event_name,
-            str(exc)[:400],
-        )
-    except Exception as exc:
-        logger.warning(
-            "monitor_webhook_unexpected user_id=%s event=%s error=%s",
-            user_id,
-            event_name,
-            str(exc)[:400],
-        )
-    finally:
-        await redis.aclose()
-
-
-async def dispatch_alert_email(
-    user_id: int,
-    monitor: Monitor,
-    event: AlertEvent,
-) -> None:
-    """Check user email prefs and send alert email if applicable."""
-    if not settings.EMAIL_DISPATCH_ENABLED:
-        return
-
-    redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
-    try:
-        cfg = await get_notification_settings(redis, user_id)
-        if not cfg.get("emailEnabled"):
-            return
-        to_email = (cfg.get("emailAddress") or "").strip()
-        if not to_email:
-            return
-        if not _severity_email_enabled(cfg, event.severity):
-            return
-        await email_service.send_alert_email(to_email=to_email, alert_event=event, monitor=monitor)
-    except Exception as exc:
-        logger.warning(
-            "alert_email_dispatch_unexpected user_id=%s monitor_id=%s error=%s",
-            user_id,
-            monitor.id,
-            str(exc)[:400],
-        )
-    finally:
-        await redis.aclose()
-
-
-def schedule_monitor_webhook(
-    user_id: int,
-    monitor_id: uuid.UUID,
-    event_name: str,
-    payload: dict[str, Any],
-) -> None:
-    """Fire-and-forget webhook dispatch (does not block check pipeline)."""
-
-    async def _run() -> None:
-        await dispatch_monitor_webhook(user_id, monitor_id, event_name, payload)
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        asyncio.run(_run())
-        return
-    loop.create_task(_run())
-
-
-def schedule_alert_email(
-    user_id: int,
-    monitor: Monitor,
-    event: AlertEvent,
-) -> None:
-    """Fire-and-forget email dispatch (does not block check pipeline)."""
-
-    async def _run() -> None:
-        await dispatch_alert_email(user_id, monitor, event)
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        asyncio.run(_run())
-        return
-    loop.create_task(_run())

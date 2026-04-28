@@ -9,6 +9,7 @@ from app.models.monitor import (
     MonitorVisualCapture,
     MonitorVisualChange,
 )
+from app.models.notification_dispatch import NotificationDispatchLog
 from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.models.url_group import UrlGroup, UrlGroupMember
@@ -23,6 +24,7 @@ __all__ = [
     "MonitorStatus",
     "MonitorVisualCapture",
     "MonitorVisualChange",
+    "NotificationDispatchLog",
     "Report",
     "ReportFormat",
     "ReportStatus",

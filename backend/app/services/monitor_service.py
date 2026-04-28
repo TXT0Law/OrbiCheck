@@ -108,7 +108,9 @@ from app.services.content_visual_correlation import (
     resolve_linked_visual_captures_for_changes,
 )
 from app.services.scan_client import call_screenshot_service
-from app.services.user_notification_settings import dispatch_monitor_webhook
+from app.services.notification_channels.lifecycle import (
+    publish_monitor_lifecycle_webhook,
+)
 from app.services.visual_change_helpers import (
     DHASH_BIT_LENGTH,
     compute_dhash_hex,
@@ -599,7 +601,9 @@ async def _publish_monitor_event(
         ),
     )
     if dispatch_webhook:
-        await dispatch_monitor_webhook(user_id, monitor_id, event_name, payload)
+        await publish_monitor_lifecycle_webhook(
+            user_id, monitor_id, event_name, payload
+        )
 
 
 def _normalize_capability_tokens(raw: list[str] | None) -> list[str]:
@@ -2348,8 +2352,44 @@ async def execute_check(
                 "changed_at": datetime.now(timezone.utc).isoformat(),
             },
         )
+        # Phase 3.5: when the monitor recovers (DOWN/DEGRADED → UP), fire a
+        # ``resolve`` event into channels that support deduplicated incidents
+        # (currently PagerDuty). Failures are isolated and recorded in the
+        # dispatch_log via the channel registry.
+        if (
+            new_status == MonitorStatus.UP
+            and old_status in {MonitorStatus.DOWN, MonitorStatus.DEGRADED}
+        ):
+            await _dispatch_recovery_for_enabled_capabilities(
+                monitor=monitor, redis=redis, db=db
+            )
 
     return check
+
+
+async def _dispatch_recovery_for_enabled_capabilities(
+    *,
+    monitor: Monitor,
+    redis: Redis | None,
+    db: AsyncSession,
+) -> None:
+    """Fire one channel-level resolve per enabled capability on the monitor."""
+
+    enabled = list(monitor.enabled_capabilities or []) or ["uptime_only"]
+    for capability in enabled:
+        try:
+            await alert_service.dispatch_recovery_event(
+                monitor=monitor,
+                capability=capability,
+                redis=redis,
+                db=db,
+            )
+        except Exception:  # noqa: BLE001 - never fail the check pipeline
+            logger.warning(
+                "monitor_recovery_dispatch_failed",
+                monitor_id=str(monitor.id),
+                capability=capability,
+            )
 
 
 async def _recompute_rolling_stats(monitor: Monitor, db: AsyncSession) -> None:
