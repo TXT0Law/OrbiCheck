@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
 import uuid
-from dataclasses import asdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -17,6 +17,7 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.models.monitor import Monitor, MonitorChange, MonitorCheck
 from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
+from app.services.recommendations import generate_recommendations
 from app.services.security_analyzer import (
     compute_category_summary,
     compute_severity_counts,
@@ -25,7 +26,31 @@ from app.services.security_analyzer import (
 )
 from app.services.transformers import build_scan_detail
 
-SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+__all__ = [
+    "build_report_payload_sync",
+    "create_report",
+    "delete_report",
+    "generate_recommendations",
+    "generate_report_artifacts_sync",
+    "get_report",
+    "get_report_download",
+    "get_report_preview",
+    "list_reports",
+    "render_markdown",
+    "render_pdf",
+]
+
+logger = logging.getLogger(__name__)
+
+# Default value used when a category score is missing or non-numeric.
+_DEFAULT_CATEGORY_SCORE = 0.0
+
+# Legacy → canonical key map; supports old snake_case payloads (pre-2026-04 contract).
+_LEGACY_CATEGORY_KEY_ALIASES: dict[str, str] = {
+    "http_security": "httpSecurity",
+    "threat_intel": "threatIntel",
+    "best_practices": "bestPractices",
+}
 
 
 def _as_tech_list(value: object) -> list[dict]:
@@ -50,7 +75,6 @@ def _port_entries(value: object) -> list[dict]:
     return []
 
 
-DANGEROUS_PORTS = {21, 23, 445, 3389}
 PDF_ENABLED_FORMATS = {ReportFormat.PDF, ReportFormat.BOTH}
 MARKDOWN_ENABLED_FORMATS = {ReportFormat.MARKDOWN, ReportFormat.BOTH, ReportFormat.PDF}
 
@@ -186,9 +210,61 @@ def _recent_change_summary(row: MonitorChange) -> dict[str, str | int]:
 
 
 def _security_score_breakdown_dict(breakdown: object | None) -> dict | None:
+    """Map a ``SecurityScoreResult`` to the canonical camelCase shape.
+
+    Mirrors ``GET /scans/{id}/detail:securityScoreBreakdown`` so the offline
+    report payload and the live detail response share one source of truth
+    (``shared/types/scan.ts:SecurityScoreBreakdown``).
+    """
     if breakdown is None:
         return None
-    return asdict(breakdown)
+    raw_scores = getattr(breakdown, "category_scores", {}) or {}
+    return {
+        "baseScore": getattr(breakdown, "base_score", _DEFAULT_CATEGORY_SCORE),
+        "confidence": getattr(breakdown, "confidence", _DEFAULT_CATEGORY_SCORE),
+        "severityCapApplied": getattr(breakdown, "severity_cap_applied", None),
+        "categoryScores": {
+            "transport": raw_scores.get("transport", _DEFAULT_CATEGORY_SCORE),
+            "httpSecurity": raw_scores.get("http_security", _DEFAULT_CATEGORY_SCORE),
+            "threatIntel": raw_scores.get("threat_intel", _DEFAULT_CATEGORY_SCORE),
+            "infrastructure": raw_scores.get("infrastructure", _DEFAULT_CATEGORY_SCORE),
+            "bestPractices": raw_scores.get("best_practices", _DEFAULT_CATEGORY_SCORE),
+        },
+    }
+
+
+def _read_breakdown_category_scores(scan: dict) -> dict[str, float]:
+    """Return categoryScores normalized to camelCase keys.
+
+    Tolerates legacy snake_case payloads (``category_scores`` / ``http_security``
+    / ``threat_intel`` / ``best_practices``) for backward compatibility with any
+    cached payload created before the 2026-04 contract alignment. Logs a
+    deprecation warning when a legacy shape is detected.
+    """
+    breakdown = scan.get("securityScoreBreakdown")
+    if not isinstance(breakdown, dict):
+        return {}
+
+    scores = breakdown.get("categoryScores")
+    if not isinstance(scores, dict):
+        legacy_scores = breakdown.get("category_scores")
+        if isinstance(legacy_scores, dict):
+            logger.warning(
+                "Legacy snake_case 'category_scores' detected in report payload; "
+                "callers should emit camelCase 'categoryScores'.",
+            )
+            scores = legacy_scores
+        else:
+            return {}
+
+    normalized: dict[str, float] = {}
+    for key, value in scores.items():
+        camel_key = _LEGACY_CATEGORY_KEY_ALIASES.get(key, key)
+        try:
+            normalized[camel_key] = float(value)
+        except (TypeError, ValueError):
+            normalized[camel_key] = _DEFAULT_CATEGORY_SCORE
+    return normalized
 
 
 def _build_monitor_summary_sync(
@@ -283,90 +359,6 @@ def _build_monitor_summary_sync(
     }
 
 
-def generate_recommendations(scan_detail: dict, key_findings: list[dict]) -> list[dict]:
-    recommendations: list[dict] = []
-    ssl = scan_detail.get("ssl") or {}
-    headers = scan_detail.get("headers") or {}
-    ports = _port_entries(scan_detail.get("ports"))
-    dnssec = scan_detail.get("dnssec") or {}
-
-    days_remaining = ssl.get("daysRemaining")
-    if isinstance(days_remaining, int) and days_remaining < 0:
-        recommendations.append(
-            {
-                "severity": "critical",
-                "title": "Replace expired SSL certificate",
-                "description": "Renew the public certificate and deploy the full chain immediately.",
-            }
-        )
-    elif isinstance(days_remaining, int) and days_remaining <= 30:
-        recommendations.append(
-            {
-                "severity": "high",
-                "title": "Renew SSL certificate soon",
-                "description": "Schedule certificate rotation before the remaining validity window closes.",
-            }
-        )
-
-    security_checks = headers.get("securityChecks", []) if isinstance(headers, dict) else []
-    missing_headers = [
-        check.get("name")
-        for check in security_checks
-        if isinstance(check, dict) and check.get("status") in {"missing", "fail"}
-    ]
-    if missing_headers:
-        recommendations.append(
-            {
-                "severity": "high",
-                "title": "Harden HTTP response headers",
-                "description": (
-                    "Add or fix key headers such as "
-                    f"{', '.join(str(name) for name in missing_headers[:4])}."
-                ),
-            }
-        )
-
-    dangerous_ports = [
-        port.get("port")
-        for port in ports
-        if isinstance(port, dict) and port.get("port") in DANGEROUS_PORTS
-    ]
-    if dangerous_ports:
-        recommendations.append(
-            {
-                "severity": "critical",
-                "title": "Restrict dangerous public ports",
-                "description": (
-                    "Review exposed services and close or filter "
-                    f"ports {', '.join(str(port) for port in dangerous_ports)}."
-                ),
-            }
-        )
-
-    dnssec_enabled = bool(dnssec.get("enabled")) if isinstance(dnssec, dict) else False
-    if not dnssec_enabled:
-        recommendations.append(
-            {
-                "severity": "medium",
-                "title": "Enable DNSSEC validation",
-                "description": "Protect DNS integrity by signing the zone and publishing DS records.",
-            }
-        )
-
-    if not recommendations:
-        for finding in key_findings[:3]:
-            recommendations.append(
-                {
-                    "severity": finding.get("severity", "medium"),
-                    "title": finding.get("title", "Review top finding"),
-                    "description": finding.get("description", "Investigate the highlighted issue."),
-                }
-            )
-
-    recommendations.sort(key=lambda item: SEVERITY_ORDER.get(item["severity"], 99))
-    return recommendations[:6]
-
-
 def build_report_payload_sync(db: Session, report: Report) -> dict:
     if report.scan_id is None:
         raise ValidationError(code="REPORT_SCAN_REQUIRED", message="Report must reference a scan")
@@ -450,7 +442,7 @@ def render_markdown(report_data: dict) -> str:
     detail = scan["detail"]
     score = scan["securityScore"]
     severity = scan["severity"]
-    breakdown = (scan.get("securityScoreBreakdown") or {}).get("category_scores", {})
+    breakdown = _read_breakdown_category_scores(scan)
     headers = (detail.get("headers") or {}).get("securityChecks", [])
     ports = _port_entries(detail.get("ports"))
     uptime = (report_data.get("monitor") or {}).get("uptime") or {}
@@ -497,11 +489,11 @@ def render_markdown(report_data: dict) -> str:
             "",
             "| Category | Score |",
             "|---|---:|",
-            f"| Transport | {round(breakdown.get('transport', 0), 2)} |",
-            f"| HTTP Security | {round(breakdown.get('http_security', 0), 2)} |",
-            f"| Threat Intel | {round(breakdown.get('threat_intel', 0), 2)} |",
-            f"| Infrastructure | {round(breakdown.get('infrastructure', 0), 2)} |",
-            f"| Best Practices | {round(breakdown.get('best_practices', 0), 2)} |",
+            f"| Transport | {round(breakdown.get('transport', _DEFAULT_CATEGORY_SCORE), 2)} |",
+            f"| HTTP Security | {round(breakdown.get('httpSecurity', _DEFAULT_CATEGORY_SCORE), 2)} |",
+            f"| Threat Intel | {round(breakdown.get('threatIntel', _DEFAULT_CATEGORY_SCORE), 2)} |",
+            f"| Infrastructure | {round(breakdown.get('infrastructure', _DEFAULT_CATEGORY_SCORE), 2)} |",
+            f"| Best Practices | {round(breakdown.get('bestPractices', _DEFAULT_CATEGORY_SCORE), 2)} |",
             "",
             "---",
             "",
@@ -653,7 +645,7 @@ def render_pdf(report_data: dict) -> bytes:
     detail = scan["detail"]
     score = scan["securityScore"]
     severity = scan["severity"]
-    breakdown = (scan.get("securityScoreBreakdown") or {}).get("category_scores", {})
+    breakdown = _read_breakdown_category_scores(scan)
     headers = (detail.get("headers") or {}).get("securityChecks", [])
     ports = _port_entries(detail.get("ports"))
     pdf.set_font("Helvetica", "B", 20)
@@ -701,11 +693,11 @@ def render_pdf(report_data: dict) -> bytes:
     pdf.ln()
     pdf.set_font("Helvetica", size=9)
     for label, value in (
-        ("Transport", round(breakdown.get("transport", 0), 2)),
-        ("HTTP Security", round(breakdown.get("http_security", 0), 2)),
-        ("Threat Intel", round(breakdown.get("threat_intel", 0), 2)),
-        ("Infrastructure", round(breakdown.get("infrastructure", 0), 2)),
-        ("Best Practices", round(breakdown.get("best_practices", 0), 2)),
+        ("Transport", round(breakdown.get("transport", _DEFAULT_CATEGORY_SCORE), 2)),
+        ("HTTP Security", round(breakdown.get("httpSecurity", _DEFAULT_CATEGORY_SCORE), 2)),
+        ("Threat Intel", round(breakdown.get("threatIntel", _DEFAULT_CATEGORY_SCORE), 2)),
+        ("Infrastructure", round(breakdown.get("infrastructure", _DEFAULT_CATEGORY_SCORE), 2)),
+        ("Best Practices", round(breakdown.get("bestPractices", _DEFAULT_CATEGORY_SCORE), 2)),
     ):
         pdf.cell(breakdown_col_w, 7, label, border=1)
         pdf.cell(breakdown_col_w, 7, str(value), border=1)

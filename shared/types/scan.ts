@@ -32,6 +32,18 @@ export interface KeyFinding {
   description: string;
 }
 
+/**
+ * Actionable recommendation surfaced on both the live scan summary page
+ * and the offline PDF/Markdown report. Emitted by the shared backend
+ * service `app/services/recommendations.py`; web summary and report MUST
+ * receive bit-equal payloads (see middleReport.md T0.3).
+ */
+export interface Recommendation {
+  severity: ScanSeverity;
+  title: string;
+  description: string;
+}
+
 // ────────────────────────────────────────────
 // SSL Check sub-types (expanded for full assessment)
 // ────────────────────────────────────────────
@@ -680,6 +692,8 @@ export interface ScanDetail {
   severity: SeverityCounts;
   categorySummary: CategorySummary[];
   keyFindings: KeyFinding[];
+  /** Actionable advice; same payload also appears in offline PDF/MD reports. */
+  recommendations?: Recommendation[];
   moduleErrors: Record<string, ModuleErrorSummary>;
   moduleJobs?: ModuleJob[];
   totalDurationMs?: number;

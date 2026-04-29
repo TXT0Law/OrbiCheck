@@ -19,6 +19,7 @@ from app.core.deps import CurrentUser, get_current_user, get_db
 from app.core.config import settings
 from app.core.redis import get_redis_async
 from app.services import scan_service
+from app.services.recommendations import generate_recommendations
 from app.services.security_analyzer import (
     compute_category_summary,
     compute_severity_counts,
@@ -262,6 +263,7 @@ async def get_scan_full_detail(
     severity = compute_severity_counts(all_raw)
     category_summary = compute_category_summary(all_raw)
     key_findings = extract_key_findings(all_raw, max_findings=8)
+    recommendations = generate_recommendations(detail, key_findings)
 
     resolved_security = resolve_security_score_for_detail(
         stored_score=scan.security_score,
@@ -285,6 +287,7 @@ async def get_scan_full_detail(
         "severity": severity,
         "categorySummary": category_summary,
         "keyFindings": key_findings,
+        "recommendations": recommendations,
         "moduleErrors": module_errors,
         "moduleJobs": module_jobs,
         "totalDurationMs": total_duration_ms,
