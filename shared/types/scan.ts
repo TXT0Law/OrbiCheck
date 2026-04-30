@@ -42,6 +42,13 @@ export interface Recommendation {
   severity: ScanSeverity;
   title: string;
   description: string;
+  /**
+   * Optional originating module id (matches `ScanModuleId`). When present the
+   * Summary page renders a deep link to that module's detail page; when absent
+   * the recommendation is rendered as a static card. Backend may omit this
+   * field today (graceful degradation).
+   */
+  module?: string;
 }
 
 // ────────────────────────────────────────────

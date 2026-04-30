@@ -154,16 +154,20 @@ describe("scan detail routes", () => {
     useScanDetailMock.mockReturnValue(queryState());
   });
 
-  it("renders scan summary with key sections", () => {
+  it("renders scan summary with the new T1.2 sections", () => {
     render(<ScanSummaryPage />);
 
     expect(screen.getByText("Scan Info")).toBeInTheDocument();
-    expect(screen.getByText("Security Score")).toBeInTheDocument();
+    expect(screen.getByText("Verdict")).toBeInTheDocument();
+    expect(screen.getByText("Severity Distribution")).toBeInTheDocument();
+    expect(screen.getByText("Score Breakdown")).toBeInTheDocument();
+    expect(screen.getByText("Recommendations")).toBeInTheDocument();
+    expect(screen.getByText("Module Execution Timeline")).toBeInTheDocument();
     expect(screen.getByText("Key Findings")).toBeInTheDocument();
     expect(screen.getByText("example.com")).toBeInTheDocument();
   });
 
-  it("shows empty category and key-finding copy when running and arrays are empty", () => {
+  it("shows empty category and key-finding copy plus running verdict when scan is in progress", () => {
     useScanDetailContextMock.mockReturnValue(
       baseScanDetailContext({
         detail: {
@@ -180,7 +184,7 @@ describe("scan detail routes", () => {
 
     expect(screen.getByText(/Category summary will appear as modules finish/i)).toBeInTheDocument();
     expect(screen.getByText(/No key findings yet/i)).toBeInTheDocument();
-    expect(screen.getByText(/Severity counts update when the scan completes/i)).toBeInTheDocument();
+    expect(screen.getByText(/Scan in progress — verdict will appear once modules finish/i)).toBeInTheDocument();
   });
 
   it("shows empty category and key-finding copy when completed with no grouped data", () => {
@@ -202,10 +206,9 @@ describe("scan detail routes", () => {
       screen.getByText(/No category summary for this scan/i)
     ).toBeInTheDocument();
     expect(screen.getByText(/No key findings — no high-priority issues/i)).toBeInTheDocument();
-    expect(screen.getByText(/All severity counts are zero/i)).toBeInTheDocument();
   });
 
-  it("shows em dash when security score is null while scan is running", () => {
+  it("shows em-dash gauge and progress verdict when security score is null while running", () => {
     useScanDetailContextMock.mockReturnValue(
       baseScanDetailContext({
         detail: { ...MOCK_SCAN_DETAIL, securityScore: null, status: "running" },
@@ -214,7 +217,9 @@ describe("scan detail routes", () => {
     render(<ScanSummaryPage />);
 
     expect(screen.getByText("—")).toBeInTheDocument();
-    expect(screen.getByText(/Available when the scan finishes/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Scan in progress — verdict will appear once modules finish/i)
+    ).toBeInTheDocument();
   });
 
   it("renders keyFindings with id for stable React keys", () => {
