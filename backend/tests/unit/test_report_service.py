@@ -52,13 +52,16 @@ def _sample_report_data() -> dict:
             },
             "securityScore": 72,
             "securityScoreBreakdown": {
-                "category_scores": {
+                "baseScore": 71.5,
+                "confidence": 0.8,
+                "severityCapApplied": None,
+                "categoryScores": {
                     "transport": 24.0,
-                    "http_security": 18.0,
-                    "threat_intel": 15.0,
+                    "httpSecurity": 18.0,
+                    "threatIntel": 15.0,
                     "infrastructure": 9.0,
-                    "best_practices": 6.0,
-                }
+                    "bestPractices": 6.0,
+                },
             },
             "severity": {"critical": 0, "high": 1, "medium": 1, "low": 0},
             "categorySummary": [],
@@ -106,6 +109,31 @@ def test_render_markdown_contains_expected_sections() -> None:
     assert "## 1. Executive Summary" in markdown
     assert "## 5. Recommendations" in markdown
     assert "- Open ports: 443" in markdown
+    # Score Breakdown table sourced from camelCase categoryScores.
+    assert "| HTTP Security | 18.0 |" in markdown
+    assert "| Best Practices | 6.0 |" in markdown
+
+
+@pytest.mark.unit
+def test_render_markdown_falls_back_to_legacy_breakdown_shape() -> None:
+    """Backward-compat reader: legacy snake_case breakdown still renders."""
+    payload = _sample_report_data()
+    payload["scan"]["securityScoreBreakdown"] = {
+        "category_scores": {
+            "transport": 30.0,
+            "http_security": 21.0,
+            "threat_intel": 12.0,
+            "infrastructure": 9.0,
+            "best_practices": 6.0,
+        }
+    }
+
+    markdown = render_markdown(payload)
+
+    assert "| Transport | 30.0 |" in markdown
+    assert "| HTTP Security | 21.0 |" in markdown
+    assert "| Threat Intel | 12.0 |" in markdown
+    assert "| Best Practices | 6.0 |" in markdown
 
 
 @pytest.mark.unit
@@ -146,24 +174,77 @@ def test_monitor_incidents_counts_failure_transitions() -> None:
 
 
 @pytest.mark.unit
-def test_security_score_breakdown_dict_uses_dataclass_conversion() -> None:
+def test_security_score_breakdown_dict_returns_camelcase_payload() -> None:
+    """Report payload must mirror the GET /scans/{id}/detail camelCase shape.
+
+    Guards against the historical drift where ``dataclasses.asdict`` produced
+    snake_case while the live API emitted camelCase (see middleReport.md G7).
+    """
     breakdown = SecurityScoreResult(
         score=72,
         base_score=71.5,
         confidence=0.8,
         severity_cap_applied=None,
-        category_scores={"transport": 24.0},
+        category_scores={
+            "transport": 24.0,
+            "http_security": 18.0,
+            "threat_intel": 15.0,
+            "infrastructure": 9.0,
+            "best_practices": 6.0,
+        },
     )
 
     result = _security_score_breakdown_dict(breakdown)
 
     assert result == {
-        "score": 72,
-        "base_score": 71.5,
+        "baseScore": 71.5,
         "confidence": 0.8,
-        "severity_cap_applied": None,
-        "category_scores": {"transport": 24.0},
+        "severityCapApplied": None,
+        "categoryScores": {
+            "transport": 24.0,
+            "httpSecurity": 18.0,
+            "threatIntel": 15.0,
+            "infrastructure": 9.0,
+            "bestPractices": 6.0,
+        },
     }
+
+
+@pytest.mark.unit
+def test_security_score_breakdown_dict_returns_none_for_missing_breakdown() -> None:
+    assert _security_score_breakdown_dict(None) is None
+
+
+@pytest.mark.unit
+def test_report_breakdown_shape_matches_detail_endpoint() -> None:
+    """Snapshot guard: report breakdown keys must equal the detail endpoint keys."""
+    detail_breakdown_keys = {"baseScore", "confidence", "severityCapApplied", "categoryScores"}
+    detail_category_keys = {
+        "transport",
+        "httpSecurity",
+        "threatIntel",
+        "infrastructure",
+        "bestPractices",
+    }
+
+    breakdown = SecurityScoreResult(
+        score=85,
+        base_score=85.0,
+        confidence=1.0,
+        severity_cap_applied=None,
+        category_scores={
+            "transport": 30.0,
+            "http_security": 22.0,
+            "threat_intel": 18.0,
+            "infrastructure": 10.0,
+            "best_practices": 5.0,
+        },
+    )
+
+    report_breakdown = _security_score_breakdown_dict(breakdown)
+    assert report_breakdown is not None
+    assert set(report_breakdown.keys()) == detail_breakdown_keys
+    assert set(report_breakdown["categoryScores"].keys()) == detail_category_keys
 
 
 @pytest.mark.unit

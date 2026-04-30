@@ -163,6 +163,73 @@ async def test_scan_detail_derives_security_score_when_db_column_null(monkeypatc
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_scan_detail_includes_shared_recommendations(monkeypatch):
+    """``GET /scans/{id}/detail`` must surface the same recommendations payload.
+
+    Guards against drift between the live web summary and the offline PDF/MD
+    report: both consume ``services/recommendations.generate_recommendations``
+    so the user sees identical actionable advice in either context.
+    """
+    scan_id = UUID("44444444-4444-4444-4444-444444444444")
+
+    fake_scan = SimpleNamespace(
+        id=scan_id,
+        domain="rec.test",
+        url="https://rec.test",
+        started_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 4, 1, 0, 0, 4, tzinfo=timezone.utc),
+        status=ScanStatus.COMPLETED,
+        security_score=42,
+        module_results=[
+            SimpleNamespace(
+                module_name="ports",
+                status=ModuleStatus.SUCCESS,
+                # Includes a dangerous public port -> triggers a critical recommendation.
+                raw_result={"openPorts": [{"port": 21}, {"port": 443}], "failedPorts": []},
+                error_message=None,
+            ),
+        ],
+    )
+
+    async def _fake_get_scan(_db, _scan_id, _user_id=None):
+        return fake_scan
+
+    async def _fake_get_db():
+        yield None
+
+    async def _fake_user():
+        return CurrentUser(
+            id=1,
+            email="admin@orbicheck.local",
+            csrf_token="csrf-token",
+        )
+
+    from app.services import scan_service
+
+    monkeypatch.setattr(scan_service, "get_scan", _fake_get_scan)
+
+    app = FastAPI()
+    app.include_router(scans_router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = _fake_get_db
+    app.dependency_overrides[get_current_user] = _fake_user
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/api/v1/scans/{scan_id}/detail")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert "recommendations" in data
+    items = data["recommendations"]
+    assert isinstance(items, list)
+    assert items, "expected at least one recommendation when dangerous port is open"
+    titles = [item["title"] for item in items]
+    assert "Restrict dangerous public ports" in titles
+    for item in items:
+        assert {"severity", "title", "description"} <= set(item.keys())
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_scan_detail_security_score_null_while_running(monkeypatch):
     scan_id = UUID("33333333-3333-3333-3333-333333333333")
 
