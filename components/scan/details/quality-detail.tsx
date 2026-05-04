@@ -1,79 +1,63 @@
 "use client";
 
+import * as React from "react";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { QualityResult } from "@/shared/types/scan";
+import { ScoreGauge } from "@/components/scan/charts/score-gauge";
+import { QualityCategoryRadar } from "@/components/scan/charts/quality-category-radar";
+import type { QualityAudit, QualityResult } from "@/shared/types/scan";
 
 interface QualityDetailProps {
   data: QualityResult | null;
 }
 
-function getScoreColor(score: number): string {
-  if (score >= 90) return "#22c55e";
-  if (score >= 50) return "#f59e0b";
-  return "#ef4444";
-}
+const LIGHTHOUSE_GAUGE_THRESHOLDS = { good: 90, warn: 50 } as const;
 
-function ScoreGauge({ score, label }: { score: number; label: string }) {
-  const color = getScoreColor(score);
-  const circumference = 2 * Math.PI * 40;
-  const offset = circumference - (score / 100) * circumference;
+const AUDIT_GOOD_THRESHOLD = 0.9;
+const AUDIT_WARN_THRESHOLD = 0.5;
 
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <svg
-        className="h-24 w-24 -rotate-90"
-        viewBox="0 0 100 100"
-        role="img"
-        aria-label={`${label} score: ${score} out of 100`}
-      >
-        <circle
-          cx="50"
-          cy="50"
-          r="40"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="8"
-          className="text-zinc-200 dark:text-zinc-700"
-        />
-        <circle
-          cx="50"
-          cy="50"
-          r="40"
-          fill="none"
-          stroke={color}
-          strokeWidth="8"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          className="transition-all duration-500"
-        />
-      </svg>
-      <div className="text-center">
-        <p className="text-2xl font-bold" style={{ color }}>
-          {score}
-        </p>
-        <p className="text-xs text-muted-foreground">{label}</p>
-      </div>
-    </div>
-  );
-}
+const TOP_AUDITS_LIMIT = 10;
+
+type AuditFilter = "all" | "fail" | "warn" | "pass";
 
 function ScoreBadge({ score }: { score: number | null }) {
   if (score === null) return <Badge variant="outline">N/A</Badge>;
-  const label = score >= 0.9 ? "Good" : score >= 0.5 ? "Needs Work" : "Poor";
+  const label =
+    score >= AUDIT_GOOD_THRESHOLD ? "Good" : score >= AUDIT_WARN_THRESHOLD ? "Needs Work" : "Poor";
   const cls =
-    score >= 0.9
+    score >= AUDIT_GOOD_THRESHOLD
       ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200"
-      : score >= 0.5
+      : score >= AUDIT_WARN_THRESHOLD
         ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
         : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200";
 
   return <Badge className={`border-transparent ${cls}`}>{label}</Badge>;
 }
 
+function classifyAudit(audit: QualityAudit): Exclude<AuditFilter, "all"> {
+  if (audit.score === null) return "warn";
+  if (audit.score >= AUDIT_GOOD_THRESHOLD) return "pass";
+  if (audit.score >= AUDIT_WARN_THRESHOLD) return "warn";
+  return "fail";
+}
+
+function rankAudit(audit: QualityAudit): number {
+  if (audit.score === null) return -1;
+  return audit.score;
+}
+
+const AUDIT_FILTERS: Array<{ id: AuditFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "fail", label: "Failing" },
+  { id: "warn", label: "Needs Work" },
+  { id: "pass", label: "Passing" },
+];
+
 export function QualityDetail({ data }: QualityDetailProps) {
+  const [filter, setFilter] = React.useState<AuditFilter>("all");
+
   if (
     !data ||
     ((!data.categories || data.categories.length === 0) &&
@@ -93,6 +77,14 @@ export function QualityDetail({ data }: QualityDetailProps) {
       </Card>
     );
   }
+
+  const categories = data.categories ?? [];
+  const audits = data.audits ?? [];
+
+  const sortedAudits = [...audits].sort((left, right) => rankAudit(left) - rankAudit(right));
+  const visibleAudits = sortedAudits
+    .filter((audit) => filter === "all" || classifyAudit(audit) === filter)
+    .slice(0, TOP_AUDITS_LIMIT);
 
   return (
     <div className="space-y-4">
@@ -119,22 +111,54 @@ export function QualityDetail({ data }: QualityDetailProps) {
           )}
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
-            {(data.categories ?? []).map((cat) => (
-              <ScoreGauge
-                key={cat.id}
-                score={cat.displayScore ?? 0}
-                label={cat.title}
-              />
-            ))}
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_minmax(0,1fr)]">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
+              {categories.map((cat) => (
+                <ScoreGauge
+                  key={cat.id}
+                  score={cat.displayScore}
+                  label={cat.title}
+                  thresholds={LIGHTHOUSE_GAUGE_THRESHOLDS}
+                />
+              ))}
+            </div>
+            <QualityCategoryRadar data={categories} />
           </div>
         </CardContent>
       </Card>
 
-      {(data.audits ?? []).length > 0 && (
+      {audits.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg font-semibold">Key Web Vitals</CardTitle>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle className="text-lg font-semibold">
+                Top Web Vitals (worst first)
+              </CardTitle>
+              <div
+                className="flex flex-wrap gap-2"
+                role="group"
+                aria-label="Filter audits by status"
+              >
+                {AUDIT_FILTERS.map((option) => {
+                  const active = filter === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setFilter(option.id)}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                        active
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-background text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             <Table>
@@ -146,7 +170,7 @@ export function QualityDetail({ data }: QualityDetailProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(data.audits ?? []).map((audit) => (
+                {visibleAudits.map((audit) => (
                   <TableRow key={audit.id}>
                     <TableCell className="font-medium">{audit.title}</TableCell>
                     <TableCell className="font-mono text-sm">
@@ -157,6 +181,13 @@ export function QualityDetail({ data }: QualityDetailProps) {
                     </TableCell>
                   </TableRow>
                 ))}
+                {visibleAudits.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-sm text-muted-foreground">
+                      No audits match the current filter.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </CardContent>

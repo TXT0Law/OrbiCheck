@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { SslCheckResult } from "@/shared/types/scan";
 
 import { SslCertificateChainSection } from "./ssl/ssl-certificate-chain-section";
+import { SslChartsSection } from "./ssl/ssl-charts-section";
 import { SslCipherSummaryCard, SslProtocolSummaryCard } from "./ssl/ssl-protocol-cipher-cards";
 import {
   SslDnsCaaSection,
@@ -47,6 +48,7 @@ export function SslDetail({ data, scanId }: SslDetailProps) {
   return (
     <div className="space-y-6">
       <SslOverviewSection data={data} />
+      <SslChartsSection data={data} />
       <SslCertificateChainSection data={data} />
       <SslSanSection data={data} />
       <SslProtocolSummaryCard protocols={data.protocols ?? []} basePath={basePath} />

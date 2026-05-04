@@ -1,10 +1,36 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { HeaderStatusChart } from "@/components/scan/charts/header-status-chart";
 import type { HeaderCheck, HeadersResult } from "@/shared/types/scan";
 
 interface HeadersDetailProps {
   data: HeadersResult;
+}
+
+const GRADE_COLOR_CLASSES: Record<HeadersResult["overallGrade"], string> = {
+  A: "bg-green-500 text-white",
+  B: "bg-yellow-400 text-zinc-900",
+  C: "bg-orange-400 text-white",
+  D: "bg-red-400 text-white",
+  F: "bg-red-600 text-white",
+};
+
+const NEUTRAL_GRADE_CLASS =
+  "bg-zinc-500/20 text-zinc-600 dark:bg-zinc-500/25 dark:text-zinc-300";
+
+function HeadersGradeBadge({ grade }: { grade?: HeadersResult["overallGrade"] | null }) {
+  const value = grade && grade in GRADE_COLOR_CLASSES ? grade : null;
+  const colorClass = value ? GRADE_COLOR_CLASSES[value] : NEUTRAL_GRADE_CLASS;
+  const label = value ?? "—";
+  return (
+    <span
+      className={`inline-flex h-12 min-w-12 items-center justify-center rounded-lg px-2 text-2xl font-bold ${colorClass}`}
+      aria-label={`Overall security headers grade ${label}`}
+    >
+      {label}
+    </span>
+  );
 }
 
 function statusBadge(check: HeaderCheck) {
@@ -26,8 +52,47 @@ export function HeadersDetail({ data }: HeadersDetailProps) {
       ? data.responseHeaders
       : ({} as Record<string, string>);
 
+  const passCount = securityChecks.filter((check) => check.status === "pass").length;
+  const failCount = securityChecks.filter((check) => check.status === "fail").length;
+  const missingCount = securityChecks.filter((check) => check.status === "missing").length;
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg font-semibold">Security Headers Overview</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 items-center gap-6 md:grid-cols-[auto_1fr]">
+            <div className="flex flex-col items-center gap-2">
+              <HeadersGradeBadge grade={data.overallGrade} />
+              <p className="text-xs text-muted-foreground">Overall grade</p>
+              <div className="flex flex-wrap justify-center gap-2 text-xs">
+                <Badge
+                  variant="outline"
+                  className="border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300"
+                >
+                  {passCount} pass
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className="border-red-300 text-red-700 dark:border-red-700 dark:text-red-300"
+                >
+                  {failCount} fail
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className="border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+                >
+                  {missingCount} missing
+                </Badge>
+              </div>
+            </div>
+            <HeaderStatusChart data={securityChecks} />
+          </div>
+        </CardContent>
+      </Card>
+
       <Card id="http-security" className="scroll-mt-24">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle className="text-lg font-semibold">Security Headers Checklist</CardTitle>
