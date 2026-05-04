@@ -7,6 +7,12 @@ ENV PATH="/app/backend/.venv/bin:${PATH}"
 
 WORKDIR /app/backend
 
+# matplotlib (used by report_service for embedded PDF charts) needs a baseline
+# font set. Install DejaVu so charts render readable labels in the slim image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 COPY backend/pyproject.toml backend/alembic.ini ./

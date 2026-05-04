@@ -6,10 +6,16 @@ from types import SimpleNamespace
 import pytest
 
 from app.services.security_analyzer import SecurityScoreResult
+from app.services import report_service
 from app.services.report_service import (
+    _embed_chart,
+    _group_tech_by_category,
     _monitor_incidents,
     _recent_change_summary,
+    _safe_chart_bytes,
     _security_score_breakdown_dict,
+    _ssl_chain_preview,
+    _ssl_days_remaining_text,
     _sum_module_duration_ms,
     generate_recommendations,
     render_markdown,
@@ -32,7 +38,37 @@ def _sample_report_data() -> dict:
             "duration": "12.0s",
             "totalDurationMs": 12000,
             "detail": {
-                "ssl": {"issuer": "Let's Encrypt", "validTo": "2026-12-31", "daysRemaining": 90},
+                "ssl": {
+                    "issuer": "Let's Encrypt",
+                    "validTo": "2026-12-31",
+                    "daysRemaining": 90,
+                    "chainDetails": [
+                        {
+                            "subject": "example.com",
+                            "issuer": "Let's Encrypt R3",
+                            "order": 0,
+                            "isTrusted": True,
+                        },
+                        {
+                            "subject": "Let's Encrypt R3",
+                            "issuer": "ISRG Root X1",
+                            "order": 1,
+                            "isTrusted": True,
+                        },
+                        {
+                            "subject": "ISRG Root X1",
+                            "issuer": "ISRG Root X1",
+                            "order": 2,
+                            "isTrusted": True,
+                        },
+                        {
+                            "subject": "Extra Cert",
+                            "issuer": "Should not appear",
+                            "order": 3,
+                            "isTrusted": False,
+                        },
+                    ],
+                },
                 "tls": {"grade": "A"},
                 "hsts": {"enabled": True},
                 "headers": {
@@ -45,7 +81,14 @@ def _sample_report_data() -> dict:
                 "ports": {"entries": [{"port": 443, "service": "https"}]},
                 "firewall": {"hasWaf": True},
                 "threats": {},
-                "techStack": {"technologies": [{"name": "Next.js"}]},
+                "techStack": {
+                    "technologies": [
+                        {"name": "Next.js", "category": "JavaScript Framework", "confidence": 100},
+                        {"name": "React", "category": "JavaScript Framework", "confidence": 100},
+                        {"name": "Cloudflare", "category": "CDN", "confidence": 90},
+                        {"name": "Nginx", "category": "Web Server", "confidence": 80},
+                    ]
+                },
                 "robotsTxt": {"robots": ["User-agent: *"]},
                 "sitemap": {"items": ["/"]},
                 "dnssec": {"enabled": True},
@@ -64,7 +107,29 @@ def _sample_report_data() -> dict:
                 },
             },
             "severity": {"critical": 0, "high": 1, "medium": 1, "low": 0},
-            "categorySummary": [],
+            "categorySummary": [
+                {
+                    "category": "security",
+                    "label": "Security",
+                    "modulesChecked": 8,
+                    "issuesFound": 2,
+                    "status": "warn",
+                },
+                {
+                    "category": "network",
+                    "label": "Network",
+                    "modulesChecked": 3,
+                    "issuesFound": 0,
+                    "status": "pass",
+                },
+                {
+                    "category": "content",
+                    "label": "Content",
+                    "modulesChecked": 4,
+                    "issuesFound": 1,
+                    "status": "warn",
+                },
+            ],
             "keyFindings": [
                 {
                     "severity": "high",
@@ -112,6 +177,19 @@ def test_render_markdown_contains_expected_sections() -> None:
     # Score Breakdown table sourced from camelCase categoryScores.
     assert "| HTTP Security | 18.0 |" in markdown
     assert "| Best Practices | 6.0 |" in markdown
+    # Category Summary table (T3.1: align with Web categorySummary).
+    assert "### Category Summary" in markdown
+    assert "| Security | 8 | 2 | Warn |" in markdown
+    assert "| Network | 3 | 0 | Pass |" in markdown
+    # SSL chain (T3.1: include chainDetails preview + daysRemaining text).
+    assert "**Certificate Chain**" in markdown
+    assert "Let's Encrypt R3" in markdown
+    assert "90 days remaining" in markdown
+    # Tech stack now grouped by category (T3.1: full list, not top-8 names).
+    assert "**Tech Stack (by category)**" in markdown
+    assert "_JavaScript Framework_" in markdown
+    assert "_CDN_" in markdown
+    assert "_Web Server_" in markdown
 
 
 @pytest.mark.unit
@@ -142,7 +220,33 @@ def test_render_pdf_returns_non_empty_bytes() -> None:
 
     assert isinstance(pdf_bytes, bytes)
     assert len(pdf_bytes) > 1000
-    assert b"/Count 2" in pdf_bytes or pdf_bytes.count(b"/Type /Page") >= 2
+    assert b"%PDF" in pdf_bytes[:8]
+    # T3.3: cover page is its own page; body starts on page 2 -> total >= 2.
+    assert pdf_bytes.count(b"/Type /Page\n") >= 2 or b"/Count 2" in pdf_bytes
+    # T3.2: embedded matplotlib charts produce XObject Image streams in the PDF.
+    assert b"/XObject" in pdf_bytes
+    assert b"/Subtype /Image" in pdf_bytes
+
+
+@pytest.mark.unit
+def test_render_pdf_falls_back_when_chart_render_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chart rendering failure must NOT abort the PDF (T3.2 acceptance)."""
+
+    def _explode(*_args, **_kwargs):  # noqa: ANN001 -- test stub, signature flexible
+        raise RuntimeError("synthetic chart failure")
+
+    monkeypatch.setattr(report_service, "render_severity_donut", _explode)
+    monkeypatch.setattr(report_service, "render_score_radar", _explode)
+    monkeypatch.setattr(report_service, "render_module_duration_bar", _explode)
+
+    pdf_bytes = render_pdf(_sample_report_data())
+
+    # PDF must still be produced, just without the embedded XObject images.
+    assert isinstance(pdf_bytes, bytes)
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 1000
+    # Cover page survives because it is pure fpdf shapes/text, not matplotlib.
+    assert pdf_bytes.count(b"/Type /Page\n") >= 2 or b"/Count 2" in pdf_bytes
 
 
 @pytest.mark.unit
@@ -255,3 +359,86 @@ def test_sum_module_duration_ms_keeps_zero_value() -> None:
     ]
 
     assert _sum_module_duration_ms(modules) == 0
+
+
+@pytest.mark.unit
+def test_ssl_chain_preview_caps_to_three_entries() -> None:
+    """T3.1: SSL chain preview must not exceed SSL_CHAIN_PREVIEW_LIMIT."""
+    detail = {
+        "ssl": {
+            "chainDetails": [
+                {"order": i, "subject": f"cert-{i}", "issuer": f"issuer-{i}", "isTrusted": True}
+                for i in range(5)
+            ]
+        }
+    }
+
+    preview = _ssl_chain_preview(detail)
+
+    assert [entry["order"] for entry in preview] == [0, 1, 2]
+
+
+@pytest.mark.unit
+def test_ssl_days_remaining_text_handles_expired_and_missing() -> None:
+    assert _ssl_days_remaining_text({"ssl": {"daysRemaining": 90}}) == "90 days remaining"
+    assert _ssl_days_remaining_text({"ssl": {"daysRemaining": -3}}) == "expired 3 days ago"
+    assert _ssl_days_remaining_text({"ssl": {}}) == "N/A"
+    assert _ssl_days_remaining_text({}) == "N/A"
+
+
+@pytest.mark.unit
+def test_group_tech_by_category_sorts_alphabetically_and_by_confidence() -> None:
+    detail = {
+        "techStack": {
+            "technologies": [
+                {"name": "B-Lib", "category": "Library", "confidence": 50},
+                {"name": "A-Lib", "category": "Library", "confidence": 80},
+                {"name": "Cloudflare", "category": "CDN", "confidence": 90},
+                {"name": "Other", "category": "", "confidence": 10},
+            ]
+        }
+    }
+
+    groups = _group_tech_by_category(detail)
+
+    keys = [pair[0] for pair in groups]
+    assert keys == sorted(keys, key=str.lower)
+    library = next(items for cat, items in groups if cat == "Library")
+    # Highest-confidence tech first (A-Lib 80 > B-Lib 50).
+    assert library[0]["name"] == "A-Lib"
+    # Items with empty category fall under "Uncategorized".
+    assert any(cat == "Uncategorized" for cat, _ in groups)
+
+
+@pytest.mark.unit
+def test_safe_chart_bytes_returns_none_on_exception() -> None:
+    def _broken() -> bytes:
+        raise RuntimeError("synthetic")
+
+    assert _safe_chart_bytes(_broken) is None
+
+
+@pytest.mark.unit
+def test_safe_chart_bytes_returns_none_when_builder_returns_empty() -> None:
+    def _empty() -> bytes:
+        return b""
+
+    assert _safe_chart_bytes(_empty) is None
+
+
+@pytest.mark.unit
+def test_safe_chart_bytes_returns_bytes_when_builder_succeeds() -> None:
+    def _ok() -> bytes:
+        return b"\x89PNG-tiny"
+
+    result = _safe_chart_bytes(_ok)
+    assert result == b"\x89PNG-tiny"
+
+
+@pytest.mark.unit
+def test_embed_chart_returns_false_for_missing_bytes() -> None:
+    sentinel = object()
+
+    # _embed_chart should short-circuit on falsy bytes without touching the pdf.
+    assert _embed_chart(sentinel, None, width_mm=10) is False
+    assert _embed_chart(sentinel, b"", width_mm=10) is False
