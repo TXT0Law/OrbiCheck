@@ -4,6 +4,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
+from io import BytesIO
 from urllib.parse import urlparse
 
 from sqlalchemy import func, select
@@ -18,6 +19,11 @@ from app.models.monitor import Monitor, MonitorChange, MonitorCheck
 from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.services.recommendations import generate_recommendations
+from app.services.report_charts import (
+    render_module_duration_bar,
+    render_score_radar,
+    render_severity_donut,
+)
 from app.services.security_analyzer import (
     compute_category_summary,
     compute_severity_counts,
@@ -77,6 +83,136 @@ def _port_entries(value: object) -> list[dict]:
 
 PDF_ENABLED_FORMATS = {ReportFormat.PDF, ReportFormat.BOTH}
 MARKDOWN_ENABLED_FORMATS = {ReportFormat.MARKDOWN, ReportFormat.BOTH, ReportFormat.PDF}
+
+# Maximum certificate-chain entries inlined into MD/PDF (full chain stays in
+# raw JSON export). Mirrors the reasoning in middleReport.md T3.1.
+SSL_CHAIN_PREVIEW_LIMIT = 3
+
+# Maximum technologies enumerated per category in the MD/PDF tech-stack section.
+# Keeps the report readable when Wappalyzer reports dozens of small libraries.
+TECH_STACK_PER_CATEGORY_LIMIT = 10
+
+# How many module bars fit comfortably in the PDF chart.
+PDF_MODULE_DURATION_BAR_LIMIT = 10
+
+# Cover-page typography (PDF). Kept as named constants because raw font sizes
+# are forbidden as magic numbers (see root AGENTS.md "Forbidden" #7).
+COVER_TITLE_FONT_SIZE = 22
+COVER_DOMAIN_FONT_SIZE = 16
+COVER_SCORE_FONT_SIZE = 60
+COVER_LABEL_FONT_SIZE = 10
+COVER_SCORE_BOX_HEIGHT = 32
+
+# Approximate matplotlib chart sizes (mm) when embedded in the PDF.
+PDF_CHART_WIDTH_MM = 90
+PDF_FULL_CHART_WIDTH_MM = 180
+
+# Severity palette (RGB tuples for fpdf2 ``set_fill_color``); aligned with the
+# Web ``severity-distribution-chart`` Tailwind colors.
+SEVERITY_RGB: dict[str, tuple[int, int, int]] = {
+    "critical": (220, 38, 38),
+    "high": (234, 88, 12),
+    "medium": (202, 138, 4),
+    "low": (37, 99, 235),
+}
+SEVERITY_LABEL_ORDER: tuple[str, ...] = ("critical", "high", "medium", "low")
+
+
+def _category_status_label(status: object) -> str:
+    text = str(status or "").strip().lower()
+    if text == "pass":
+        return "Pass"
+    if text == "warn":
+        return "Warn"
+    if text == "fail":
+        return "Fail"
+    return text.capitalize() or "N/A"
+
+
+def _group_tech_by_category(detail: dict) -> list[tuple[str, list[dict]]]:
+    """Group transformed techStack items by category, sorted alphabetically.
+
+    Items inside a category are sorted by descending confidence so the most
+    reliable detections lead each section.
+    """
+    groups: dict[str, list[dict]] = {}
+    for item in _as_tech_list(detail.get("techStack")):
+        if not isinstance(item, dict):
+            continue
+        category = str(item.get("category") or "Uncategorized").strip() or "Uncategorized"
+        groups.setdefault(category, []).append(item)
+    for items in groups.values():
+        items.sort(
+            key=lambda entry: (
+                -float(entry.get("confidence") or 0),
+                str(entry.get("name") or ""),
+            )
+        )
+    return sorted(groups.items(), key=lambda pair: pair[0].lower())
+
+
+def _format_tech_entry(item: dict) -> str:
+    name = str(item.get("name") or "unknown")
+    version = str(item.get("version") or "").strip()
+    confidence = item.get("confidence")
+    parts: list[str] = [name]
+    if version:
+        parts.append(f"v{version}")
+    if isinstance(confidence, (int, float)) and confidence:
+        parts.append(f"({int(confidence)}%)")
+    return " ".join(parts)
+
+
+def _ssl_chain_preview(detail: dict) -> list[dict]:
+    """Return up to ``SSL_CHAIN_PREVIEW_LIMIT`` chain entries from the SSL detail."""
+    ssl = detail.get("ssl") or {}
+    chain = ssl.get("chainDetails") if isinstance(ssl, dict) else None
+    if not isinstance(chain, list):
+        return []
+    return [entry for entry in chain[:SSL_CHAIN_PREVIEW_LIMIT] if isinstance(entry, dict)]
+
+
+def _ssl_days_remaining_text(detail: dict) -> str:
+    ssl = detail.get("ssl") or {}
+    days = ssl.get("daysRemaining") if isinstance(ssl, dict) else None
+    if isinstance(days, int):
+        if days < 0:
+            return f"expired {abs(days)} days ago"
+        return f"{days} days remaining"
+    return "N/A"
+
+
+def _safe_chart_bytes(builder, *args, **kwargs) -> bytes | None:
+    """Run a chart builder; swallow errors so PDF generation keeps going.
+
+    Catches any exception (matplotlib/font crashes, transient memory issues, …)
+    because chart loss must NOT abort the entire report — the dashboard still
+    has the live data and the PDF degrades to the existing text fallback.
+    """
+    try:
+        png = builder(*args, **kwargs)
+    except Exception:  # noqa: BLE001 -- chart rendering is best-effort
+        logger.warning(
+            "Report chart builder %s failed; falling back to text", getattr(builder, "__name__", repr(builder)),
+            exc_info=True,
+        )
+        return None
+    if not isinstance(png, (bytes, bytearray)) or not png:
+        return None
+    return bytes(png)
+
+
+def _embed_chart(pdf, png_bytes: bytes | None, *, width_mm: float) -> bool:
+    """Embed a chart at the current Y; return True on success, False on fallback."""
+    if not png_bytes:
+        return False
+    try:
+        pdf.image(BytesIO(png_bytes), w=width_mm)
+        pdf.ln(2)
+        return True
+    except Exception:  # noqa: BLE001 -- treat fpdf image failure same as render failure
+        logger.warning("PDF embed_chart failed; falling back to text", exc_info=True)
+        return False
 
 
 def _score_grade(score: int | None) -> str:
@@ -443,6 +579,7 @@ def render_markdown(report_data: dict) -> str:
     score = scan["securityScore"]
     severity = scan["severity"]
     breakdown = _read_breakdown_category_scores(scan)
+    category_summary = scan.get("categorySummary") or []
     headers = (detail.get("headers") or {}).get("securityChecks", [])
     ports = _port_entries(detail.get("ports"))
     uptime = (report_data.get("monitor") or {}).get("uptime") or {}
@@ -471,8 +608,25 @@ def render_markdown(report_data: dict) -> str:
         f"| Medium | {severity['medium']} |",
         f"| Low | {severity['low']} |",
         "",
-        "### Top Findings",
+        "### Category Summary",
+        "| Category | Modules Checked | Issues Found | Status |",
+        "|---|---:|---:|---|",
     ]
+    if isinstance(category_summary, list) and category_summary:
+        for entry in category_summary:
+            if not isinstance(entry, dict):
+                continue
+            label = _stringify(entry.get("label") or entry.get("category"), "Unknown")
+            modules_checked = entry.get("modulesChecked") or 0
+            issues_found = entry.get("issuesFound") or 0
+            status = _category_status_label(entry.get("status"))
+            lines.append(
+                f"| {label} | {modules_checked} | {issues_found} | {status} |"
+            )
+    else:
+        lines.append("| _no category summary available_ |  |  |  |")
+
+    lines.extend(["", "### Top Findings"])
     for index, finding in enumerate(scan["keyFindings"][:8], start=1):
         lines.append(
             f"{index}. [{finding['severity']}] {finding['title']} - {finding['description']}"
@@ -502,12 +656,34 @@ def render_markdown(report_data: dict) -> str:
             "### 3.1 Transport Security (SSL/TLS)",
             (
                 f"- Certificate: {_stringify((detail.get('ssl') or {}).get('issuer'))}, "
-                f"valid until {_stringify((detail.get('ssl') or {}).get('validTo'))}"
+                f"valid until {_stringify((detail.get('ssl') or {}).get('validTo'))} "
+                f"({_ssl_days_remaining_text(detail)})"
             ),
             (
                 f"- TLS grade: {_stringify((detail.get('tls') or {}).get('grade'))}  |  "
                 f"HSTS: {'enabled' if (detail.get('hsts') or {}).get('enabled') else 'disabled'}"
             ),
+        ]
+    )
+
+    chain_preview = _ssl_chain_preview(detail)
+    if chain_preview:
+        lines.append("")
+        lines.append("**Certificate Chain**")
+        lines.append("| Order | Subject | Issuer | Trusted |")
+        lines.append("|---:|---|---|---|")
+        for entry in chain_preview:
+            order = entry.get("order")
+            subject = _truncate(entry.get("subject"))
+            issuer = _truncate(entry.get("issuer"))
+            trusted = entry.get("isTrusted")
+            trusted_text = "yes" if trusted else "no" if trusted is False else "unknown"
+            lines.append(
+                f"| {_stringify(order, '0')} | {subject} | {issuer} | {trusted_text} |"
+            )
+
+    lines.extend(
+        [
             "",
             "### 3.2 HTTP Security Headers",
             "| Header | Present | Value |",
@@ -555,18 +731,27 @@ def render_markdown(report_data: dict) -> str:
             ),
             "",
             "### 3.5 Content & Best Practices",
-            (
-                "- Tech stack: "
-                + ", ".join(
-                    item.get("name", "unknown")
-                    for item in _as_tech_list(detail.get("techStack"))[:8]
-                )
-            ),
             f"- Robots.txt: {'present' if (detail.get('robotsTxt') or {}).get('robots') else 'absent'}",
             f"- Sitemap: {'present' if (detail.get('sitemap') or {}).get('items') else 'absent'}",
             "",
+            "**Tech Stack (by category)**",
         ]
     )
+
+    tech_groups = _group_tech_by_category(detail)
+    if tech_groups:
+        for category, items in tech_groups:
+            entries = [
+                _format_tech_entry(item) for item in items[:TECH_STACK_PER_CATEGORY_LIMIT]
+            ]
+            extra = len(items) - len(entries)
+            line = f"- _{category}_: " + ", ".join(entries)
+            if extra > 0:
+                line += f" (+{extra} more)"
+            lines.append(line)
+    else:
+        lines.append("- _no technologies detected_")
+    lines.append("")
 
     if report_data.get("monitor"):
         lines.extend(
@@ -623,6 +808,85 @@ def render_markdown(report_data: dict) -> str:
     return "\n".join(lines)
 
 
+def _render_pdf_cover(pdf, scan: dict, report_data: dict) -> None:
+    """Render the standalone cover page (T3.3).
+
+    Layout:
+        * Optional logo (top-left)
+        * "Security Assessment Report" title
+        * Domain
+        * Score block (large numerals + grade)
+        * Severity 4-cell grid
+        * Generated timestamp
+    """
+    score = scan["securityScore"]
+    severity = scan["severity"]
+
+    logo_path = settings.REPORT_PDF_LOGO_PATH
+    if logo_path and os.path.exists(logo_path):
+        pdf.image(logo_path, x=10, y=12, w=24)
+
+    pdf.set_y(40)
+    pdf.set_font("Helvetica", "B", COVER_TITLE_FONT_SIZE)
+    pdf.cell(0, 14, "Security Assessment Report", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.set_font("Helvetica", "B", COVER_DOMAIN_FONT_SIZE)
+    pdf.cell(0, 12, scan["domain"], new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(6)
+
+    pdf.set_draw_color(229, 231, 235)  # gray-200
+    pdf.set_line_width(0.4)
+    pdf.line(20, pdf.get_y(), pdf.w - 20, pdf.get_y())
+    pdf.ln(8)
+
+    pdf.set_font("Helvetica", size=COVER_LABEL_FONT_SIZE)
+    pdf.set_text_color(107, 114, 128)  # gray-500
+    pdf.cell(0, 6, "Overall Score", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.set_text_color(17, 24, 39)  # gray-900
+    pdf.set_font("Helvetica", "B", COVER_SCORE_FONT_SIZE)
+    score_text = _stringify(score, "—")
+    pdf.cell(0, COVER_SCORE_BOX_HEIGHT, score_text, new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.set_font("Helvetica", "B", COVER_DOMAIN_FONT_SIZE)
+    pdf.cell(0, 8, f"Grade {_score_grade(score)}", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(8)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(17, 24, 39)
+    pdf.cell(0, 8, "Severity Overview", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(2)
+    grid_w = pdf.w - 40
+    cell_w = grid_w / 4
+    pdf.set_x(20)
+    for level in SEVERITY_LABEL_ORDER:
+        color = SEVERITY_RGB[level]
+        pdf.set_fill_color(*color)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(cell_w, 16, f"{level.capitalize()}: {severity.get(level, 0)}", border=1, fill=True, align="C")
+    pdf.ln(20)
+    pdf.set_text_color(17, 24, 39)
+
+    pdf.set_y(pdf.h - 30)
+    pdf.set_font("Helvetica", size=9)
+    pdf.set_text_color(107, 114, 128)
+    pdf.cell(
+        0,
+        6,
+        f"Generated: {report_data['generatedAt']}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+        align="C",
+    )
+    pdf.cell(
+        0,
+        6,
+        f"Target: {scan['url']}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+        align="C",
+    )
+    pdf.set_text_color(0, 0, 0)
+
+
 def render_pdf(report_data: dict) -> bytes:
     from fpdf import FPDF
 
@@ -634,86 +898,133 @@ def render_pdf(report_data: dict) -> bytes:
 
     pdf = ReportPdf()
     pdf.set_auto_page_break(auto=True, margin=12)
-    pdf.add_page()
-
-    logo_path = settings.REPORT_PDF_LOGO_PATH
-    if logo_path and os.path.exists(logo_path):
-        pdf.image(logo_path, x=10, y=10, w=24)
-        pdf.ln(20)
 
     scan = report_data["scan"]
     detail = scan["detail"]
     score = scan["securityScore"]
     severity = scan["severity"]
     breakdown = _read_breakdown_category_scores(scan)
+    category_summary = scan.get("categorySummary") or []
     headers = (detail.get("headers") or {}).get("securityChecks", [])
     ports = _port_entries(detail.get("ports"))
-    pdf.set_font("Helvetica", "B", 20)
-    pdf.multi_cell(0, 12, f"Security Assessment Report\n{scan['domain']}")
-    pdf.ln(4)
+
+    # Cover page (T3.3) — standalone, no body content.
+    pdf.add_page()
+    _render_pdf_cover(pdf, scan, report_data)
+
+    # Page 2+ — Executive Summary onwards.
+    pdf.add_page()
+
+    severity_donut_png = _safe_chart_bytes(render_severity_donut, severity)
+    score_radar_png = _safe_chart_bytes(render_score_radar, breakdown)
+    module_bar_png = _safe_chart_bytes(
+        render_module_duration_bar,
+        scan["moduleSummary"],
+        limit=PDF_MODULE_DURATION_BAR_LIMIT,
+    )
+
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Executive Summary", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", size=11)
     pdf.multi_cell(
         0,
         7,
         (
-            f"Generated: {report_data['generatedAt']}\n"
-            f"Target: {scan['url']}\n"
-            f"Score: {_stringify(score)}/100 ({_score_grade(score)})"
+            f"Domain: {scan['domain']}\n"
+            f"Score: {_stringify(score)}/100 ({_score_grade(score)})\n"
+            f"Status: {scan['status']}\n"
+            f"Duration: {scan['duration']}"
         ),
     )
-    pdf.ln(4)
+    pdf.ln(2)
 
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Severity overview", new_x="LMARGIN", new_y="NEXT")
-    col_w = (pdf.w - 20) / 4
-    for label, value, color in (
-        ("Critical", severity["critical"], (220, 38, 38)),
-        ("High", severity["high"], (234, 88, 12)),
-        ("Medium", severity["medium"], (202, 138, 4)),
-        ("Low", severity["low"], (37, 99, 235)),
-    ):
-        pdf.set_fill_color(*color)
-        pdf.set_text_color(255, 255, 255)
-        pdf.cell(col_w, 8, f"{label}: {value}", border=1, fill=True)
-    pdf.ln(12)
-    pdf.set_text_color(0, 0, 0)
-
-    _pdf_write_section(
-        pdf,
-        "Executive Summary",
-        f"Status: {scan['status']}\nDuration: {scan['duration']}",
-    )
+    pdf.cell(0, 8, "Severity Distribution", new_x="LMARGIN", new_y="NEXT")
+    if not _embed_chart(pdf, severity_donut_png, width_mm=PDF_CHART_WIDTH_MM):
+        col_w = (pdf.w - 20) / 4
+        for label, value, color in (
+            ("Critical", severity["critical"], SEVERITY_RGB["critical"]),
+            ("High", severity["high"], SEVERITY_RGB["high"]),
+            ("Medium", severity["medium"], SEVERITY_RGB["medium"]),
+            ("Low", severity["low"], SEVERITY_RGB["low"]),
+        ):
+            pdf.set_fill_color(*color)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(col_w, 8, f"{label}: {value}", border=1, fill=True)
+        pdf.ln(12)
+        pdf.set_text_color(0, 0, 0)
 
     pdf.set_font("Helvetica", "B", 13)
     pdf.cell(0, 8, "Security Score Breakdown", new_x="LMARGIN", new_y="NEXT")
+    if not _embed_chart(pdf, score_radar_png, width_mm=PDF_CHART_WIDTH_MM):
+        pdf.set_font("Helvetica", "B", 10)
+        breakdown_col_w = (pdf.w - 20) / 2
+        pdf.cell(breakdown_col_w, 7, "Category", border=1)
+        pdf.cell(breakdown_col_w, 7, "Score", border=1)
+        pdf.ln()
+        pdf.set_font("Helvetica", size=9)
+        for label, value in (
+            ("Transport", round(breakdown.get("transport", _DEFAULT_CATEGORY_SCORE), 2)),
+            ("HTTP Security", round(breakdown.get("httpSecurity", _DEFAULT_CATEGORY_SCORE), 2)),
+            ("Threat Intel", round(breakdown.get("threatIntel", _DEFAULT_CATEGORY_SCORE), 2)),
+            ("Infrastructure", round(breakdown.get("infrastructure", _DEFAULT_CATEGORY_SCORE), 2)),
+            ("Best Practices", round(breakdown.get("bestPractices", _DEFAULT_CATEGORY_SCORE), 2)),
+        ):
+            pdf.cell(breakdown_col_w, 7, label, border=1)
+            pdf.cell(breakdown_col_w, 7, str(value), border=1)
+            pdf.ln()
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, "Category Summary", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "B", 10)
-    breakdown_col_w = (pdf.w - 20) / 2
-    pdf.cell(breakdown_col_w, 7, "Category", border=1)
-    pdf.cell(breakdown_col_w, 7, "Score", border=1)
+    summary_cols = ((pdf.w - 20) / 4, (pdf.w - 20) / 4, (pdf.w - 20) / 4, (pdf.w - 20) / 4)
+    for header_label, col_width in zip(
+        ("Category", "Modules Checked", "Issues Found", "Status"), summary_cols, strict=False
+    ):
+        pdf.cell(col_width, 7, header_label, border=1)
     pdf.ln()
     pdf.set_font("Helvetica", size=9)
-    for label, value in (
-        ("Transport", round(breakdown.get("transport", _DEFAULT_CATEGORY_SCORE), 2)),
-        ("HTTP Security", round(breakdown.get("httpSecurity", _DEFAULT_CATEGORY_SCORE), 2)),
-        ("Threat Intel", round(breakdown.get("threatIntel", _DEFAULT_CATEGORY_SCORE), 2)),
-        ("Infrastructure", round(breakdown.get("infrastructure", _DEFAULT_CATEGORY_SCORE), 2)),
-        ("Best Practices", round(breakdown.get("bestPractices", _DEFAULT_CATEGORY_SCORE), 2)),
-    ):
-        pdf.cell(breakdown_col_w, 7, label, border=1)
-        pdf.cell(breakdown_col_w, 7, str(value), border=1)
+    if isinstance(category_summary, list) and category_summary:
+        for entry in category_summary:
+            if not isinstance(entry, dict):
+                continue
+            pdf.cell(summary_cols[0], 7, _stringify(entry.get("label") or entry.get("category"), "Unknown"), border=1)
+            pdf.cell(summary_cols[1], 7, str(entry.get("modulesChecked") or 0), border=1)
+            pdf.cell(summary_cols[2], 7, str(entry.get("issuesFound") or 0), border=1)
+            pdf.cell(summary_cols[3], 7, _category_status_label(entry.get("status")), border=1)
+            pdf.ln()
+    else:
+        pdf.cell(summary_cols[0], 7, "No category summary available", border=1)
+        pdf.cell(summary_cols[1] + summary_cols[2] + summary_cols[3], 7, "", border=1)
         pdf.ln()
     pdf.ln(3)
+
+    chain_preview = _ssl_chain_preview(detail)
+    chain_lines: list[str] = []
+    if chain_preview:
+        chain_lines.append("")
+        chain_lines.append("Certificate chain (top entries):")
+        for entry in chain_preview:
+            order = entry.get("order")
+            subject = _truncate(entry.get("subject"))
+            issuer = _truncate(entry.get("issuer"))
+            trusted = entry.get("isTrusted")
+            trusted_text = "trusted" if trusted else "untrusted" if trusted is False else "trust unknown"
+            chain_lines.append(f"  [{_stringify(order, '0')}] {subject} <- {issuer} ({trusted_text})")
 
     category_lines = [
         "Transport Security (SSL/TLS)",
         (
             f"- Certificate: {_stringify((detail.get('ssl') or {}).get('issuer'))}, "
-            f"valid until {_stringify((detail.get('ssl') or {}).get('validTo'))}"
+            f"valid until {_stringify((detail.get('ssl') or {}).get('validTo'))} "
+            f"({_ssl_days_remaining_text(detail)})"
         ),
         (
             f"- TLS grade: {_stringify((detail.get('tls') or {}).get('grade'))}, "
             f"HSTS: {'enabled' if (detail.get('hsts') or {}).get('enabled') else 'disabled'}"
         ),
+        *chain_lines,
         "",
         "HTTP Security Headers",
     ]
@@ -750,17 +1061,26 @@ def render_pdf(report_data: dict) -> bytes:
             ),
             "",
             "Content & Best Practices",
-            (
-                "- Tech stack: "
-                + ", ".join(
-                    item.get("name", "unknown")
-                    for item in _as_tech_list(detail.get("techStack"))[:8]
-                )
-            ),
             f"- Robots.txt: {'present' if (detail.get('robotsTxt') or {}).get('robots') else 'absent'}",
             f"- Sitemap: {'present' if (detail.get('sitemap') or {}).get('items') else 'absent'}",
         ]
     )
+
+    tech_groups = _group_tech_by_category(detail)
+    if tech_groups:
+        category_lines.extend(["", "Tech Stack (by category)"])
+        for category, items in tech_groups:
+            entries = [
+                _format_tech_entry(item) for item in items[:TECH_STACK_PER_CATEGORY_LIMIT]
+            ]
+            extra = len(items) - len(entries)
+            line = f"- {category}: " + ", ".join(entries)
+            if extra > 0:
+                line += f" (+{extra} more)"
+            category_lines.append(line)
+    else:
+        category_lines.extend(["", "Tech Stack: no technologies detected"])
+
     _pdf_write_section(pdf, "Category Assessment", "\n".join(category_lines))
 
     _pdf_write_section(
@@ -772,6 +1092,20 @@ def render_pdf(report_data: dict) -> bytes:
         )
         or "- No high-priority findings extracted.",
     )
+
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, "Module Execution Duration", new_x="LMARGIN", new_y="NEXT")
+    if not _embed_chart(pdf, module_bar_png, width_mm=PDF_FULL_CHART_WIDTH_MM):
+        pdf.set_font("Helvetica", size=9)
+        for item in scan["moduleSummary"][:PDF_MODULE_DURATION_BAR_LIMIT]:
+            pdf.cell(
+                0,
+                5,
+                f"- {item['module']}: {_stringify(item['duration'], '0')}ms ({item['status']})",
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+        pdf.ln(2)
 
     if report_data.get("monitor"):
         uptime = report_data["monitor"]["uptime"]
