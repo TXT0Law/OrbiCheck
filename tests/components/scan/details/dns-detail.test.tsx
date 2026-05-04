@@ -1,5 +1,26 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import React from "react";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("recharts", () => {
+  const passthrough = (name: string) => {
+    const Component = (props: { children?: React.ReactNode }) => (
+      <div data-recharts={name}>{props.children}</div>
+    );
+    Component.displayName = `Mock(${name})`;
+    return Component;
+  };
+  return {
+    ResponsiveContainer: passthrough("ResponsiveContainer"),
+    BarChart: passthrough("BarChart"),
+    Bar: passthrough("Bar"),
+    Cell: passthrough("Cell"),
+    CartesianGrid: passthrough("CartesianGrid"),
+    XAxis: passthrough("XAxis"),
+    YAxis: passthrough("YAxis"),
+    Tooltip: passthrough("Tooltip"),
+  };
+});
 
 import { DnsDetail } from "@/components/scan/details/dns-detail";
 
@@ -22,6 +43,12 @@ describe("DnsDetail", () => {
     expect(screen.getByText("DNS Records")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "A" })).toBeInTheDocument();
     expect(screen.getByText("93.184.216.34")).toBeInTheDocument();
+  });
+
+  it("renders the record-type distribution chart card alongside the tab list", () => {
+    render(<DnsDetail data={FULL_DATA} />);
+
+    expect(screen.getByText("Record Type Distribution")).toBeInTheDocument();
   });
 
   it("shows empty state for missing record values", () => {

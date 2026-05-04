@@ -1,5 +1,29 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import React from "react";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("recharts", () => {
+  const passthrough = (name: string) => {
+    const Component = (props: { children?: React.ReactNode }) => (
+      <div data-recharts={name}>{props.children}</div>
+    );
+    Component.displayName = `Mock(${name})`;
+    return Component;
+  };
+  return {
+    ResponsiveContainer: passthrough("ResponsiveContainer"),
+    PieChart: passthrough("PieChart"),
+    Pie: passthrough("Pie"),
+    BarChart: passthrough("BarChart"),
+    Bar: passthrough("Bar"),
+    Cell: passthrough("Cell"),
+    CartesianGrid: passthrough("CartesianGrid"),
+    XAxis: passthrough("XAxis"),
+    YAxis: passthrough("YAxis"),
+    Tooltip: passthrough("Tooltip"),
+    Legend: passthrough("Legend"),
+  };
+});
 
 import { PortsDetail } from "@/components/scan/details/ports-detail";
 
@@ -67,6 +91,15 @@ function getMainTable() {
 }
 
 describe("PortsDetail", () => {
+  it("renders chart subsections for state distribution and risk breakdown", () => {
+    render(<PortsDetail data={buildData()} />);
+
+    expect(screen.getByText("Port State Distribution")).toBeInTheDocument();
+    expect(screen.getByText("Open Port Risk Breakdown")).toBeInTheDocument();
+    expect(screen.getByText(/High-risk \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Routine \(1\)/)).toBeInTheDocument();
+  });
+
   it("renders state and reason columns plus host summary", () => {
     render(<PortsDetail data={buildData()} />);
 

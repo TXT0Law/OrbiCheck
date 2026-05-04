@@ -1,6 +1,34 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("recharts", () => {
+  const passthrough = (name: string) => {
+    const Component = (props: { children?: React.ReactNode }) => (
+      <div data-recharts={name}>{props.children}</div>
+    );
+    Component.displayName = `Mock(${name})`;
+    return Component;
+  };
+  return {
+    ResponsiveContainer: passthrough("ResponsiveContainer"),
+    PieChart: passthrough("PieChart"),
+    Pie: passthrough("Pie"),
+    BarChart: passthrough("BarChart"),
+    Bar: passthrough("Bar"),
+    Cell: passthrough("Cell"),
+    CartesianGrid: passthrough("CartesianGrid"),
+    XAxis: passthrough("XAxis"),
+    YAxis: passthrough("YAxis"),
+    Tooltip: passthrough("Tooltip"),
+    Legend: passthrough("Legend"),
+    RadarChart: passthrough("RadarChart"),
+    PolarGrid: passthrough("PolarGrid"),
+    PolarAngleAxis: passthrough("PolarAngleAxis"),
+    PolarRadiusAxis: passthrough("PolarRadiusAxis"),
+    Radar: passthrough("Radar"),
+  };
+});
 
 import { ArchivesDetail } from "@/components/scan/details/archives-detail";
 import { CookiesDetail } from "@/components/scan/details/cookies-detail";
@@ -362,7 +390,7 @@ describe("scan detail components null/partial guards", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(4);
   });
 
-  it("renders quality gauge with zero when displayScore is missing", () => {
+  it("renders quality gauge with em-dash when displayScore is missing", () => {
     render(
       <QualityDetail
         data={{
@@ -384,6 +412,6 @@ describe("scan detail components null/partial guards", () => {
     );
 
     expect(screen.getByText("Performance")).toBeInTheDocument();
-    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 });

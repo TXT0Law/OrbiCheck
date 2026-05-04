@@ -6,6 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DangerousPortsChart } from "@/components/scan/charts/dangerous-ports-chart";
+import { PortStateChart } from "@/components/scan/charts/port-state-chart";
+import { DANGEROUS_PORTS } from "@/shared/constants/dangerous-ports";
 import type {
   OsDetection,
   PortResult,
@@ -17,8 +20,6 @@ import type {
 interface PortsDetailProps {
   data: PortsResult | null | undefined;
 }
-
-const DANGEROUS_PORTS = new Set([21, 23, 445, 3389]);
 const PORT_FILTERS = [
   { id: "open", label: "Open" },
   { id: "all", label: "All" },
@@ -579,6 +580,27 @@ export function PortsDetail({ data }: PortsDetailProps) {
             High-risk ports appear open but may be CDN ports: {dangerousOpenPorts.join(", ")}.
           </div>
         ) : null}
+
+        <div className="grid grid-cols-1 gap-6 rounded-md border border-border/60 bg-muted/10 p-4 lg:grid-cols-2">
+          <section aria-labelledby="ports-state-distribution-heading">
+            <h3
+              id="ports-state-distribution-heading"
+              className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-200"
+            >
+              Port State Distribution
+            </h3>
+            <PortStateChart data={allEntries} />
+          </section>
+          <section aria-labelledby="ports-risk-breakdown-heading">
+            <h3
+              id="ports-risk-breakdown-heading"
+              className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-200"
+            >
+              Open Port Risk Breakdown
+            </h3>
+            <DangerousPortsChart data={openPorts} dangerousPorts={DANGEROUS_PORTS} />
+          </section>
+        </div>
 
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">

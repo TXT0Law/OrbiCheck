@@ -1,5 +1,29 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import React from "react";
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("recharts", () => {
+  const passthrough = (name: string) => {
+    const Component = (props: { children?: React.ReactNode }) => (
+      <div data-recharts={name}>{props.children}</div>
+    );
+    Component.displayName = `Mock(${name})`;
+    return Component;
+  };
+  return {
+    ResponsiveContainer: passthrough("ResponsiveContainer"),
+    PieChart: passthrough("PieChart"),
+    Pie: passthrough("Pie"),
+    Cell: passthrough("Cell"),
+    Tooltip: passthrough("Tooltip"),
+    Legend: passthrough("Legend"),
+    BarChart: passthrough("BarChart"),
+    Bar: passthrough("Bar"),
+    CartesianGrid: passthrough("CartesianGrid"),
+    XAxis: passthrough("XAxis"),
+    YAxis: passthrough("YAxis"),
+  };
+});
 
 import { formatDate, SslDetail } from "@/components/scan/details/ssl-detail";
 import type { SslCheckResult } from "@/shared/types/scan";
@@ -66,6 +90,16 @@ describe("SslDetail", () => {
     render(<SslDetail data={FULL_DATA} />);
     expect(screen.getByText("A+")).toBeInTheDocument();
     expect(screen.getAllByText("github.com").length).toBeGreaterThan(0);
+  });
+
+  it("renders the visual snapshot section with three chart subsections", () => {
+    render(<SslDetail data={FULL_DATA} />);
+
+    expect(screen.getByText("Visual Snapshot")).toBeInTheDocument();
+    expect(screen.getByText("Certificate Validity")).toBeInTheDocument();
+    expect(screen.getByText("Protocol Support Matrix")).toBeInTheDocument();
+    expect(screen.getByText("Cipher Strength Distribution")).toBeInTheDocument();
+    expect(screen.getByText("180 days remaining")).toBeInTheDocument();
   });
 
   it("renders certificate chain table when chainDetails present", () => {

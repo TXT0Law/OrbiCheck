@@ -1,5 +1,25 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import React from "react";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("recharts", () => {
+  const passthrough = (name: string) => {
+    const Component = (props: { children?: React.ReactNode }) => (
+      <div data-recharts={name}>{props.children}</div>
+    );
+    Component.displayName = `Mock(${name})`;
+    return Component;
+  };
+  return {
+    ResponsiveContainer: passthrough("ResponsiveContainer"),
+    RadarChart: passthrough("RadarChart"),
+    PolarGrid: passthrough("PolarGrid"),
+    PolarAngleAxis: passthrough("PolarAngleAxis"),
+    PolarRadiusAxis: passthrough("PolarRadiusAxis"),
+    Radar: passthrough("Radar"),
+    Tooltip: passthrough("Tooltip"),
+  };
+});
 
 import { QualityDetail } from "@/components/scan/details/quality-detail";
 
@@ -34,6 +54,47 @@ describe("QualityDetail", () => {
     expect(screen.getByText("91")).toBeInTheDocument();
     expect(screen.getByText("Largest Contentful Paint")).toBeInTheDocument();
     expect(screen.getByText("Good")).toBeInTheDocument();
+    expect(screen.getByText("Top Web Vitals (worst first)")).toBeInTheDocument();
+  });
+
+  it("filters audits by status when a chip is toggled", () => {
+    render(
+      <QualityDetail
+        data={{
+          categories: [
+            { id: "performance", title: "Performance", score: 0.5, displayScore: 50 },
+          ],
+          audits: [
+            {
+              id: "good-audit",
+              title: "Good audit",
+              displayValue: "1.0 s",
+              score: 0.95,
+              numericValue: 1000,
+            },
+            {
+              id: "bad-audit",
+              title: "Bad audit",
+              displayValue: "5.0 s",
+              score: 0.3,
+              numericValue: 5000,
+            },
+          ],
+          fetchTime: null,
+          requestedUrl: "https://example.com",
+          finalUrl: "https://example.com",
+          runtimeError: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Bad audit")).toBeInTheDocument();
+    expect(screen.getByText("Good audit")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Failing" }));
+
+    expect(screen.getByText("Bad audit")).toBeInTheDocument();
+    expect(screen.queryByText("Good audit")).not.toBeInTheDocument();
   });
 
   it("renders empty-state guidance when no data is available", () => {

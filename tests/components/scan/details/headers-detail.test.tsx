@@ -1,5 +1,24 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import React from "react";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("recharts", () => {
+  const passthrough = (name: string) => {
+    const Component = (props: { children?: React.ReactNode }) => (
+      <div data-recharts={name}>{props.children}</div>
+    );
+    Component.displayName = `Mock(${name})`;
+    return Component;
+  };
+  return {
+    ResponsiveContainer: passthrough("ResponsiveContainer"),
+    PieChart: passthrough("PieChart"),
+    Pie: passthrough("Pie"),
+    Cell: passthrough("Cell"),
+    Tooltip: passthrough("Tooltip"),
+    Legend: passthrough("Legend"),
+  };
+});
 
 import { HeadersDetail } from "@/components/scan/details/headers-detail";
 
@@ -35,6 +54,12 @@ describe("HeadersDetail", () => {
     expect(screen.getAllByText("content-security-policy").length).toBeGreaterThan(1);
     expect(screen.getByText("server")).toBeInTheDocument();
     expect(screen.getByText("nginx")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Overall security headers grade A"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 pass")).toBeInTheDocument();
+    expect(screen.getByText("0 fail")).toBeInTheDocument();
+    expect(screen.getByText("1 missing")).toBeInTheDocument();
   });
 
   it("shows empty states when checks and raw headers are missing", () => {
@@ -46,6 +71,9 @@ describe("HeadersDetail", () => {
 
     expect(screen.getByText("No security header checks available.")).toBeInTheDocument();
     expect(screen.getByText("No response headers captured.")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Header status distribution unavailable/i),
+    ).toBeInTheDocument();
   });
 
   it("renders missing badge recommendations", () => {
