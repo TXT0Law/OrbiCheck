@@ -82,7 +82,7 @@ async def get_report_preview(
 @router.get("/{report_id}/download")
 async def download_report(
     report_id: uuid.UUID,
-    format: Literal["pdf", "markdown"] = Query(default="pdf"),
+    format: Literal["pdf", "markdown", "html"] = Query(default="pdf"),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

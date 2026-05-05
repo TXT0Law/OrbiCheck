@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
@@ -241,14 +242,18 @@ async def get_scan_module(
     )
 
 
-@router.get("/{scan_id}/detail")
-async def get_scan_full_detail(
-    scan_id: uuid.UUID,
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Get full scan detail with all modules transformed for frontend."""
-    scan = await scan_service.get_scan(db, scan_id, current_user.id)
+# Default cap for surfaced findings on detail / export endpoints. Mirrors
+# `KEY_FINDINGS_DISPLAY_LIMIT` on the Web Summary so live and exported
+# payloads agree on top-N findings.
+DETAIL_KEY_FINDINGS_LIMIT = 8
+
+
+def _compose_scan_detail_payload(scan, *, key_findings_limit: int) -> dict:
+    """Assemble the canonical scan-detail dict shared by ``/detail`` and ``/detail/full``.
+
+    Pulls every transformer + analyzer once so both endpoints stay in lockstep
+    (G7 / D0-1: single source of truth for ``securityScoreBreakdown`` shape).
+    """
     all_raw = {
         m.module_name: m.raw_result
         for m in scan.module_results
@@ -262,7 +267,7 @@ async def get_scan_full_detail(
 
     severity = compute_severity_counts(all_raw)
     category_summary = compute_category_summary(all_raw)
-    key_findings = extract_key_findings(all_raw, max_findings=8)
+    key_findings = extract_key_findings(all_raw, max_findings=key_findings_limit)
     recommendations = generate_recommendations(detail, key_findings)
 
     resolved_security = resolve_security_score_for_detail(
@@ -307,8 +312,60 @@ async def get_scan_full_detail(
                 "bestPractices": cs["best_practices"],
             },
         }
+    return data
 
-    return SuccessResponse(data=data)
+
+@router.get("/{scan_id}/detail")
+async def get_scan_full_detail(
+    scan_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get full scan detail with all modules transformed for frontend."""
+    scan = await scan_service.get_scan(db, scan_id, current_user.id)
+    return SuccessResponse(
+        data=_compose_scan_detail_payload(
+            scan,
+            key_findings_limit=DETAIL_KEY_FINDINGS_LIMIT,
+        )
+    )
+
+
+@router.get("/{scan_id}/detail/full")
+async def get_scan_full_export(
+    scan_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return transformed scan detail plus untouched module raw results.
+
+    Used by the dashboard "Export full (JSON)" action so users can take a
+    portable snapshot of every module's raw output (no transformer
+    flattening) alongside the dashboard summary. Owner-scoped via
+    ``scan_service.get_scan``.
+    """
+    scan = await scan_service.get_scan(db, scan_id, current_user.id)
+    summary = _compose_scan_detail_payload(
+        scan,
+        key_findings_limit=DETAIL_KEY_FINDINGS_LIMIT,
+    )
+    raw_results = {
+        m.module_name: {
+            "status": m.status.value,
+            "durationMs": m.duration_ms,
+            "errorMessage": m.error_message,
+            "rawResult": m.raw_result,
+        }
+        for m in scan.module_results
+    }
+
+    return SuccessResponse(
+        data={
+            "summary": summary,
+            "rawResults": raw_results,
+            "exportedAt": datetime.now(timezone.utc).isoformat(),
+        }
+    )
 
 
 @router.post("/{scan_id}/modules/{module_name}/retry")

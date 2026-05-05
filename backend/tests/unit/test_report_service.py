@@ -18,6 +18,7 @@ from app.services.report_service import (
     _ssl_days_remaining_text,
     _sum_module_duration_ms,
     generate_recommendations,
+    render_html,
     render_markdown,
     render_pdf,
 )
@@ -212,6 +213,69 @@ def test_render_markdown_falls_back_to_legacy_breakdown_shape() -> None:
     assert "| HTTP Security | 21.0 |" in markdown
     assert "| Threat Intel | 12.0 |" in markdown
     assert "| Best Practices | 6.0 |" in markdown
+
+
+@pytest.mark.unit
+def test_render_html_includes_key_dom_landmarks() -> None:
+    """T4.2: HTML report must surface the same key sections as the Web summary."""
+    html = render_html(_sample_report_data())
+
+    # Document scaffold + title.
+    assert "<!doctype html>" in html.lower()
+    assert "<title>example.com" in html.lower()
+    # Score gauge + grade letter.
+    assert "Security Score" in html
+    assert "Grade C" in html  # 72 maps to "C" via _score_grade.
+    # Severity grid.
+    assert "Critical 0" in html
+    assert "High 1" in html
+    # Category Summary table mirrors the Web summary categorySummary.
+    assert "<th>Category</th>" in html
+    assert ">Security<" in html
+    assert ">Network<" in html
+    # Score Breakdown (camelCase keys rendered).
+    assert "Transport" in html
+    assert "HTTP Security" in html
+    # Recommendations card.
+    assert "Enable HSTS preload" in html
+    # Embedded chart placeholders surface as data:image PNG sources when
+    # matplotlib renders successfully (otherwise the figure block is omitted
+    # and we still render the table).
+    assert "Module Execution Summary" in html
+
+
+@pytest.mark.unit
+def test_render_html_falls_back_when_chart_render_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chart rendering failure must NOT abort HTML rendering (T4.2 acceptance)."""
+
+    def _explode(*_args, **_kwargs):  # noqa: ANN001 -- test stub, signature flexible
+        raise RuntimeError("synthetic chart failure")
+
+    monkeypatch.setattr(report_service, "render_severity_donut", _explode)
+    monkeypatch.setattr(report_service, "render_score_radar", _explode)
+    monkeypatch.setattr(report_service, "render_module_duration_bar", _explode)
+
+    html = render_html(_sample_report_data())
+
+    assert "<title>example.com" in html.lower()
+    # No data:image embedded when charts fail; the fallback content survives.
+    assert "data:image/png;base64," not in html
+    assert "Severity Overview" in html
+
+
+@pytest.mark.unit
+def test_render_html_escapes_user_supplied_strings() -> None:
+    """Injected scan domain / titles must be HTML-escaped (autoescape on)."""
+    payload = _sample_report_data()
+    payload["scan"]["domain"] = "<script>bad</script>"
+    payload["recommendations"][0]["title"] = "<img src=x onerror=alert(1)>"
+
+    html = render_html(payload)
+
+    assert "<script>bad</script>" not in html
+    assert "&lt;script&gt;bad&lt;/script&gt;" in html
+    assert "<img src=x" not in html
+    assert "&lt;img src=x" in html
 
 
 @pytest.mark.unit

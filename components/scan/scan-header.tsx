@@ -3,13 +3,20 @@
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Download, FileText } from "lucide-react";
+import { ChevronRight, Download, FileSpreadsheet, FileText } from "lucide-react";
 
 import { ReportGenerateDialog } from "@/components/report/report-generate-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/use-toast";
+import { getScanFullExport } from "@/lib/api/scans";
 import { getPageLabelFromPathname } from "@/lib/constants/scan-module-routes";
-import { downloadJson, pickScanDetailExportSummary } from "@/lib/utils/export-json";
+import { downloadCsv, pickScanModuleCsvRows } from "@/lib/utils/export-csv";
+import {
+  downloadJson,
+  pickScanDetailExportSummary,
+  pickScanFullExport,
+} from "@/lib/utils/export-json";
 import type { ScanDetail } from "@/shared/types/scan";
 
 interface ScanHeaderProps {
@@ -19,12 +26,41 @@ interface ScanHeaderProps {
 export function ScanHeader({ detail }: ScanHeaderProps) {
   const pathname = usePathname();
   const pageLabel = getPageLabelFromPathname(pathname);
+  const { toast } = useToast();
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [fullExportLoading, setFullExportLoading] = useState(false);
+
+  const safeDomain = detail.domain.replace(/[^\w.-]+/g, "_");
 
   const handleExportSummary = () => {
     const payload = pickScanDetailExportSummary(detail);
-    const safeDomain = detail.domain.replace(/[^\w.-]+/g, "_");
     downloadJson(`scan-${detail.id}-${safeDomain}-summary.json`, payload);
+  };
+
+  const handleExportFull = async () => {
+    if (fullExportLoading) {
+      return;
+    }
+    setFullExportLoading(true);
+    try {
+      const full = await getScanFullExport(detail.id);
+      const payload = pickScanFullExport(detail, full);
+      downloadJson(`scan-${detail.id}-${safeDomain}-full.json`, payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not export full data.";
+      toast({
+        title: "Export failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setFullExportLoading(false);
+    }
+  };
+
+  const handleExportCsv = () => {
+    const rows = pickScanModuleCsvRows(detail);
+    downloadCsv(`scan-${detail.id}-${safeDomain}-modules.csv`, rows);
   };
 
   return (
@@ -60,6 +96,27 @@ export function ScanHeader({ detail }: ScanHeaderProps) {
             <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={handleExportSummary}>
               <Download className="h-4 w-4" aria-hidden />
               Export summary (JSON)
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => void handleExportFull()}
+              disabled={fullExportLoading}
+            >
+              <Download className="h-4 w-4" aria-hidden />
+              {fullExportLoading ? "Exporting..." : "Export full (JSON)"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleExportCsv}
+            >
+              <FileSpreadsheet className="h-4 w-4" aria-hidden />
+              Export CSV
             </Button>
             <Badge
               className={`border-transparent ${
