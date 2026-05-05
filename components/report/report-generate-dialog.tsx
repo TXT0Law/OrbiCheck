@@ -25,7 +25,7 @@ interface ReportGenerateDialogProps {
 }
 
 const PERIOD_OPTIONS: ReportPeriod[] = ["24h", "7d", "30d", "90d"];
-const FORMAT_OPTIONS: ReportFormat[] = ["pdf", "markdown", "both"];
+const FORMAT_OPTIONS: ReportFormat[] = ["pdf", "markdown", "html", "both", "all"];
 
 export function ReportGenerateDialog({
   open,

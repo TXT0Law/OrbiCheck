@@ -10,10 +10,30 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/components/ui/use-toast";
 import { downloadReport } from "@/lib/api/reports";
 import { useDeleteReport } from "@/lib/hooks/use-reports";
-import type { ReportListItem } from "@/shared/types/report";
+import type { ReportDownloadFormat, ReportListItem } from "@/shared/types/report";
 
 interface ReportListTableProps {
   reports: ReportListItem[];
+}
+
+/**
+ * Mirror of ``backend/app/services/report_service.py`` enabled-format sets.
+ * Keep aligned when extending ``ReportFormat`` so the UI does not surface a
+ * download button for an artifact that the worker never produced.
+ */
+const FORMAT_AVAILABILITY: Record<ReportListItem["format"], ReportDownloadFormat[]> = {
+  pdf: ["pdf", "markdown"],
+  markdown: ["markdown"],
+  html: ["markdown", "html"],
+  both: ["pdf", "markdown"],
+  all: ["pdf", "markdown", "html"],
+};
+
+function isFormatAvailable(
+  reportFormat: ReportListItem["format"],
+  candidate: ReportDownloadFormat,
+): boolean {
+  return FORMAT_AVAILABILITY[reportFormat]?.includes(candidate) ?? false;
 }
 
 function formatBytes(value: number | null): string {
@@ -55,7 +75,7 @@ export function ReportListTable({ reports }: ReportListTableProps) {
     }
   }
 
-  async function handleDownload(reportId: string, format: "pdf" | "markdown") {
+  async function handleDownload(reportId: string, format: ReportDownloadFormat) {
     try {
       await downloadReport(reportId, format);
     } catch (error) {
@@ -107,7 +127,10 @@ export function ReportListTable({ reports }: ReportListTableProps) {
                       size="sm"
                       variant="outline"
                       onClick={() => void handleDownload(report.id, "markdown")}
-                      disabled={report.status !== "completed"}
+                      disabled={
+                        report.status !== "completed" ||
+                        !isFormatAvailable(report.format, "markdown")
+                      }
                     >
                       MD
                     </Button>
@@ -115,9 +138,23 @@ export function ReportListTable({ reports }: ReportListTableProps) {
                       size="sm"
                       variant="outline"
                       onClick={() => void handleDownload(report.id, "pdf")}
-                      disabled={report.status !== "completed"}
+                      disabled={
+                        report.status !== "completed" ||
+                        !isFormatAvailable(report.format, "pdf")
+                      }
                     >
                       PDF
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleDownload(report.id, "html")}
+                      disabled={
+                        report.status !== "completed" ||
+                        !isFormatAvailable(report.format, "html")
+                      }
+                    >
+                      HTML
                     </Button>
                     <Button size="sm" variant="destructive" onClick={() => setDeleting(report)}>
                       Delete

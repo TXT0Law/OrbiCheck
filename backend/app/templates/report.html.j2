@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ scan.domain }} — Security Assessment Report</title>
+  <style>
+    /* Print-friendly defaults: A4 width, 1.4 line height, black-and-white safe palette. */
+    :root {
+      color-scheme: light;
+      --color-text: #111827;
+      --color-muted: #6b7280;
+      --color-border: #e5e7eb;
+      --color-card: #ffffff;
+      --color-bg: #f9fafb;
+      --color-critical: #dc2626;
+      --color-high: #ea580c;
+      --color-medium: #ca8a04;
+      --color-low: #2563eb;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: "Helvetica", "Arial", sans-serif;
+      line-height: 1.45;
+      font-size: 13px;
+    }
+    body {
+      max-width: 210mm;
+      margin: 0 auto;
+      padding: 24px 28px;
+      background: var(--color-card);
+    }
+    h1, h2, h3, h4 {
+      color: var(--color-text);
+      margin-top: 0;
+    }
+    h1 { font-size: 24px; margin-bottom: 4px; }
+    h2 { font-size: 18px; margin: 28px 0 8px; }
+    h3 { font-size: 14px; margin: 16px 0 6px; }
+    p { margin: 4px 0; }
+    .meta {
+      color: var(--color-muted);
+      font-size: 12px;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0 24px;
+    }
+    .card {
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      background: var(--color-card);
+    }
+    .score-block {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .score-block .score {
+      font-size: 48px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .score-block .grade {
+      font-size: 14px;
+      color: var(--color-muted);
+    }
+    .severity-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .severity-cell {
+      border-radius: 4px;
+      padding: 8px 6px;
+      color: #ffffff;
+      text-align: center;
+      font-weight: 600;
+    }
+    .severity-critical { background: var(--color-critical); }
+    .severity-high { background: var(--color-high); }
+    .severity-medium { background: var(--color-medium); }
+    .severity-low { background: var(--color-low); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0;
+      font-size: 12px;
+    }
+    th, td {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--color-border);
+      vertical-align: top;
+    }
+    th {
+      background: var(--color-bg);
+      font-weight: 600;
+    }
+    .pill {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .pill-critical { background: rgba(220, 38, 38, 0.15); color: var(--color-critical); }
+    .pill-high { background: rgba(234, 88, 12, 0.15); color: var(--color-high); }
+    .pill-medium { background: rgba(202, 138, 4, 0.18); color: var(--color-medium); }
+    .pill-low { background: rgba(37, 99, 235, 0.15); color: var(--color-low); }
+    .pill-info { background: rgba(107, 114, 128, 0.15); color: var(--color-muted); }
+    .chart-figure {
+      margin: 12px 0;
+      text-align: center;
+    }
+    .chart-figure img {
+      max-width: 100%;
+      height: auto;
+    }
+    ul.findings {
+      margin: 0;
+      padding-left: 18px;
+    }
+    ul.findings li { margin: 4px 0; }
+    .footer {
+      margin-top: 32px;
+      padding-top: 12px;
+      border-top: 1px solid var(--color-border);
+      color: var(--color-muted);
+      font-size: 11px;
+    }
+    @media print {
+      body { padding: 0; max-width: none; }
+      .page-break { page-break-before: always; }
+      .card { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{ scan.domain }} — Security Assessment Report</h1>
+    <p class="meta">Generated {{ generated_at }} · Target {{ scan.url }} · Report ID {{ report_id }}</p>
+  </header>
+
+  <section class="summary-grid">
+    <div class="card">
+      <h3>Security Score</h3>
+      <div class="score-block">
+        <div class="score">{{ score_text }}</div>
+        <div>
+          <div class="grade">Grade {{ grade }}</div>
+          <div class="meta">Status: {{ scan.status }}</div>
+          <div class="meta">Duration: {{ scan.duration or "N/A" }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Severity Overview</h3>
+      <div class="severity-grid">
+        <div class="severity-cell severity-critical">Critical {{ severity.critical }}</div>
+        <div class="severity-cell severity-high">High {{ severity.high }}</div>
+        <div class="severity-cell severity-medium">Medium {{ severity.medium }}</div>
+        <div class="severity-cell severity-low">Low {{ severity.low }}</div>
+      </div>
+      {% if charts.severity_donut %}
+      <div class="chart-figure">
+        <img src="data:image/png;base64,{{ charts.severity_donut }}" alt="Severity distribution chart" />
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section>
+    <h2>1. Executive Summary</h2>
+    {% if category_summary %}
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th style="text-align:right">Modules Checked</th>
+          <th style="text-align:right">Issues Found</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in category_summary %}
+        <tr>
+          <td>{{ entry.label or entry.category or "Unknown" }}</td>
+          <td style="text-align:right">{{ entry.modulesChecked or 0 }}</td>
+          <td style="text-align:right">{{ entry.issuesFound or 0 }}</td>
+          <td>{{ entry.status_label }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="meta">No category summary available.</p>
+    {% endif %}
+
+    <h3>Top Findings</h3>
+    {% if key_findings %}
+    <ul class="findings">
+      {% for finding in key_findings %}
+      <li>
+        <span class="pill pill-{{ finding.severity }}">{{ finding.severity|upper }}</span>
+        <strong>{{ finding.title }}</strong> — {{ finding.description }}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="meta">No high-priority findings extracted.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>2. Score Breakdown</h2>
+    <div class="summary-grid">
+      <div class="card">
+        <table>
+          <thead>
+            <tr><th>Category</th><th style="text-align:right">Score</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Transport</td><td style="text-align:right">{{ breakdown.transport }}</td></tr>
+            <tr><td>HTTP Security</td><td style="text-align:right">{{ breakdown.httpSecurity }}</td></tr>
+            <tr><td>Threat Intel</td><td style="text-align:right">{{ breakdown.threatIntel }}</td></tr>
+            <tr><td>Infrastructure</td><td style="text-align:right">{{ breakdown.infrastructure }}</td></tr>
+            <tr><td>Best Practices</td><td style="text-align:right">{{ breakdown.bestPractices }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      {% if charts.score_radar %}
+      <div class="card chart-figure">
+        <img src="data:image/png;base64,{{ charts.score_radar }}" alt="Score breakdown radar chart" />
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Recommendations</h2>
+    {% if recommendations %}
+    <ol class="findings">
+      {% for item in recommendations %}
+      <li>
+        <span class="pill pill-{{ item.severity }}">{{ item.severity|upper }}</span>
+        <strong>{{ item.title }}</strong> — {{ item.description }}
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="meta">No recommendations were generated for this scan.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>4. Module Execution Summary</h2>
+    {% if charts.module_duration %}
+    <div class="chart-figure">
+      <img src="data:image/png;base64,{{ charts.module_duration }}" alt="Module duration chart" />
+    </div>
+    {% endif %}
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Status</th>
+          <th style="text-align:right">Duration (ms)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in module_summary %}
+        <tr>
+          <td>{{ item.module }}</td>
+          <td>{{ item.status }}</td>
+          <td style="text-align:right">{{ item.duration or 0 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if module_errors %}
+    <h3>Failed Modules</h3>
+    <table>
+      <thead>
+        <tr><th>Module</th><th>Error</th></tr>
+      </thead>
+      <tbody>
+        {% for item in module_errors %}
+        <tr>
+          <td>{{ item.module }}</td>
+          <td>{{ item.error }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
+  <footer class="footer">
+    <p>OrbiCheck Security Report · scan {{ scan.id }} · external-perspective assessment</p>
+  </footer>
+</body>
+</html>

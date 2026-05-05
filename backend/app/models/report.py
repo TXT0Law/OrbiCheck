@@ -19,7 +19,9 @@ class ReportStatus(str, enum.Enum):
 class ReportFormat(str, enum.Enum):
     PDF = "pdf"
     MARKDOWN = "markdown"
+    HTML = "html"
     BOTH = "both"
+    ALL = "all"
 
 
 class Report(Base):
@@ -52,6 +54,7 @@ class Report(Base):
     monitor_period: Mapped[str | None] = mapped_column(String(10), nullable=True)
     content_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    content_html: Mapped[str | None] = mapped_column(Text, nullable=True)
     report_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

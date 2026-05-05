@@ -52,7 +52,12 @@ def generate_report(self, report_id: str) -> dict:
             report = db.execute(
                 select(Report).where(Report.id == uuid.UUID(report_id))
             ).scalar_one()
-            content_md, content_pdf, report_meta = generate_report_artifacts_sync(db, report)
+            (
+                content_md,
+                content_pdf,
+                content_html,
+                report_meta,
+            ) = generate_report_artifacts_sync(db, report)
 
             redis.set(
                 progress_key,
@@ -67,6 +72,8 @@ def generate_report(self, report_id: str) -> dict:
 
             file_size = len(content_md.encode("utf-8")) + (
                 len(content_pdf) if content_pdf else 0
+            ) + (
+                len(content_html.encode("utf-8")) if content_html else 0
             )
             db.execute(
                 update(Report)
@@ -75,6 +82,7 @@ def generate_report(self, report_id: str) -> dict:
                     status=ReportStatus.COMPLETED,
                     content_md=content_md,
                     content_pdf=content_pdf,
+                    content_html=content_html,
                     report_meta=report_meta,
                     file_size_bytes=file_size,
                     completed_at=datetime.now(timezone.utc),

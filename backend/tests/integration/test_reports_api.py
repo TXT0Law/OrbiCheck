@@ -114,3 +114,49 @@ async def test_report_preview_and_download(async_client, monkeypatch) -> None:
     assert preview_response.json()["data"]["contentMd"] == "# Heading"
     assert download_response.status_code == 200
     assert download_response.headers["content-disposition"] == 'attachment; filename="example-report.md"'
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_report_download_html_format(async_client, monkeypatch) -> None:
+    row = _report_row()
+
+    async def fake_download(_db, report_id, user_id, fmt):
+        assert fmt == "html"
+        _ = report_id, user_id
+        return (
+            b"<!doctype html><title>x</title>",
+            "example-report.html",
+            "text/html; charset=utf-8",
+        )
+
+    monkeypatch.setattr(report_service, "get_report_download", fake_download)
+
+    response = await async_client.get(f"/api/v1/reports/{row.id}/download?format=html")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["content-disposition"] == 'attachment; filename="example-report.html"'
+    assert response.content.startswith(b"<!doctype html>")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_create_report_accepts_html_and_all_formats(async_client, monkeypatch) -> None:
+    """T4.2: dialog should be able to request html or all formats."""
+    for fmt in ("html", "all"):
+        row = _report_row(format=fmt)
+
+        async def fake_create(*_args, **_kwargs):
+            return row
+
+        monkeypatch.setattr(report_service, "create_report", fake_create)
+        monkeypatch.setattr(reports_endpoints.generate_report, "run", lambda *_args, **_kwargs: None)
+
+        response = await async_client.post(
+            "/api/v1/reports",
+            json={"scanId": str(uuid4()), "format": fmt},
+        )
+
+        assert response.status_code == 201, fmt
+        assert response.json()["data"]["format"] == fmt

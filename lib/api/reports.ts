@@ -1,6 +1,6 @@
 import type {
   ReportCreateParams,
-  ReportFormat,
+  ReportDownloadFormat,
   ReportListResult,
   ReportPreview,
   ReportRecord,
@@ -51,7 +51,16 @@ export async function deleteReport(reportId: string): Promise<void> {
   await apiClient.delete(`${BASE}/${reportId}`);
 }
 
-export async function downloadReport(reportId: string, format: Extract<ReportFormat, "pdf" | "markdown">) {
-  const ext = format === "pdf" ? "pdf" : "md";
-  await downloadFromApiGet(`${BASE}/${reportId}/download?format=${format}`, `report-${reportId}.${ext}`);
+const DOWNLOAD_FORMAT_EXTENSIONS: Record<ReportDownloadFormat, string> = {
+  pdf: "pdf",
+  markdown: "md",
+  html: "html",
+};
+
+export async function downloadReport(reportId: string, format: ReportDownloadFormat) {
+  const ext = DOWNLOAD_FORMAT_EXTENSIONS[format];
+  await downloadFromApiGet(
+    `${BASE}/${reportId}/download?format=${format}`,
+    `report-${reportId}.${ext}`,
+  );
 }

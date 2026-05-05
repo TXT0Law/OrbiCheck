@@ -1,5 +1,6 @@
 import type { ScanListApiResponse, ScanResponse } from "@/shared/types/api";
 import type { ModuleRetryResponse, ScanDetail } from "@/shared/types/scan";
+import type { ScanFullExport } from "@/lib/utils/export-json";
 
 import { apiClient } from "./client";
 
@@ -115,6 +116,11 @@ export async function getScan(scanId: string): Promise<ScanResponse> {
 
 export async function getScanDetail(scanId: string): Promise<ScanDetail> {
   const { data } = await apiClient.get<ScanDetail>(`/scans/${scanId}/detail`);
+  return data;
+}
+
+export async function getScanFullExport(scanId: string): Promise<ScanFullExport> {
+  const { data } = await apiClient.get<ScanFullExport>(`/scans/${scanId}/detail/full`);
   return data;
 }
 

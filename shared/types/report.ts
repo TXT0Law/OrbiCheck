@@ -1,4 +1,7 @@
-export type ReportFormat = "pdf" | "markdown" | "both";
+export type ReportFormat = "pdf" | "markdown" | "html" | "both" | "all";
+
+/** Formats that yield a downloadable artifact (one URL per format). */
+export type ReportDownloadFormat = "pdf" | "markdown" | "html";
 export type ReportStatus = "pending" | "generating" | "completed" | "failed";
 export type ReportPeriod = "24h" | "7d" | "30d" | "90d";
 

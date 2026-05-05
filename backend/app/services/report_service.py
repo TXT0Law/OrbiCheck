@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import uuid
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import urlparse
 
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
@@ -42,6 +45,7 @@ __all__ = [
     "get_report_download",
     "get_report_preview",
     "list_reports",
+    "render_html",
     "render_markdown",
     "render_pdf",
 ]
@@ -81,8 +85,26 @@ def _port_entries(value: object) -> list[dict]:
     return []
 
 
-PDF_ENABLED_FORMATS = {ReportFormat.PDF, ReportFormat.BOTH}
-MARKDOWN_ENABLED_FORMATS = {ReportFormat.MARKDOWN, ReportFormat.BOTH, ReportFormat.PDF}
+PDF_ENABLED_FORMATS = {ReportFormat.PDF, ReportFormat.BOTH, ReportFormat.ALL}
+MARKDOWN_ENABLED_FORMATS = {
+    ReportFormat.MARKDOWN,
+    ReportFormat.BOTH,
+    ReportFormat.PDF,
+    ReportFormat.HTML,
+    ReportFormat.ALL,
+}
+HTML_ENABLED_FORMATS = {ReportFormat.HTML, ReportFormat.ALL}
+
+# Templates directory shipped alongside the backend package. Resolved at module
+# import time because the Jinja2 environment is reused across reports.
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+_jinja_env = Environment(
+    loader=FileSystemLoader(_TEMPLATES_DIR),
+    autoescape=select_autoescape(("html", "xml", "j2")),
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+_HTML_TEMPLATE_NAME = "report.html.j2"
 
 # Maximum certificate-chain entries inlined into MD/PDF (full chain stays in
 # raw JSON export). Mirrors the reasoning in middleReport.md T3.1.
@@ -1151,16 +1173,88 @@ def render_pdf(report_data: dict) -> bytes:
     return out.encode("latin-1")
 
 
-def generate_report_artifacts_sync(db: Session, report: Report) -> tuple[str, bytes | None, dict]:
+def _png_to_data_b64(png_bytes: bytes | None) -> str | None:
+    if not png_bytes:
+        return None
+    return base64.b64encode(png_bytes).decode("ascii")
+
+
+def render_html(report_data: dict) -> str:
+    """Render the print-friendly HTML report.
+
+    Embeds the same matplotlib PNG charts used by ``render_pdf`` as
+    ``data:image/png;base64,...`` images so the file is fully self-contained
+    (no external assets, no auth-protected URLs). Failure of any individual
+    chart degrades to a text fallback — the same contract as PDF.
+    """
+    scan = report_data["scan"]
+    detail = scan["detail"]
+    score = scan["securityScore"]
+    severity = scan["severity"]
+    breakdown_raw = _read_breakdown_category_scores(scan)
+    breakdown = {
+        "transport": round(breakdown_raw.get("transport", _DEFAULT_CATEGORY_SCORE), 2),
+        "httpSecurity": round(breakdown_raw.get("httpSecurity", _DEFAULT_CATEGORY_SCORE), 2),
+        "threatIntel": round(breakdown_raw.get("threatIntel", _DEFAULT_CATEGORY_SCORE), 2),
+        "infrastructure": round(breakdown_raw.get("infrastructure", _DEFAULT_CATEGORY_SCORE), 2),
+        "bestPractices": round(breakdown_raw.get("bestPractices", _DEFAULT_CATEGORY_SCORE), 2),
+    }
+    category_summary = []
+    raw_summary = scan.get("categorySummary") or []
+    if isinstance(raw_summary, list):
+        for entry in raw_summary:
+            if not isinstance(entry, dict):
+                continue
+            category_summary.append(
+                {
+                    **entry,
+                    "status_label": _category_status_label(entry.get("status")),
+                }
+            )
+
+    severity_donut = _safe_chart_bytes(render_severity_donut, severity)
+    score_radar = _safe_chart_bytes(render_score_radar, breakdown_raw)
+    module_bar = _safe_chart_bytes(
+        render_module_duration_bar,
+        scan["moduleSummary"],
+        limit=PDF_MODULE_DURATION_BAR_LIMIT,
+    )
+    template = _jinja_env.get_template(_HTML_TEMPLATE_NAME)
+    return template.render(
+        scan=scan,
+        detail=detail,
+        report_id=report_data.get("reportId"),
+        generated_at=report_data.get("generatedAt"),
+        score_text=_stringify(score, "—"),
+        grade=_score_grade(score),
+        severity=severity,
+        category_summary=category_summary,
+        breakdown=breakdown,
+        key_findings=scan["keyFindings"][:8],
+        recommendations=report_data.get("recommendations") or [],
+        module_summary=scan["moduleSummary"],
+        module_errors=scan["moduleErrors"],
+        charts={
+            "severity_donut": _png_to_data_b64(severity_donut),
+            "score_radar": _png_to_data_b64(score_radar),
+            "module_duration": _png_to_data_b64(module_bar),
+        },
+    )
+
+
+def generate_report_artifacts_sync(
+    db: Session, report: Report
+) -> tuple[str, bytes | None, str | None, dict]:
     report_data = build_report_payload_sync(db, report)
     content_md = render_markdown(report_data)
     content_pdf = render_pdf(report_data) if report.format in PDF_ENABLED_FORMATS else None
+    content_html = render_html(report_data) if report.format in HTML_ENABLED_FORMATS else None
     meta = report_data["meta"] | {
         "title": report.title,
         "monitorIncluded": report.monitor_id is not None,
         "format": report.format.value,
     }
-    return content_md, content_pdf, meta
+    return content_md, content_pdf, content_html, meta
 
 
 async def create_report(
@@ -1299,4 +1393,12 @@ async def get_report_download(
         if not report.content_pdf:
             raise ValidationError(code="REPORT_NOT_READY", message="PDF report is not ready")
         return report.content_pdf, f"{safe_domain}-report.pdf", "application/pdf"
+    if fmt == "html":
+        if not report.content_html:
+            raise ValidationError(code="REPORT_NOT_READY", message="HTML report is not ready")
+        return (
+            report.content_html.encode("utf-8"),
+            f"{safe_domain}-report.html",
+            "text/html; charset=utf-8",
+        )
     raise ValidationError(code="REPORT_FORMAT_INVALID", message="Unsupported report format")

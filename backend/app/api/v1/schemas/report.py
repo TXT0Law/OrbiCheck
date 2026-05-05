@@ -14,7 +14,7 @@ class ReportCreateRequest(BaseModel):
     scan_id: uuid.UUID
     monitor_id: uuid.UUID | None = None
     monitor_period: Literal["24h", "7d", "30d", "90d"] = "30d"
-    format: Literal["pdf", "markdown", "both"] = "pdf"
+    format: Literal["pdf", "markdown", "html", "both", "all"] = "pdf"
     title: str | None = Field(default=None, max_length=512)
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
