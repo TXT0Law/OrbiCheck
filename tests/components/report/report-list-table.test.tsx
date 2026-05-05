@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     mutateAsync: vi.fn().mockResolvedValue(undefined),
     isPending: false,
   })),
+  routerPush: vi.fn(),
 }));
 
 vi.mock("next/link", () => ({
@@ -19,12 +20,20 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mocks.routerPush }),
+}));
+
 vi.mock("@/lib/api/reports", () => ({
   downloadReport: mocks.downloadReport,
 }));
 
 vi.mock("@/lib/hooks/use-reports", () => ({
   useDeleteReport: mocks.useDeleteReport,
+}));
+
+vi.mock("@/lib/hooks/use-scan-trend", () => ({
+  useScanDomainTimeline: () => ({ data: { domain: "", points: [] }, isLoading: false, error: null }),
 }));
 
 vi.mock("@/components/ui/use-toast", () => ({
@@ -45,6 +54,7 @@ function buildRow(overrides: Partial<ReportListItem> = {}): ReportListItem {
     title: "Security Report - example.com",
     format: "both",
     status: "completed",
+    scanId: "scan-1",
     scanDomain: "example.com",
     fileSizeBytes: 4096,
     createdAt: "2026-05-04T00:00:00Z",

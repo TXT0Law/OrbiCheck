@@ -1333,6 +1333,7 @@ async def list_reports(
             title=row.title,
             format=row.format,
             status=row.status,
+            scan_id=row.scan_id,
             scan_domain=((row.report_meta or {}).get("scanDomain") if row.report_meta else None),
             file_size_bytes=row.file_size_bytes,
             created_at=row.created_at,

@@ -1,5 +1,11 @@
 import type { ScanListApiResponse, ScanResponse } from "@/shared/types/api";
-import type { ModuleRetryResponse, ScanDetail } from "@/shared/types/scan";
+import type {
+  ModuleRetryResponse,
+  ScanDetail,
+  ScanDiffResponse,
+  ScanTimelineRange,
+  ScanTimelineResponse,
+} from "@/shared/types/scan";
 import type { ScanFullExport } from "@/lib/utils/export-json";
 
 import { apiClient } from "./client";
@@ -121,6 +127,51 @@ export async function getScanDetail(scanId: string): Promise<ScanDetail> {
 
 export async function getScanFullExport(scanId: string): Promise<ScanFullExport> {
   const { data } = await apiClient.get<ScanFullExport>(`/scans/${scanId}/detail/full`);
+  return data;
+}
+
+/**
+ * Fetch the same-domain scan timeline for the Trend page (Phase 5 / T5.1).
+ *
+ * The endpoint is owner-scoped server-side. ``range`` defaults to "all" so
+ * sparse-history domains still produce a chart; the dashboard exposes the
+ * usual presets (7d / 30d / 90d / all) via the URL query string.
+ */
+export async function getScanDomainTimeline(
+  domain: string,
+  options?: { range?: ScanTimelineRange; limit?: number },
+): Promise<ScanTimelineResponse> {
+  const trimmed = domain.trim();
+  if (!trimmed) {
+    return { domain: "", points: [] };
+  }
+  const params: Record<string, string | number> = {};
+  if (options?.range) {
+    params.range = options.range;
+  }
+  if (typeof options?.limit === "number") {
+    params.limit = options.limit;
+  }
+  const { data } = await apiClient.get<ScanTimelineResponse>(
+    `/scans/by-domain/${encodeURIComponent(trimmed)}/timeline`,
+    Object.keys(params).length ? { params } : undefined,
+  );
+  return data;
+}
+
+/**
+ * Fetch the diff between two owner-scoped scans (Phase 5 / T5.2).
+ *
+ * The backend returns 404 for any unknown / non-owner scan id; callers
+ * should surface that as a "could not load diff" state to the user.
+ */
+export async function getScanDiff(
+  baseId: string,
+  compareId: string,
+): Promise<ScanDiffResponse> {
+  const { data } = await apiClient.get<ScanDiffResponse>("/scans/diff", {
+    params: { baseId, compareId },
+  });
   return data;
 }
 

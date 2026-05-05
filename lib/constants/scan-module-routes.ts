@@ -368,6 +368,10 @@ export const ROUTE_SEGMENT_PAGE_TITLE: Record<string, string> = (() => {
       map[e.routeSegment] = e.pageTitleLabel;
     }
   }
+  // Phase 5 / T5.1: trend page lives under the same scan layout but is not
+  // backed by a backend module — register its label here so the breadcrumb
+  // / H1 stay consistent with the rest of the scan-detail nav.
+  map["trend"] = "Domain Trend";
   return map;
 })();
 

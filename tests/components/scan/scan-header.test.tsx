@@ -151,4 +151,11 @@ describe("scan header", () => {
       [{ module: "ssl" }],
     );
   });
+
+  it("renders a Trend link to the per-domain timeline page", () => {
+    render(<ScanHeader detail={detail} />);
+
+    const trendLink = screen.getByRole("link", { name: /trend/i });
+    expect(trendLink).toHaveAttribute("href", "/dashboard/scan/scan-1/trend");
+  });
 });

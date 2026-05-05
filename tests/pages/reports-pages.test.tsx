@@ -31,6 +31,7 @@ vi.mock("@/lib/hooks/use-reports", () => ({
           title: "Security Report - example.com",
           format: "both",
           status: "completed",
+          scanId: "scan-1",
           scanDomain: "example.com",
           fileSizeBytes: 4096,
           createdAt: "2026-03-27T00:00:00Z",
@@ -72,6 +73,11 @@ vi.mock("@/lib/hooks/use-reports", () => ({
 
 vi.mock("@/lib/api/reports", () => ({
   downloadReport: vi.fn(),
+}));
+
+vi.mock("@/lib/hooks/use-scan-trend", () => ({
+  useScanDomainTimeline: () => ({ data: { domain: "", points: [] }, isLoading: false, error: null }),
+  useScanDiff: () => ({ data: undefined, isLoading: false, error: null }),
 }));
 
 vi.mock("@/components/ui/use-toast", () => ({

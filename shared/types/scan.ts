@@ -741,3 +741,64 @@ export interface ScanResultCardData {
   severity: SeverityCounts;
   reportHref: string;
 }
+
+// ────────────────────────────────────────────
+// Phase 5 — Trend & Diff (T5.1 / T5.2)
+// Mirrors the wire shape served by:
+//   GET /scans/by-domain/{domain}/timeline
+//   GET /scans/diff?baseId=&compareId=
+// Backend authority: backend/app/services/scan_trend.py
+// ────────────────────────────────────────────
+
+/** ``range`` query parameter accepted by the timeline endpoint. */
+export type ScanTimelineRange = "7d" | "30d" | "90d" | "all";
+
+/** One scan summarised for the trend chart. */
+export interface ScanTimelinePoint {
+  scanId: string;
+  completedAt: string | null;
+  securityScore: number | null;
+  severity: SeverityCounts;
+}
+
+export interface ScanTimelineResponse {
+  domain: string;
+  points: ScanTimelinePoint[];
+}
+
+/** Compact finding shape used inside the diff payload (no client-side ``id``). */
+export interface ScanFindingDelta {
+  title: string;
+  severity: ScanSeverity | string;
+  module: string | null;
+  description: string | null;
+}
+
+export interface ScanSeverityDelta {
+  base: SeverityCounts;
+  compare: SeverityCounts;
+  /** ``compare - base`` per severity bucket; positive = regression. */
+  delta: SeverityCounts;
+}
+
+/** Five-dimension breakdown delta; ``null`` when either side lacks raw data. */
+export interface ScanCategoryScoreDelta {
+  base: SecurityScoreBreakdown["categoryScores"] | null;
+  compare: SecurityScoreBreakdown["categoryScores"] | null;
+  delta: SecurityScoreBreakdown["categoryScores"] | null;
+}
+
+export interface ScanDiffResponse {
+  baseScanId: string;
+  compareScanId: string;
+  baseDomain: string;
+  compareDomain: string;
+  baseCompletedAt: string | null;
+  compareCompletedAt: string | null;
+  baseScore: number | null;
+  compareScore: number | null;
+  addedFindings: ScanFindingDelta[];
+  removedFindings: ScanFindingDelta[];
+  severityDelta: ScanSeverityDelta;
+  breakdownDelta: ScanCategoryScoreDelta;
+}
