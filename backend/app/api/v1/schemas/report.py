@@ -46,6 +46,10 @@ class ReportListItem(BaseModel):
     title: str
     format: ReportFormat
     status: ReportStatus
+    # Scan id is included so the dashboard can deep-link from a report row
+    # into the scan-to-scan diff page (Phase 5 / T5.2). May be null when the
+    # underlying scan has been deleted (FK is set to NULL on cascade).
+    scan_id: uuid.UUID | None = None
     scan_domain: str | None = None
     file_size_bytes: int | None = None
     created_at: datetime

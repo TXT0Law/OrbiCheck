@@ -19,8 +19,15 @@ from app.api.v1.schemas.scan import (
 from app.core.deps import CurrentUser, get_current_user, get_db
 from app.core.config import settings
 from app.core.redis import get_redis_async
-from app.services import scan_service
+from app.services import scan_service, scan_trend
 from app.services.recommendations import generate_recommendations
+from app.services.scan_trend import (
+    DEFAULT_TIMELINE_LIMIT,
+    DIFF_KEY_FINDINGS_LIMIT,
+    MAX_TIMELINE_LIMIT,
+    TimelineRange,
+    compute_scan_diff,
+)
 from app.services.security_analyzer import (
     compute_category_summary,
     compute_severity_counts,
@@ -196,6 +203,94 @@ async def delete_all_scans(
     )
     await db.commit()
     return SuccessResponse(data={"deleted": deleted})
+
+
+@router.get("/by-domain/{domain}/timeline")
+async def get_domain_timeline(
+    domain: str,
+    range: TimelineRange = Query(default="all", alias="range"),
+    limit: int = Query(
+        default=DEFAULT_TIMELINE_LIMIT,
+        ge=1,
+        le=MAX_TIMELINE_LIMIT,
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return owner-scoped scan history for a domain ordered oldest → newest.
+
+    Backs the Trend page (T5.1): the dashboard plots one line for security
+    score and one for total severity counts, so the chart tooltip must keep
+    track of both. The endpoint deliberately filters on terminal statuses
+    only so partial / pending scans do not skew the trend.
+
+    Registered BEFORE the ``/{scan_id}`` catch-all so requests like
+    ``GET /scans/by-domain/example.com/timeline`` do not get matched as a
+    scan id and rejected by the UUID validator.
+    """
+    points = await scan_trend.get_domain_timeline(
+        db,
+        user_id=current_user.id,
+        domain=domain,
+        time_range=range,
+        limit=limit,
+    )
+    return SuccessResponse(
+        data={"domain": domain, "points": points},
+        meta={"range": range, "limit": limit, "count": len(points)},
+    )
+
+
+@router.get("/diff")
+async def diff_two_scans(
+    base_id: uuid.UUID = Query(alias="baseId"),
+    compare_id: uuid.UUID = Query(alias="compareId"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compare two owner-scoped scans (T5.2).
+
+    Both scans are fetched with owner enforcement (``scan_service.get_scan``
+    raises ``ScanNotFoundError`` → 404 when the user mismatches), so a user
+    cannot diff someone else's scan even by guessing IDs. Registered BEFORE
+    the ``/{scan_id}`` catch-all so the literal ``/scans/diff`` path is not
+    eaten by the UUID validator.
+    """
+    base_scan = await scan_service.get_scan(db, base_id, current_user.id)
+    compare_scan = await scan_service.get_scan(db, compare_id, current_user.id)
+
+    diff = compute_scan_diff(
+        base_scan,
+        compare_scan,
+        key_findings_limit=DIFF_KEY_FINDINGS_LIMIT,
+    )
+    return SuccessResponse(
+        data={
+            **diff,
+            "baseDomain": base_scan.domain,
+            "compareDomain": compare_scan.domain,
+            "baseCompletedAt": (
+                base_scan.completed_at.isoformat()
+                if base_scan.completed_at
+                else None
+            ),
+            "compareCompletedAt": (
+                compare_scan.completed_at.isoformat()
+                if compare_scan.completed_at
+                else None
+            ),
+            "baseScore": (
+                int(base_scan.security_score)
+                if base_scan.security_score is not None
+                else None
+            ),
+            "compareScore": (
+                int(compare_scan.security_score)
+                if compare_scan.security_score is not None
+                else None
+            ),
+        }
+    )
 
 
 @router.get("/{scan_id}", response_model=SuccessResponse[ScanDetailResponse])

@@ -35,17 +35,21 @@ async function invokeHandler(handler, url = 'https://example.com') {
   return res;
 }
 
+function dnsError(code) {
+  return Object.assign(new Error(code), { code });
+}
+
 describe('block-lists module', () => {
   afterEach(() => {
     setModulesForTest(new Map());
   });
 
-  it('returns blocklist results for each dns server', async () => {
+  it('marks each DNS server with a tri-state result and a boolean isBlocked', async () => {
     const handler = await loadHandlerWithDns({
       resolve4: (_domain, options, cb) => {
         cb(null, options.server === '1.1.1.1' ? ['208.67.222.222'] : ['93.184.216.34']);
       },
-      resolve6: (_domain, _options, cb) => cb(Object.assign(new Error('ENODATA'), { code: 'ENODATA' })),
+      resolve6: (_domain, _options, cb) => cb(dnsError('ENODATA')),
     });
 
     const response = await invokeHandler(handler);
@@ -53,12 +57,20 @@ describe('block-lists module', () => {
     expect(response.statusCode).toBe(200);
     expect(Array.isArray(response.body.blocklists)).toBe(true);
     expect(response.body.blocklists.length).toBeGreaterThan(10);
-    expect(response.body.blocklists[0]).toEqual({
-      server: expect.any(String),
-      serverIp: expect.any(String),
-      isBlocked: expect.any(Boolean),
-    });
-    expect(response.body.blocklists.some((item) => item.isBlocked)).toBe(true);
+    expect(response.body.blocklists[0]).toEqual(
+      expect.objectContaining({
+        server: expect.any(String),
+        serverIp: expect.any(String),
+        state: expect.stringMatching(/^(blocked|clear|unknown)$/),
+        isBlocked: expect.any(Boolean),
+      }),
+    );
+    const blockedRows = response.body.blocklists.filter((row) => row.isBlocked);
+    expect(blockedRows.length).toBeGreaterThan(0);
+    expect(blockedRows.every((row) => row.state === 'blocked')).toBe(true);
+    const clearRows = response.body.blocklists.filter((row) => row.state === 'clear');
+    expect(clearRows.length).toBeGreaterThan(0);
+    expect(clearRows.every((row) => row.isBlocked === false)).toBe(true);
   });
 
   it('returns a graceful all-clear result when nothing is blocked', async () => {
@@ -70,19 +82,68 @@ describe('block-lists module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.blocklists.every((item) => item.isBlocked === false)).toBe(true);
+    expect(response.body.blocklists.every((row) => row.state === 'clear')).toBe(true);
+    expect(response.body.blocklists.every((row) => row.isBlocked === false)).toBe(true);
   });
 
-  it('marks a domain as blocked when resolvers return enotfound or servfail', async () => {
+  it('treats ENOTFOUND on both record types as unknown (regression for false positives)', async () => {
     const handler = await loadHandlerWithDns({
-      resolve4: (_domain, _options, cb) => cb(Object.assign(new Error('SERVFAIL'), { code: 'SERVFAIL' })),
-      resolve6: (_domain, _options, cb) => cb(Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' })),
+      resolve4: (_domain, _options, cb) => cb(dnsError('ENOTFOUND')),
+      resolve6: (_domain, _options, cb) => cb(dnsError('ENOTFOUND')),
     });
 
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.blocklists.every((item) => item.isBlocked === true)).toBe(true);
+    expect(response.body.blocklists.every((row) => row.state === 'unknown')).toBe(true);
+    expect(response.body.blocklists.every((row) => row.isBlocked === false)).toBe(true);
+  });
+
+  it('treats SERVFAIL on the A record as a deliberate block, without consulting AAAA', async () => {
+    const resolve6 = jest.fn();
+    const handler = await loadHandlerWithDns({
+      resolve4: (_domain, _options, cb) => cb(dnsError('SERVFAIL')),
+      resolve6,
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.blocklists.every((row) => row.state === 'blocked')).toBe(true);
+    expect(response.body.blocklists.every((row) => row.isBlocked === true)).toBe(true);
+    expect(resolve6).not.toHaveBeenCalled();
+  });
+
+  it('falls back to AAAA when A returns ENOTFOUND, then flags sinkhole IPv6 as blocked', async () => {
+    const handler = await loadHandlerWithDns({
+      resolve4: (_domain, _options, cb) => cb(dnsError('ENOTFOUND')),
+      resolve6: (_domain, _options, cb) => cb(null, ['2a02:6b8::feed:bad']),
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.blocklists.every((row) => row.state === 'blocked')).toBe(true);
+    expect(response.body.blocklists.every((row) => row.isBlocked === true)).toBe(true);
+  });
+
+  it('queries DNS_SERVERS in parallel using Promise.allSettled', async () => {
+    let inflight = 0;
+    let maxInflight = 0;
+    const handler = await loadHandlerWithDns({
+      resolve4: (_domain, _options, cb) => {
+        inflight += 1;
+        if (inflight > maxInflight) maxInflight = inflight;
+        setTimeout(() => {
+          inflight -= 1;
+          cb(null, ['93.184.216.34']);
+        }, 10);
+      },
+      resolve6: (_domain, _options, cb) => cb(dnsError('ENODATA')),
+    });
+
+    await invokeHandler(handler);
+    expect(maxInflight).toBeGreaterThan(1);
   });
 
   it('returns 400 when url query parameter is missing', async () => {

@@ -1,69 +1,79 @@
 import axios from 'axios';
 import xml2js from 'xml2js';
+
 import middleware from './_common/middleware.js';
 
+const PROVIDER_TIMEOUT_MS = parseInt(process.env.THREATS_PROVIDER_TIMEOUT_MS || '5000', 10);
+const USER_AGENT = 'OrbiCheck/1.0 (+https://github.com/orbicheck)';
+
+const buildSafeBrowsingBody = (url) => ({
+  threatInfo: {
+    threatTypes: [
+      'MALWARE',
+      'SOCIAL_ENGINEERING',
+      'UNWANTED_SOFTWARE',
+      'POTENTIALLY_HARMFUL_APPLICATION',
+      'API_ABUSE',
+    ],
+    platformTypes: ['ANY_PLATFORM'],
+    threatEntryTypes: ['URL'],
+    threatEntries: [{ url }],
+  },
+});
+
 const getGoogleSafeBrowsingResult = async (url) => {
+  const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
+  if (!apiKey) {
+    return { error: 'GOOGLE_CLOUD_API_KEY is required for the Google Safe Browsing check' };
+  }
   try {
-    const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
-    if (!apiKey) {
-      return { error: 'GOOGLE_CLOUD_API_KEY is required for the Google Safe Browsing check' };
-    }
     const apiEndpoint = `https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${apiKey}`;
-
-    const requestBody = {
-      threatInfo: {
-        threatTypes: [
-          'MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE', 'POTENTIALLY_HARMFUL_APPLICATION', 'API_ABUSE'
-        ],
-        platformTypes: ["ANY_PLATFORM"],
-        threatEntryTypes: ["URL"],
-        threatEntries: [{ url }]
-      }
-    };
-
-    const response = await axios.post(apiEndpoint, requestBody);
-    if (response.data && response.data.matches) {
-      return {
-        unsafe: true,
-        details: response.data.matches
-      };
-    } else {
-      return { unsafe: false };
+    const response = await axios.post(apiEndpoint, buildSafeBrowsingBody(url), {
+      timeout: PROVIDER_TIMEOUT_MS,
+      headers: { 'User-Agent': USER_AGENT },
+    });
+    if (response.data && Array.isArray(response.data.matches) && response.data.matches.length > 0) {
+      return { unsafe: true, details: response.data.matches };
     }
+    return { unsafe: false };
   } catch (error) {
-    return { error: `Request failed: ${error.message}` };
+    return { error: `Request to Google Safe Browsing failed: ${error.message}` };
   }
 };
 
 const getUrlHausResult = async (url) => {
-  let domain = new URL(url).hostname;
-  return await axios({
-    method: 'post',
-    url: 'https://urlhaus-api.abuse.ch/v1/host/',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    data: `host=${domain}`
-  })
-  .then((x) => x.data)
-  .catch((e) => ({ error: `Request to URLHaus failed, ${e.message}`}));
+  try {
+    const domain = new URL(url).hostname;
+    const response = await axios({
+      method: 'post',
+      url: 'https://urlhaus-api.abuse.ch/v1/host/',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': USER_AGENT,
+      },
+      timeout: PROVIDER_TIMEOUT_MS,
+      data: `host=${domain}`,
+    });
+    return response.data;
+  } catch (error) {
+    return { error: `Request to URLHaus failed: ${error.message}` };
+  }
 };
-
 
 const getPhishTankResult = async (url) => {
   try {
     const encodedUrl = Buffer.from(url).toString('base64');
     const endpoint = `https://checkurl.phishtank.com/checkurl/?url=${encodedUrl}`;
-    const headers = {
-      'User-Agent': 'phishtank/web-check',
-    };
-    const response = await axios.post(endpoint, null, { headers, timeout: 3000 });
+    const response = await axios.post(endpoint, null, {
+      headers: { 'User-Agent': USER_AGENT },
+      timeout: PROVIDER_TIMEOUT_MS,
+    });
     const parsed = await xml2js.parseStringPromise(response.data, { explicitArray: false });
     return parsed.response.results;
   } catch (error) {
     return { error: `Request to PhishTank failed: ${error.message}` };
   }
-}
+};
 
 const getCloudmersiveResult = async (url) => {
   const apiKey = process.env.CLOUDMERSIVE_API_KEY;
@@ -74,10 +84,14 @@ const getCloudmersiveResult = async (url) => {
     const endpoint = 'https://api.cloudmersive.com/virus/scan/website';
     const headers = {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'Apikey': apiKey,
+      'User-Agent': USER_AGENT,
+      Apikey: apiKey,
     };
     const data = `Url=${encodeURIComponent(url)}`;
-    const response = await axios.post(endpoint, data, { headers });
+    const response = await axios.post(endpoint, data, {
+      headers,
+      timeout: PROVIDER_TIMEOUT_MS,
+    });
     return response.data;
   } catch (error) {
     return { error: `Request to Cloudmersive failed: ${error.message}` };
@@ -85,18 +99,23 @@ const getCloudmersiveResult = async (url) => {
 };
 
 const threatsHandler = async (url) => {
-  try {
-    const urlHaus = await getUrlHausResult(url);
-    const phishTank = await getPhishTankResult(url);
-    const cloudmersive = await getCloudmersiveResult(url);
-    const safeBrowsing = await getGoogleSafeBrowsingResult(url);
-    if (urlHaus.error && phishTank.error && cloudmersive.error && safeBrowsing.error) {
-      throw new Error(`All requests failed - ${urlHaus.error} ${phishTank.error} ${cloudmersive.error} ${safeBrowsing.error}`);
-    }
-    return JSON.stringify({ urlHaus, phishTank, cloudmersive, safeBrowsing });
-  } catch (error) {
-    throw new Error(error.message);
+  const [urlHaus, phishTank, cloudmersive, safeBrowsing] = await Promise.all([
+    getUrlHausResult(url),
+    getPhishTankResult(url),
+    getCloudmersiveResult(url),
+    getGoogleSafeBrowsingResult(url),
+  ]);
+
+  const allFailed = [urlHaus, phishTank, cloudmersive, safeBrowsing].every(
+    (entry) => entry && typeof entry === 'object' && 'error' in entry,
+  );
+  if (allFailed) {
+    throw new Error(
+      `All threat providers failed - urlHaus: ${urlHaus.error}; phishTank: ${phishTank.error}; cloudmersive: ${cloudmersive.error}; safeBrowsing: ${safeBrowsing.error}`,
+    );
   }
+
+  return { urlHaus, phishTank, cloudmersive, safeBrowsing };
 };
 
 export const handler = middleware(threatsHandler);

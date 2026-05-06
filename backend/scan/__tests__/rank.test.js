@@ -45,7 +45,7 @@ describe('rank module', () => {
     setModulesForTest(new Map());
   });
 
-  it('returns ranking data on success', async () => {
+  it('passes Tranco basic auth when TRANCO_API_KEY is configured', async () => {
     process.env.TRANCO_API_KEY = 'api-key';
     process.env.TRANCO_USERNAME = 'user';
     const mockGet = jest.fn().mockResolvedValue({
@@ -57,11 +57,30 @@ describe('rank module', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body.ranks[0].rank).toBe(12345);
-    expect(mockGet).toHaveBeenCalledWith(
-      'https://tranco-list.eu/api/ranks/domain/example.com',
-      { timeout: 5000 },
-      { auth: { username: 'user', password: 'api-key' } }
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    const [calledUrl, calledConfig, ...extras] = mockGet.mock.calls[0];
+    expect(calledUrl).toBe('https://tranco-list.eu/api/ranks/domain/example.com');
+    expect(extras).toEqual([]);
+    expect(calledConfig).toEqual(
+      expect.objectContaining({
+        timeout: 5000,
+        auth: { username: 'user', password: 'api-key' },
+      }),
     );
+  });
+
+  it('omits the auth config when TRANCO_API_KEY is not set', async () => {
+    delete process.env.TRANCO_API_KEY;
+    delete process.env.TRANCO_USERNAME;
+    const mockGet = jest.fn().mockResolvedValue({ data: { ranks: [] } });
+    const handler = await loadHandlerWithAxios(mockGet);
+
+    await invokeHandler(handler);
+
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    const [, calledConfig] = mockGet.mock.calls[0];
+    expect(calledConfig).toEqual({ timeout: 5000 });
+    expect(calledConfig).not.toHaveProperty('auth');
   });
 
   it('returns a skipped payload when the domain has no rank data', async () => {

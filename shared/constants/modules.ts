@@ -5,6 +5,7 @@
 
 export const SCAN_MODULES = [
   "archives",
+  "associated-hosts",
   "block-lists",
   "carbon",
   "cookies",
@@ -20,6 +21,7 @@ export const SCAN_MODULES = [
   "legacy-rank",
   "linked-pages",
   "mail-config",
+  "page-source",
   "ports",
   "quality",
   "rank",
@@ -45,6 +47,10 @@ export type ScanModuleName = (typeof SCAN_MODULES)[number];
  * Maps scan module name → frontend ScanDetail property key.
  * Modules that merge into another key share the same value.
  * null = no frontend page (stored as raw only).
+ *
+ * IMPORTANT: keys must match `backend/app/services/transformers.py`
+ * `MODULE_TO_FRONTEND_KEY`. Drift between the two breaks the
+ * ScanDetail contract.
  */
 export const MODULE_TO_FRONTEND_KEY: Record<ScanModuleName, string | null> = {
   ssl: "ssl",
@@ -69,6 +75,7 @@ export const MODULE_TO_FRONTEND_KEY: Record<ScanModuleName, string | null> = {
   status: "statusCheck",
   "mail-config": "emailConfig",
   screenshot: "screenshot",
+  "page-source": "pageSource",
   "tech-stack": "techStack",
   features: "features",
   "robots-txt": "robotsTxt",
@@ -79,7 +86,8 @@ export const MODULE_TO_FRONTEND_KEY: Record<ScanModuleName, string | null> = {
   rank: "rankingAndCarbon",
   carbon: "rankingAndCarbon",
   "legacy-rank": "rankingAndCarbon",
-  quality: null,
+  quality: "quality",
+  "associated-hosts": "associatedHosts",
 };
 
 /**
@@ -104,6 +112,7 @@ export const FRONTEND_KEY_LABELS: Record<string, string> = {
   statusCheck: "HTTP Status",
   emailConfig: "Email Config",
   screenshot: "Screenshot",
+  pageSource: "Page Source",
   techStack: "Tech Stack",
   features: "Features",
   robotsTxt: "Robots.txt",
@@ -113,4 +122,5 @@ export const FRONTEND_KEY_LABELS: Record<string, string> = {
   archives: "Web Archives",
   rankingAndCarbon: "Ranking & Carbon",
   associatedHosts: "Associated Hosts",
+  quality: "Quality",
 };

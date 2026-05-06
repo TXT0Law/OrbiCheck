@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Download, FileSpreadsheet, FileText } from "lucide-react";
+import { ChevronRight, Download, FileSpreadsheet, FileText, TrendingUp } from "lucide-react";
 
 import { ReportGenerateDialog } from "@/components/report/report-generate-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { getScanFullExport } from "@/lib/api/scans";
 import { getPageLabelFromPathname } from "@/lib/constants/scan-module-routes";
@@ -82,6 +82,13 @@ export function ScanHeader({ detail }: ScanHeaderProps) {
             <p className="mt-1 text-sm text-muted-foreground">{detail.url}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/dashboard/scan/${detail.id}/trend`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              <TrendingUp className="h-4 w-4" aria-hidden />
+              Trend
+            </Link>
             <Button
               type="button"
               variant="outline"

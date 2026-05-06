@@ -38,6 +38,7 @@ export const SCAN_CATEGORIES: ModuleCategory[] = [
       "redirects",
       "status",
       "mail-config",
+      "associated-hosts",
     ],
   },
   {
@@ -45,6 +46,7 @@ export const SCAN_CATEGORIES: ModuleCategory[] = [
     label: "Content & Site",
     modules: [
       "screenshot",
+      "page-source",
       "tech-stack",
       "features",
       "robots-txt",

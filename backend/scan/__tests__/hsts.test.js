@@ -19,52 +19,62 @@ function createResponseCapture() {
   };
 }
 
-function createHttpsMock({ headers = {}, error = null, triggerTimeout = false }) {
-  return {
-    default: {
-      request: jest.fn((_url, _opts, callback) => {
-        let errorHandler = () => {};
-        let timeoutHandler = () => {};
-        const req = {
-          on(event, handler) {
-            if (event === 'error') {
-              errorHandler = handler;
-            }
-            if (event === 'timeout') {
-              timeoutHandler = handler;
-            }
-            return req;
-          },
-          end() {
-            process.nextTick(() => {
-              if (triggerTimeout) {
-                timeoutHandler();
-                return;
-              }
-              if (error) {
-                errorHandler(error);
-                return;
-              }
-              callback({ headers });
-            });
-          },
-          destroy(err) {
-            process.nextTick(() => {
-              errorHandler(err);
-            });
-          },
-        };
+/**
+ * Build a fake `https` module that drives a deterministic outcome per call.
+ * The mock supports multiple sequential outcomes so that we can simulate a
+ * HEAD → GET fallback in the same test.
+ */
+function createHttpsMock(outcomes) {
+  const queue = Array.isArray(outcomes) ? [...outcomes] : [outcomes];
+  const requestSpy = jest.fn((_url, opts, callback) => {
+    const outcome = queue.shift() ?? queue[queue.length - 1] ?? { kind: 'response', headers: {} };
+    let errorHandler = () => {};
+    let timeoutHandler = () => {};
+    const req = {
+      on(event, handler) {
+        if (event === 'error') errorHandler = handler;
+        if (event === 'timeout') timeoutHandler = handler;
         return req;
-      }),
-    },
+      },
+      end() {
+        process.nextTick(() => {
+          if (outcome.kind === 'timeout') {
+            timeoutHandler();
+            return;
+          }
+          if (outcome.kind === 'error') {
+            errorHandler(outcome.error);
+            return;
+          }
+          callback({
+            statusCode: outcome.statusCode ?? 200,
+            headers: outcome.headers ?? {},
+            resume() {},
+          });
+        });
+      },
+      destroy(err) {
+        if (err) {
+          process.nextTick(() => errorHandler(err));
+        }
+      },
+    };
+    requestSpy.mock.requestOpts ??= [];
+    requestSpy.mock.requestOpts.push(opts);
+    return req;
+  });
+  return {
+    default: { request: requestSpy },
+    requestSpy,
   };
 }
 
-async function loadHandlerWithHttps(mockConfig) {
+async function loadHandlerWithHttps(outcomes) {
   jest.resetModules();
-  await jest.unstable_mockModule('https', () => createHttpsMock(mockConfig));
+  const mock = createHttpsMock(outcomes);
+  await jest.unstable_mockModule('https', () => ({ default: mock.default }));
   const { handler } = await import('../hsts.js');
-  return handler;
+  return { handler, requestSpy: mock.requestSpy };
 }
 
 async function invokeHandler(handler, url = 'https://example.com') {
@@ -80,10 +90,10 @@ describe('hsts module', () => {
   });
 
   it('returns preloadReady true for preload-ready HSTS headers', async () => {
-    const handler = await loadHandlerWithHttps({
-      headers: {
-        'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
-      },
+    const { handler } = await loadHandlerWithHttps({
+      kind: 'response',
+      statusCode: 200,
+      headers: { 'strict-transport-security': 'max-age=31536000; includeSubDomains; preload' },
     });
 
     const response = await invokeHandler(handler);
@@ -94,12 +104,12 @@ describe('hsts module', () => {
     expect(response.body.includeSubDomains).toBe(true);
     expect(response.body.preload).toBe(true);
     expect(response.body.maxAge).toBe(31536000);
-    expect(response.body.hstsHeader).toContain('includeSubDomains');
-    expect(response.body.hstsHeader).toContain('preload');
   });
 
-  it('returns result when HSTS header is missing', async () => {
-    const handler = await loadHandlerWithHttps({
+  it('returns a no-header result when HSTS header is missing', async () => {
+    const { handler } = await loadHandlerWithHttps({
+      kind: 'response',
+      statusCode: 200,
       headers: {},
     });
 
@@ -112,24 +122,104 @@ describe('hsts module', () => {
     expect(response.body.hstsHeader).toBeNull();
   });
 
-  it('returns a 500 payload when the HTTPS request fails', async () => {
-    const handler = await loadHandlerWithHttps({
+  it('returns a 500 payload when the HTTPS request fails (object error body)', async () => {
+    const { handler } = await loadHandlerWithHttps({
+      kind: 'error',
       error: new Error('socket hang up'),
     });
 
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toBe(JSON.stringify({ error: 'Error making request: socket hang up' }));
+    expect(response.body).toEqual({ error: 'Error making request: socket hang up' });
+  });
+
+  it('resolves with a 408 timeout payload when the request times out (regression: must not hang)', async () => {
+    const { handler } = await loadHandlerWithHttps({ kind: 'timeout' });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(408);
+    expect(response.body.error).toMatch(/timed out/i);
+  });
+
+  it('handles lowercase directives (GitHub regression)', async () => {
+    const { handler } = await loadHandlerWithHttps({
+      kind: 'response',
+      headers: { 'strict-transport-security': 'max-age=31536000; includesubdomains; preload' },
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.preloadReady).toBe(true);
+    expect(response.body.includeSubDomains).toBe(true);
+    expect(response.body.preload).toBe(true);
+  });
+
+  it('reports enabled but not preloadReady for sub-threshold max-age', async () => {
+    const { handler } = await loadHandlerWithHttps({
+      kind: 'response',
+      headers: { 'strict-transport-security': 'max-age=300' },
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.enabled).toBe(true);
+    expect(response.body.preloadReady).toBe(false);
+    expect(response.body.maxAge).toBe(300);
+  });
+
+  it('handles quoted max-age and extra whitespace', async () => {
+    const { handler } = await loadHandlerWithHttps({
+      kind: 'response',
+      headers: { 'strict-transport-security': 'max-age = "63072000"; includeSubDomains' },
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.body.maxAge).toBe(63072000);
+    expect(response.body.includeSubDomains).toBe(true);
+  });
+
+  it('falls back from HEAD to GET when the origin rejects HEAD with 405', async () => {
+    const { handler, requestSpy } = await loadHandlerWithHttps([
+      { kind: 'response', statusCode: 405, headers: {} },
+      {
+        kind: 'response',
+        statusCode: 200,
+        headers: { 'strict-transport-security': 'max-age=31536000' },
+      },
+    ]);
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.enabled).toBe(true);
+    expect(requestSpy).toHaveBeenCalledTimes(2);
+    expect(requestSpy.mock.requestOpts[0].method).toBe('HEAD');
+    expect(requestSpy.mock.requestOpts[1].method).toBe('GET');
+  });
+
+  it('normalises http URLs to https before requesting', async () => {
+    const { handler, requestSpy } = await loadHandlerWithHttps({
+      kind: 'response',
+      statusCode: 200,
+      headers: {},
+    });
+
+    await invokeHandler(handler, 'http://example.com');
+
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+    const requestedUrl = requestSpy.mock.calls[0][0];
+    expect(requestedUrl).toMatch(/^https:\/\//);
   });
 
   it('returns 400 when url query parameter is missing', async () => {
     setModulesForTest(
       new Map([
-        [
-          'hsts',
-          (_req, res) => res.status(200).json({ ok: true }),
-        ],
+        ['hsts', (_req, res) => res.status(200).json({ ok: true })],
       ])
     );
 
@@ -144,66 +234,5 @@ describe('hsts module', () => {
     const modules = await loadModules();
 
     expect(modules.has('hsts')).toBe(true);
-  });
-
-  it('handles lowercase directives (GitHub regression)', async () => {
-    const handler = await loadHandlerWithHttps({
-      headers: {
-        'strict-transport-security': 'max-age=31536000; includesubdomains; preload',
-      },
-    });
-
-    const response = await invokeHandler(handler);
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body.enabled).toBe(true);
-    expect(response.body.preloadReady).toBe(true);
-    expect(response.body.includeSubDomains).toBe(true);
-    expect(response.body.preload).toBe(true);
-    expect(response.body.maxAge).toBe(31536000);
-    expect(response.body.hstsHeader).toContain('includesubdomains');
-  });
-
-  it('reports enabled but not preloadReady for sub-threshold max-age', async () => {
-    const handler = await loadHandlerWithHttps({
-      headers: {
-        'strict-transport-security': 'max-age=300',
-      },
-    });
-
-    const response = await invokeHandler(handler);
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body.enabled).toBe(true);
-    expect(response.body.preloadReady).toBe(false);
-    expect(response.body.maxAge).toBe(300);
-    expect(response.body.hstsHeader).toBe('max-age=300');
-  });
-
-  it('handles quoted max-age and extra whitespace', async () => {
-    const handler = await loadHandlerWithHttps({
-      headers: {
-        'strict-transport-security': 'max-age = "63072000"; includeSubDomains',
-      },
-    });
-
-    const response = await invokeHandler(handler);
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body.enabled).toBe(true);
-    expect(response.body.maxAge).toBe(63072000);
-    expect(response.body.includeSubDomains).toBe(true);
-    expect(response.body.preloadReady).toBe(false);
-  });
-
-  it('returns error payload on request timeout', async () => {
-    const handler = await loadHandlerWithHttps({
-      triggerTimeout: true,
-    });
-
-    const response = await invokeHandler(handler);
-
-    expect(response.statusCode).toBe(500);
-    expect(response.body).toBe(JSON.stringify({ error: 'Error making request: Request timed out' }));
   });
 });

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
+import { CompareReportDialog } from "@/components/report/compare-report-dialog";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { ReportStatusBadge } from "@/components/report/report-status-badge";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,7 @@ export function ReportListTable({ reports }: ReportListTableProps) {
   const { toast } = useToast();
   const deleteReportMutation = useDeleteReport();
   const [deleting, setDeleting] = useState<ReportListItem | null>(null);
+  const [comparing, setComparing] = useState<ReportListItem | null>(null);
 
   async function handleDelete() {
     if (!deleting) {
@@ -156,6 +158,19 @@ export function ReportListTable({ reports }: ReportListTableProps) {
                     >
                       HTML
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setComparing(report)}
+                      disabled={!report.scanId || !report.scanDomain}
+                      title={
+                        report.scanId
+                          ? "Compare against another scan of the same domain"
+                          : "Original scan deleted; compare unavailable"
+                      }
+                    >
+                      Compare
+                    </Button>
                     <Button size="sm" variant="destructive" onClick={() => setDeleting(report)}>
                       Delete
                     </Button>
@@ -180,6 +195,16 @@ export function ReportListTable({ reports }: ReportListTableProps) {
         confirmVariant="destructive"
         onConfirm={() => void handleDelete()}
         isLoading={deleteReportMutation.isPending}
+      />
+
+      <CompareReportDialog
+        report={comparing}
+        open={Boolean(comparing)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setComparing(null);
+          }
+        }}
       />
     </>
   );

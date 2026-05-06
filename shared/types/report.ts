@@ -33,6 +33,12 @@ export interface ReportListItem {
   title: string;
   format: ReportFormat;
   status: ReportStatus;
+  /**
+   * Backing scan id, mirrored from ``Report.scan_id``. May be null when the
+   * source scan has been deleted (FK is ON DELETE SET NULL). Used by the
+   * Reports list page to deep-link into the scan-to-scan diff (T5.2).
+   */
+  scanId: string | null;
   scanDomain: string | null;
   fileSizeBytes: number | null;
   createdAt: string;

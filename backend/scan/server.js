@@ -18,9 +18,6 @@ const CORS_METHODS = ['GET', 'POST', 'OPTIONS'];
 const CORS_HEADERS = ['Content-Type', 'Accept'];
 const GENERIC_ERROR_MESSAGE = 'Scan service request failed';
 
-// Force middleware to use the Vercel/Node request-response handler mode.
-process.env.PLATFORM = 'NODE';
-
 let modules = new Map();
 
 function getAvailableModules() {
