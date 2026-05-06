@@ -1,5 +1,6 @@
 import dns from 'dns';
 import { URL } from 'url';
+
 import middleware from './_common/middleware.js';
 
 const DNS_SERVERS = [
@@ -21,6 +22,7 @@ const DNS_SERVERS = [
   { name: 'Yandex Family', ip: '77.88.8.7' },
   { name: 'Yandex Safe', ip: '77.88.8.88' },
 ];
+
 const knownBlockIPs = [
   '146.112.61.106', // OpenDNS
   '185.228.168.10', // CleanBrowsing
@@ -35,7 +37,7 @@ const knownBlockIPs = [
   '156.154.70.22',  // Neustar
   '77.88.8.7',      // Yandex
   '77.88.8.8',      // Yandex
-  '::1',              // Localhost IPv6
+  '::1',
   '2a02:6b8::feed:0ff', // Yandex DNS
   '2a02:6b8::feed:bad', // Yandex Safe
   '2a02:6b8::feed:a11', // Yandex Family
@@ -45,53 +47,88 @@ const knownBlockIPs = [
   '2606:4700:4700::1001', // Cloudflare
   '2001:4860:4860::8888', // Google DNS
   '2a0d:2a00:1::',        // AdGuard
-  '2a0d:2a00:2::'         // AdGuard Family
+  '2a0d:2a00:2::',        // AdGuard Family
 ];
 
-const isDomainBlocked = async (domain, serverIP) => {
+// State values for a single resolver outcome:
+// - 'blocked' : resolver explicitly returned a sinkhole IP, or refused via SERVFAIL
+// - 'clear'   : resolver returned at least one address, none of which are sinkholes
+// - 'unknown' : domain has no record on this resolver (NXDOMAIN/ENOTFOUND/ENODATA)
+const STATE_BLOCKED = 'blocked';
+const STATE_CLEAR = 'clear';
+const STATE_UNKNOWN = 'unknown';
+
+function resolveAddresses(domain, serverIP, resolveFn) {
   return new Promise((resolve) => {
-    dns.resolve4(domain, { server: serverIP }, (err, addresses) => {
+    resolveFn(domain, { server: serverIP }, (err, addresses) => {
       if (!err) {
-        if (addresses.some(addr => knownBlockIPs.includes(addr))) {
-          resolve(true);
-          return;
-        }
-        resolve(false);
+        resolve({ ok: true, addresses: addresses || [] });
         return;
       }
-
-      dns.resolve6(domain, { server: serverIP }, (err6, addresses6) => {
-        if (!err6) {
-          if (addresses6.some(addr => knownBlockIPs.includes(addr))) {
-            resolve(true);
-            return;
-          }
-          resolve(false);
-          return;
-        }
-        if (err6.code === 'ENOTFOUND' || err6.code === 'SERVFAIL') {
-          resolve(true);
-        } else {
-          resolve(false);
-        }
-      });
+      resolve({ ok: false, code: err.code });
     });
   });
+}
+
+const isSinkhole = (addresses) => addresses.some((addr) => knownBlockIPs.includes(addr));
+
+const SERVFAIL_LIKE = new Set(['SERVFAIL', 'EREFUSED', 'TIMEOUT']);
+const NXDOMAIN_LIKE = new Set(['ENOTFOUND', 'ENODATA', 'NOTFOUND', 'NODATA']);
+
+function classifyError(code) {
+  if (SERVFAIL_LIKE.has(String(code).toUpperCase())) return STATE_BLOCKED;
+  if (NXDOMAIN_LIKE.has(String(code).toUpperCase())) return STATE_UNKNOWN;
+  return STATE_UNKNOWN;
+}
+
+const checkAgainstResolver = async (domain, serverIP) => {
+  const aResult = await resolveAddresses(domain, serverIP, dns.resolve4);
+  if (aResult.ok) {
+    return isSinkhole(aResult.addresses) ? STATE_BLOCKED : STATE_CLEAR;
+  }
+
+  const aClassification = classifyError(aResult.code);
+
+  // Only fall back to AAAA when A failed for "no record" reasons; a SERVFAIL
+  // on the A query already tells us the resolver refused this name.
+  if (aClassification === STATE_BLOCKED) {
+    return STATE_BLOCKED;
+  }
+
+  const aaaaResult = await resolveAddresses(domain, serverIP, dns.resolve6);
+  if (aaaaResult.ok) {
+    return isSinkhole(aaaaResult.addresses) ? STATE_BLOCKED : STATE_CLEAR;
+  }
+
+  return classifyError(aaaaResult.code);
 };
 
 const checkDomainAgainstDnsServers = async (domain) => {
-  let results = [];
+  const settled = await Promise.allSettled(
+    DNS_SERVERS.map(async (server) => {
+      const state = await checkAgainstResolver(domain, server.ip);
+      return {
+        server: server.name,
+        serverIp: server.ip,
+        state,
+        isBlocked: state === STATE_BLOCKED,
+      };
+    }),
+  );
 
-  for (let server of DNS_SERVERS) {
-    const isBlocked = await isDomainBlocked(domain, server.ip);
-    results.push({
-      server: server.name,
-      serverIp: server.ip,
-      isBlocked,
-    });
-  }
-
-  return results;
+  return settled.map((entry, index) => {
+    if (entry.status === 'fulfilled') {
+      return entry.value;
+    }
+    const fallbackServer = DNS_SERVERS[index];
+    return {
+      server: fallbackServer.name,
+      serverIp: fallbackServer.ip,
+      state: STATE_UNKNOWN,
+      isBlocked: false,
+      error: entry.reason?.message,
+    };
+  });
 };
 
 export const blockListHandler = async (url) => {
@@ -102,4 +139,3 @@ export const blockListHandler = async (url) => {
 
 export const handler = middleware(blockListHandler);
 export default handler;
-

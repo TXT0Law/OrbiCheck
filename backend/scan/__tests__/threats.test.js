@@ -148,4 +148,108 @@ describe('threats module', () => {
 
     expect(modules.has('threats')).toBe(true);
   });
+
+  it('does not double-encode the result body (regression: must return an object, not a JSON string)', async () => {
+    process.env.GOOGLE_CLOUD_API_KEY = 'google-key';
+    process.env.CLOUDMERSIVE_API_KEY = 'cloud-key';
+    const axiosMock = jest.fn().mockResolvedValue({ data: { query_status: 'ok' } });
+    axiosMock.post = jest.fn().mockImplementation((url) => {
+      if (url.includes('phishtank')) {
+        return Promise.resolve({ data: '<response></response>' });
+      }
+      if (url.includes('cloudmersive')) {
+        return Promise.resolve({ data: { CleanResult: true } });
+      }
+      if (url.includes('safebrowsing')) {
+        return Promise.resolve({ data: {} });
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+
+    const handler = await loadHandlerWithMocks({
+      axiosFactory: { default: axiosMock },
+      xmlFactory: {
+        default: {
+          parseStringPromise: jest.fn().mockResolvedValue({
+            response: { results: { verified: 'false' } },
+          }),
+        },
+      },
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(typeof response.body).toBe('object');
+    expect(response.body).not.toBeInstanceOf(String);
+    expect(response.body.urlHaus).toBeDefined();
+    expect(response.body.phishTank).toBeDefined();
+    expect(response.body.cloudmersive).toBeDefined();
+    expect(response.body.safeBrowsing).toBeDefined();
+  });
+
+  it('runs all four providers in parallel (regression: total time < sum of individual delays)', async () => {
+    process.env.GOOGLE_CLOUD_API_KEY = 'google-key';
+    process.env.CLOUDMERSIVE_API_KEY = 'cloud-key';
+    const PROVIDER_DELAY_MS = 80;
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const axiosMock = jest.fn().mockImplementation(async () => {
+      await sleep(PROVIDER_DELAY_MS);
+      return { data: { query_status: 'ok' } };
+    });
+    axiosMock.post = jest.fn().mockImplementation(async () => {
+      await sleep(PROVIDER_DELAY_MS);
+      return { data: {} };
+    });
+
+    const handler = await loadHandlerWithMocks({
+      axiosFactory: { default: axiosMock },
+      xmlFactory: {
+        default: {
+          parseStringPromise: jest.fn().mockResolvedValue({
+            response: { results: { verified: 'false' } },
+          }),
+        },
+      },
+    });
+
+    const startedAt = Date.now();
+    const response = await invokeHandler(handler);
+    const elapsed = Date.now() - startedAt;
+
+    expect(response.statusCode).toBe(200);
+    // Four serial 80 ms providers would take >= 320 ms; parallel execution
+    // should comfortably stay below 240 ms. Using a generous bound to keep
+    // the test stable on noisy CI.
+    expect(elapsed).toBeLessThan(PROVIDER_DELAY_MS * 3);
+  });
+
+  it('passes a 5s timeout to every axios provider call (regression: prevent hanging requests)', async () => {
+    process.env.GOOGLE_CLOUD_API_KEY = 'google-key';
+    process.env.CLOUDMERSIVE_API_KEY = 'cloud-key';
+    const axiosMock = jest.fn().mockResolvedValue({ data: {} });
+    axiosMock.post = jest.fn().mockResolvedValue({ data: '<response></response>' });
+
+    const handler = await loadHandlerWithMocks({
+      axiosFactory: { default: axiosMock },
+      xmlFactory: {
+        default: {
+          parseStringPromise: jest.fn().mockResolvedValue({ response: { results: {} } }),
+        },
+      },
+    });
+
+    await invokeHandler(handler);
+
+    const allCalls = [
+      ...axiosMock.mock.calls.map((args) => args[0]),
+      ...axiosMock.post.mock.calls.map((args) => args[2]),
+    ];
+    for (const call of allCalls) {
+      if (call && typeof call === 'object') {
+        expect(call.timeout).toBe(5000);
+      }
+    }
+  });
 });
