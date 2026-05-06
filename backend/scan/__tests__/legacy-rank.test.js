@@ -78,9 +78,10 @@ describe('legacy-rank module', () => {
     setModulesForTest(new Map());
   });
 
-  it('returns rank data on success and downloads the csv into os.tmpdir() when missing', async () => {
+  it('returns rank data on success and downloads the csv into os.tmpdir() under the zip-internal filename', async () => {
     const parser = createCsvParser([{ rank: '42', domain: 'example.com' }]);
     const extractor = new EventEmitter();
+    const expectedTempPath = path.join(os.tmpdir(), 'top-1m.csv');
     const axiosMock = jest.fn().mockResolvedValue({
       data: {
         pipe: () => {
@@ -89,11 +90,12 @@ describe('legacy-rank module', () => {
         },
       },
     });
+    const sourceStream = { pipe: jest.fn().mockReturnValue(parser), on: jest.fn().mockReturnThis() };
     const fsMock = {
-      existsSync: jest.fn().mockReturnValue(false),
-      createReadStream: jest.fn().mockReturnValue({
-        pipe: () => parser,
-      }),
+      existsSync: jest.fn()
+        .mockImplementationOnce(() => false)
+        .mockImplementation(() => true),
+      createReadStream: jest.fn().mockReturnValue(sourceStream),
     };
     const unzipperMock = {
       Extract: jest.fn().mockReturnValue(extractor),
@@ -117,20 +119,17 @@ describe('legacy-rank module', () => {
     expect(axiosMock).toHaveBeenCalled();
     expect(unzipperMock.Extract).toHaveBeenCalledTimes(1);
     expect(unzipperMock.Extract).toHaveBeenCalledWith({ path: os.tmpdir() });
-    expect(fsMock.createReadStream).toHaveBeenCalledWith(
-      path.join(os.tmpdir(), 'orbicheck-umbrella-top-1m.csv'),
-    );
+    expect(fsMock.createReadStream).toHaveBeenCalledWith(expectedTempPath);
   });
 
   it('returns a skipped payload when the domain is not found in the csv', async () => {
     const parser = createCsvParser([{ rank: '77', domain: 'other.com' }]);
+    const sourceStream = { pipe: jest.fn().mockReturnValue(parser), on: jest.fn().mockReturnThis() };
     const { handler, __resetLegacyRankCacheForTests } = await loadHandlerWithMocks({
       axiosMock: jest.fn(),
       fsMock: {
         existsSync: jest.fn().mockReturnValue(true),
-        createReadStream: jest.fn().mockReturnValue({
-          pipe: () => parser,
-        }),
+        createReadStream: jest.fn().mockReturnValue(sourceStream),
       },
       unzipperMock: {
         Extract: jest.fn(),
@@ -146,6 +145,73 @@ describe('legacy-rank module', () => {
     expect(response.body.skipped).toContain('not present in the Umbrella top 1M list');
   });
 
+  it('rejects gracefully when the extracted CSV is missing instead of crashing the process (regression for ENOENT)', async () => {
+    const extractor = new EventEmitter();
+    extractor.pipe = () => extractor;
+    const axiosMock = jest.fn().mockResolvedValue({
+      data: {
+        pipe: () => {
+          process.nextTick(() => extractor.emit('close'));
+          return extractor;
+        },
+      },
+    });
+    const { handler, __resetLegacyRankCacheForTests } = await loadHandlerWithMocks({
+      axiosMock,
+      fsMock: {
+        existsSync: jest.fn().mockReturnValue(false),
+        createReadStream: jest.fn(() => {
+          throw new Error('test should not reach createReadStream');
+        }),
+      },
+      unzipperMock: { Extract: jest.fn().mockReturnValue(extractor) },
+      csvFactory: jest.fn(),
+    });
+    __resetLegacyRankCacheForTests();
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(500);
+    // The middleware swallows the specific reason and returns its generic
+    // failure payload, but crucially the Node process must NOT crash here.
+    expect(response.body.error).toBeDefined();
+  });
+
+  it('propagates a source-stream error as a rejected promise, not as a process-level "uncaught error" (regression for unhandled error event)', async () => {
+    // A "silent" parser that never emits end/data — forcing the source-error
+    // path to be the only resolution channel.
+    const silentParser = {
+      on: jest.fn().mockReturnThis(),
+    };
+    let sourceErrorHandler = null;
+    const sourceStream = {
+      pipe: jest.fn().mockReturnValue(silentParser),
+      on(event, listener) {
+        if (event === 'error') sourceErrorHandler = listener;
+        return sourceStream;
+      },
+    };
+    const { handler, __resetLegacyRankCacheForTests } = await loadHandlerWithMocks({
+      axiosMock: jest.fn(),
+      fsMock: {
+        existsSync: jest.fn().mockReturnValue(true),
+        createReadStream: jest.fn().mockReturnValue(sourceStream),
+      },
+      unzipperMock: { Extract: jest.fn() },
+      csvFactory: jest.fn().mockReturnValue(silentParser),
+    });
+    __resetLegacyRankCacheForTests();
+
+    const handlerPromise = invokeHandler(handler);
+    // Wait for the handler to wire up listeners on the source stream.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sourceErrorHandler).not.toBeNull();
+    sourceErrorHandler(new Error('disk read failed'));
+
+    const response = await handlerPromise;
+    expect(response.statusCode).toBe(500);
+  });
+
   it('caches the parsed rank table across invocations (single download + single parse)', async () => {
     const buildParser = () => createCsvParser([
       { rank: '1', domain: 'one.com' },
@@ -155,11 +221,13 @@ describe('legacy-rank module', () => {
     const axiosMock = jest.fn();
     const extractor = new EventEmitter();
     extractor.pipe = () => extractor;
+    const buildSourceStream = () => ({
+      pipe: jest.fn(() => csvFactory()),
+      on: jest.fn().mockReturnThis(),
+    });
     const fsMock = {
       existsSync: jest.fn().mockReturnValue(true),
-      createReadStream: jest.fn().mockReturnValue({
-        pipe: () => csvFactory(),
-      }),
+      createReadStream: jest.fn(() => buildSourceStream()),
     };
     const unzipperMock = { Extract: jest.fn().mockReturnValue(extractor) };
     const { handler, __resetLegacyRankCacheForTests } = await loadHandlerWithMocks({
@@ -202,10 +270,13 @@ describe('legacy-rank module', () => {
       });
     });
     const fsMock = {
-      existsSync: jest.fn().mockReturnValue(false),
-      createReadStream: jest.fn().mockReturnValue({
-        pipe: () => createCsvParser([{ rank: '5', domain: 'example.com' }]),
-      }),
+      existsSync: jest.fn()
+        .mockImplementationOnce(() => false)
+        .mockImplementation(() => true),
+      createReadStream: jest.fn(() => ({
+        pipe: jest.fn(() => createCsvParser([{ rank: '5', domain: 'example.com' }])),
+        on: jest.fn().mockReturnThis(),
+      })),
     };
     const unzipperMock = { Extract: jest.fn().mockReturnValue(extractor) };
     const { handler, __resetLegacyRankCacheForTests } = await loadHandlerWithMocks({

@@ -167,6 +167,39 @@ describe("scan detail routes", () => {
     expect(screen.getByText("example.com")).toBeInTheDocument();
   });
 
+  it("renders the Module Execution Timeline at the top of the summary page (regression for duplicate module-error display)", () => {
+    useScanDetailContextMock.mockReturnValue(
+      baseScanDetailContext({
+        detail: {
+          ...MOCK_SCAN_DETAIL,
+          // Populate moduleErrors so that — if the deprecated red banner ever
+          // gets re-introduced on this page — the assertion below would catch it.
+          moduleErrors: {
+            ssl: {
+              module: "ssl",
+              frontendKey: "ssl",
+              status: "failed",
+              message: "TLS handshake failed",
+            },
+          },
+        },
+      }),
+    );
+
+    const { container } = render(<ScanSummaryPage />);
+
+    // 1. The retry-capable timeline card is the first child of the page wrapper.
+    const wrapper = container.firstElementChild;
+    expect(wrapper).not.toBeNull();
+    const timelineCard = screen.getByTestId("module-timeline-card");
+    expect(wrapper?.firstElementChild).toBe(timelineCard);
+
+    // 2. The standalone red "Module errors (N)" banner has been removed from
+    //    this page in favour of the timeline's per-module retry rows.
+    expect(screen.queryByTestId("module-errors-card")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Module errors \(/i)).not.toBeInTheDocument();
+  });
+
   it("shows empty category and key-finding copy plus running verdict when scan is in progress", () => {
     useScanDetailContextMock.mockReturnValue(
       baseScanDetailContext({

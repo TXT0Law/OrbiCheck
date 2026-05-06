@@ -2,7 +2,6 @@
 
 import { useScanDetailContext } from "@/components/scan/scan-detail-context";
 import { ExecutiveSummaryCard } from "@/components/scan/summary/executive-summary-card";
-import { ModuleErrorsCard } from "@/components/scan/summary/module-errors-card";
 import { ModuleTimelineCard } from "@/components/scan/summary/module-timeline-card";
 import { RecommendationsCard } from "@/components/scan/summary/recommendations-card";
 import { SeverityAndBreakdownSection } from "@/components/scan/summary/severity-and-breakdown-section";
@@ -65,7 +64,7 @@ export default function ScanSummaryPage() {
 
   return (
     <div className="space-y-6">
-      <ModuleErrorsCard detail={safeDetail} />
+      <ModuleTimelineCard detail={safeDetail} />
 
       <ExecutiveSummaryCard detail={safeDetail} />
 
@@ -129,8 +128,6 @@ export default function ScanSummaryPage() {
           )}
         </CardContent>
       </Card>
-
-      <ModuleTimelineCard detail={safeDetail} />
 
       <Card>
         <CardHeader>
