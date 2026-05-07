@@ -36,7 +36,6 @@ export const SCAN_MODULES = [
   "tech-stack",
   "threats",
   "tls",
-  "trace-route",
   "txt-records",
   "whois",
 ] as const;
@@ -70,7 +69,6 @@ export const MODULE_TO_FRONTEND_KEY: Record<ScanModuleName, string | null> = {
   "dns-server": "dns",
   "txt-records": "dns",
   ports: "ports",
-  "trace-route": "traceroute",
   redirects: "redirects",
   status: "statusCheck",
   "mail-config": "emailConfig",
@@ -107,7 +105,6 @@ export const FRONTEND_KEY_LABELS: Record<string, string> = {
   whois: "WHOIS",
   dns: "DNS Records",
   ports: "Open Ports",
-  traceroute: "Traceroute",
   redirects: "Redirects",
   statusCheck: "HTTP Status",
   emailConfig: "Email Config",

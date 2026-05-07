@@ -99,11 +99,13 @@ describe('hsts module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.enabled).toBe(true);
-    expect(response.body.preloadReady).toBe(true);
-    expect(response.body.includeSubDomains).toBe(true);
-    expect(response.body.preload).toBe(true);
-    expect(response.body.maxAge).toBe(31536000);
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.enabled).toBe(true);
+    expect(data.preloadReady).toBe(true);
+    expect(data.includeSubDomains).toBe(true);
+    expect(data.preload).toBe(true);
+    expect(data.maxAge).toBe(31536000);
   });
 
   it('returns a no-header result when HSTS header is missing', async () => {
@@ -116,13 +118,15 @@ describe('hsts module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.enabled).toBe(false);
-    expect(response.body.preloadReady).toBe(false);
-    expect(response.body.message).toContain('does not serve any HSTS headers');
-    expect(response.body.hstsHeader).toBeNull();
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.enabled).toBe(false);
+    expect(data.preloadReady).toBe(false);
+    expect(data.message).toContain('does not serve any HSTS headers');
+    expect(data.hstsHeader).toBeNull();
   });
 
-  it('returns a 500 payload when the HTTPS request fails (object error body)', async () => {
+  it('returns an error envelope when the HTTPS request fails', async () => {
     const { handler } = await loadHandlerWithHttps({
       kind: 'error',
       error: new Error('socket hang up'),
@@ -131,7 +135,8 @@ describe('hsts module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toEqual({ error: 'Error making request: socket hang up' });
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toContain('socket hang up');
   });
 
   it('resolves with a 408 timeout payload when the request times out (regression: must not hang)', async () => {
@@ -140,7 +145,8 @@ describe('hsts module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(408);
-    expect(response.body.error).toMatch(/timed out/i);
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toMatch(/timed out|timed-out/i);
   });
 
   it('handles lowercase directives (GitHub regression)', async () => {
@@ -152,9 +158,11 @@ describe('hsts module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.preloadReady).toBe(true);
-    expect(response.body.includeSubDomains).toBe(true);
-    expect(response.body.preload).toBe(true);
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.preloadReady).toBe(true);
+    expect(data.includeSubDomains).toBe(true);
+    expect(data.preload).toBe(true);
   });
 
   it('reports enabled but not preloadReady for sub-threshold max-age', async () => {
@@ -166,9 +174,11 @@ describe('hsts module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.enabled).toBe(true);
-    expect(response.body.preloadReady).toBe(false);
-    expect(response.body.maxAge).toBe(300);
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.enabled).toBe(true);
+    expect(data.preloadReady).toBe(false);
+    expect(data.maxAge).toBe(300);
   });
 
   it('handles quoted max-age and extra whitespace', async () => {
@@ -179,8 +189,9 @@ describe('hsts module', () => {
 
     const response = await invokeHandler(handler);
 
-    expect(response.body.maxAge).toBe(63072000);
-    expect(response.body.includeSubDomains).toBe(true);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.maxAge).toBe(63072000);
+    expect(response.body.data.includeSubDomains).toBe(true);
   });
 
   it('falls back from HEAD to GET when the origin rejects HEAD with 405', async () => {
@@ -196,7 +207,8 @@ describe('hsts module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.enabled).toBe(true);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.enabled).toBe(true);
     expect(requestSpy).toHaveBeenCalledTimes(2);
     expect(requestSpy.mock.requestOpts[0].method).toBe('HEAD');
     expect(requestSpy.mock.requestOpts[1].method).toBe('GET');

@@ -1,113 +1,85 @@
-import axios from 'axios';
+import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
+import {
+  WAF_BLOCK_ERROR_CODES,
+  WAF_BLOCK_STATUSES,
+  findMatchingSignature,
+} from './_common/waf-signatures.js';
+import { normalizeUrl } from './_common/url.js';
 
-const hasWaf = (waf) => {
+function buildPositive(label, evidence, blocked = false, statusCode = null) {
   return {
-    hasWaf: true, waf,
-  }
-};
+    hasWaf: true,
+    waf: label,
+    evidence,
+    blocked,
+    statusCode,
+  };
+}
 
-const firewallHandler = async (url) => {
-  const fullUrl = url.startsWith('http') ? url : `http://${url}`;
-  
+function buildNegative() {
+  return { hasWaf: false };
+}
+
+function inspectErrorResponse(error) {
+  const errResponse = error && error.response;
+  if (errResponse && errResponse.headers) {
+    const match = findMatchingSignature(errResponse.headers, errResponse.status);
+    if (match) {
+      return buildPositive(match.label, match.evidence, true, errResponse.status || null);
+    }
+    if (WAF_BLOCK_STATUSES.has(errResponse.status)) {
+      return buildPositive(
+        'Unknown WAF',
+        `blocked with status ${errResponse.status}`,
+        true,
+        errResponse.status,
+      );
+    }
+  }
+  if (error && WAF_BLOCK_ERROR_CODES.has(error.code)) {
+    return buildPositive(
+      'Unknown WAF',
+      `connection terminated (${error.code})`,
+      true,
+      null,
+    );
+  }
+  return null;
+}
+
+const firewallHandler = async (rawUrl) => {
+  const url = normalizeUrl(rawUrl, { defaultProtocol: 'http://' });
+
+  let response;
   try {
-    const response = await axios.get(fullUrl);
-
-    const headers = response.headers;
-
-    if (headers['server'] && headers['server'].includes('cloudflare')) {
-      return hasWaf('Cloudflare');
-    }
-
-    if (headers['x-powered-by'] && headers['x-powered-by'].includes('AWS Lambda')) {
-      return hasWaf('AWS WAF');
-    }
-
-    if (headers['server'] && headers['server'].includes('AkamaiGHost')) {
-      return hasWaf('Akamai');
-    }
-
-    if (headers['server'] && headers['server'].includes('Sucuri')) {
-      return hasWaf('Sucuri');
-    }
-
-    if (headers['server'] && headers['server'].includes('BarracudaWAF')) {
-      return hasWaf('Barracuda WAF');
-    }
-
-    if (headers['server'] && (headers['server'].includes('F5 BIG-IP') || headers['server'].includes('BIG-IP'))) {
-      return hasWaf('F5 BIG-IP');
-    }
-
-    if (headers['x-sucuri-id'] || headers['x-sucuri-cache']) {
-      return hasWaf('Sucuri CloudProxy WAF');
-    }
-
-    if (headers['server'] && headers['server'].includes('FortiWeb')) {
-      return hasWaf('Fortinet FortiWeb WAF');
-    }
-
-    if (headers['server'] && headers['server'].includes('Imperva')) {
-      return hasWaf('Imperva SecureSphere WAF');
-    }
-
-    if (headers['x-protected-by'] && headers['x-protected-by'].includes('Sqreen')) {
-      return hasWaf('Sqreen');
-    }
-
-    if (headers['x-waf-event-info']) {
-      return hasWaf('Reblaze WAF');
-    }
-
-    if (headers['set-cookie'] && headers['set-cookie'].includes('_citrix_ns_id')) {
-      return hasWaf('Citrix NetScaler');
-    }
-
-    if (headers['x-denied-reason'] || headers['x-wzws-requested-method']) {
-      return hasWaf('WangZhanBao WAF');
-    }
-
-    if (headers['x-webcoment']) {
-      return hasWaf('Webcoment Firewall');
-    }
-
-    if (headers['server'] && headers['server'].includes('Yundun')) {
-      return hasWaf('Yundun WAF');
-    }
-
-    if (headers['x-yd-waf-info'] || headers['x-yd-info']) {
-      return hasWaf('Yundun WAF');
-    }
-
-    if (headers['server'] && headers['server'].includes('Safe3WAF')) {
-      return hasWaf('Safe3 Web Application Firewall');
-    }
-
-    if (headers['server'] && headers['server'].includes('NAXSI')) {
-      return hasWaf('NAXSI WAF');
-    }
-
-    if (headers['x-datapower-transactionid']) {
-      return hasWaf('IBM WebSphere DataPower');
-    }
-
-    if (headers['server'] && headers['server'].includes('QRATOR')) {
-      return hasWaf('QRATOR WAF');
-    }
-
-    if (headers['server'] && headers['server'].includes('ddos-guard')) {
-      return hasWaf('DDoS-Guard WAF');
-    }
-
-    return {
-      hasWaf: false,
-    }
+    response = await http.get(url);
   } catch (error) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: error.message }),
-    };
+    const inferred = inspectErrorResponse(error);
+    if (inferred) return inferred;
+    throw new Error(`Failed to fetch URL for WAF inspection: ${error.message}`, { cause: error });
   }
+
+  const status = response.status;
+  if (WAF_BLOCK_STATUSES.has(status)) {
+    const match = findMatchingSignature(response.headers, status);
+    if (match) {
+      return buildPositive(match.label, match.evidence, true, status);
+    }
+    return buildPositive(
+      'Unknown WAF',
+      `blocked with status ${status}`,
+      true,
+      status,
+    );
+  }
+
+  const match = findMatchingSignature(response.headers, status);
+  if (match) {
+    return buildPositive(match.label, match.evidence, false, status);
+  }
+
+  return buildNegative();
 };
 
 export const handler = middleware(firewallHandler);

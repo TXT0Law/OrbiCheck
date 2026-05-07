@@ -33,7 +33,7 @@ const sslHandler = async (urlString) => {
           ));
         }
 
-        const { raw, issuerCertificate, ...certWithoutRaw } = peerCert;
+        const { raw: _raw, issuerCertificate: _issuerCert, ...certWithoutRaw } = peerCert;
         socket.end();
         resolve(certWithoutRaw);
       });

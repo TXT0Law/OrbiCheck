@@ -19,10 +19,12 @@ function createResponseCapture() {
   };
 }
 
-async function loadHandlerWithAxios(mockGet) {
+async function loadHandlerWithHttp(mockGet) {
   jest.resetModules();
-  await jest.unstable_mockModule('axios', () => ({
-    default: { get: mockGet },
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: { get: mockGet },
+    httpWith: () => ({ get: mockGet }),
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
   }));
   const { handler } = await import('../firewall.js');
   return handler;
@@ -40,50 +42,127 @@ describe('firewall module', () => {
     setModulesForTest(new Map());
   });
 
-  it('detects Cloudflare from server header', async () => {
-    const handler = await loadHandlerWithAxios(
+  it('detects Cloudflare from server header (200 OK)', async () => {
+    const handler = await loadHandlerWithHttp(
       jest.fn().mockResolvedValue({
-        headers: {
-          server: 'cloudflare',
-        },
+        status: 200,
+        headers: { server: 'cloudflare' },
       })
     );
 
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toMatchObject({
       hasWaf: true,
       waf: 'Cloudflare',
+      blocked: false,
+      evidence: 'server: cloudflare',
     });
   });
 
-  it('returns hasWaf false when no known WAF headers are present', async () => {
-    const handler = await loadHandlerWithAxios(
+  it('detects Cloudflare via cf-ray header even with no server header', async () => {
+    const handler = await loadHandlerWithHttp(
       jest.fn().mockResolvedValue({
-        headers: {
-          server: 'nginx',
-        },
+        status: 200,
+        headers: { 'cf-ray': '1234abcd' },
+      })
+    );
+
+    const response = await invokeHandler(handler);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toMatchObject({
+      hasWaf: true,
+      waf: 'Cloudflare',
+      evidence: 'cf-ray header present',
+    });
+  });
+
+  it('reports hasWaf=true (blocked) when WAF returns 403 with signature header', async () => {
+    const handler = await loadHandlerWithHttp(
+      jest.fn().mockResolvedValue({
+        status: 403,
+        headers: { server: 'cloudflare' },
+      })
+    );
+
+    const response = await invokeHandler(handler);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toMatchObject({
+      hasWaf: true,
+      waf: 'Cloudflare',
+      blocked: true,
+      statusCode: 403,
+    });
+  });
+
+  it('reports hasWaf=true (blocked, unknown vendor) when status is 503 with no headers', async () => {
+    const handler = await loadHandlerWithHttp(
+      jest.fn().mockResolvedValue({
+        status: 503,
+        headers: {},
+      })
+    );
+
+    const response = await invokeHandler(handler);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toMatchObject({
+      hasWaf: true,
+      waf: 'Unknown WAF',
+      blocked: true,
+      statusCode: 503,
+    });
+  });
+
+  it('reports hasWaf=true (blocked) when WAF closes connection (ECONNRESET)', async () => {
+    const econnreset = Object.assign(new Error('connection reset'), {
+      code: 'ECONNRESET',
+    });
+    const handler = await loadHandlerWithHttp(
+      jest.fn().mockRejectedValue(econnreset)
+    );
+
+    const response = await invokeHandler(handler);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toMatchObject({
+      hasWaf: true,
+      waf: 'Unknown WAF',
+      blocked: true,
+      evidence: 'connection terminated (ECONNRESET)',
+    });
+  });
+
+  it('returns hasWaf=false when no known WAF headers are present', async () => {
+    const handler = await loadHandlerWithHttp(
+      jest.fn().mockResolvedValue({
+        status: 200,
+        headers: { server: 'nginx' },
       })
     );
 
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({
-      hasWaf: false,
-    });
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({ hasWaf: false });
   });
 
-  it('returns a 500 payload when the upstream request fails', async () => {
-    const handler = await loadHandlerWithAxios(
-      jest.fn().mockRejectedValue(new Error('connection reset'))
+  it('returns a generic error envelope when fetch fails for non-WAF reasons', async () => {
+    const handler = await loadHandlerWithHttp(
+      jest.fn().mockRejectedValue(new Error('boom'))
     );
 
     const response = await invokeHandler(handler);
 
-    expect(response.statusCode).toBe(500);
-    expect(response.body).toBe(JSON.stringify({ error: 'connection reset' }));
+    expect(response.body.success).toBe(false);
+    // Internal error messages are masked at the middleware boundary; we
+    // only care that the envelope is well-formed.
+    expect(response.body.error).toBe('Request failed while processing this scan module.');
   });
 
   it('returns 400 when url query parameter is missing', async () => {

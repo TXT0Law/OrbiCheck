@@ -1,16 +1,14 @@
-import axios from 'axios';
 import * as cheerio from 'cheerio';
-import middleware from './_common/middleware.js';
 
-const socialTagsHandler = async (url) => {
-  
-  // Check if url includes protocol
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = 'http://' + url;
-  }
-  
+import { http } from './_common/http.js';
+import middleware from './_common/middleware.js';
+import { normalizeUrl } from './_common/url.js';
+
+const socialTagsHandler = async (rawUrl) => {
+  const url = normalizeUrl(rawUrl, { defaultProtocol: 'http://' });
+
   try {
-    const response = await axios.get(url);
+    const response = await http.get(url);
     const html = response.data;
     const $ = cheerio.load(html);
     

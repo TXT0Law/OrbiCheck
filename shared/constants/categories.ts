@@ -34,7 +34,6 @@ export const SCAN_CATEGORIES: ModuleCategory[] = [
       "dns-server",
       "txt-records",
       "ports",
-      "trace-route",
       "redirects",
       "status",
       "mail-config",

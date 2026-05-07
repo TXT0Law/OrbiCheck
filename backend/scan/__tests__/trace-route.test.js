@@ -1,6 +1,7 @@
-import request from 'supertest';
+// trace-route is disabled (P1-9). The .js file is preserved so a future
+// agent can wire up an execFile-based implementation, but the registry must
+// NOT auto-register it. These tests guard that boundary.
 
-import { app, setModulesForTest } from '../server.js';
 import { handler } from '../trace-route.js';
 
 function createResponseCapture() {
@@ -19,55 +20,24 @@ function createResponseCapture() {
   };
 }
 
-async function invokeHandler(url = 'https://example.com') {
-  const req = { query: { url } };
-  const res = createResponseCapture();
-  await handler(req, res);
-  return res;
-}
-
-describe('trace-route module', () => {
-  afterEach(() => {
-    setModulesForTest(new Map());
+describe('trace-route module (disabled)', () => {
+  it('the module file still exposes a handler so it can be re-enabled later', () => {
+    expect(typeof handler).toBe('function');
   });
 
-  it('returns a disabled traceroute payload on success', async () => {
-    const response = await invokeHandler();
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body.message).toContain('temporarily disabled');
-    expect(response.body.result).toEqual([]);
-    expect(response.body.warning).toContain('example.com');
+  it('handler returns a disabled-status envelope when called directly', async () => {
+    const req = { query: { url: 'https://example.com' } };
+    const res = createResponseCapture();
+    await handler(req, res);
+    // Disabled response is still a successful envelope (data carries note).
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.message).toContain('disabled');
   });
 
-  it('returns an empty traceroute result gracefully', async () => {
-    const response = await invokeHandler('https://sub.example.com');
-
-    expect(response.statusCode).toBe(200);
-    expect(Array.isArray(response.body.result)).toBe(true);
-    expect(response.body.result).toHaveLength(0);
-  });
-
-  it('returns a generic error when the hostname is invalid', async () => {
-    const response = await invokeHandler('https:///');
-
-    expect(response.statusCode).toBe(500);
-    expect(response.body.error).toBe('Request failed while processing this scan module.');
-  });
-
-  it('returns 400 when url query parameter is missing', async () => {
-    setModulesForTest(new Map([['trace-route', (_req, res) => res.status(200).json({ ok: true })]]));
-
-    const routeResponse = await request(app).get('/api/scan/trace-route');
-
-    expect(routeResponse.statusCode).toBe(400);
-    expect(routeResponse.body.error).toContain('Missing required query parameter: url');
-  });
-
-  it('is registered in module registry', async () => {
+  it('is NOT registered in module registry (regression guard)', async () => {
     const { loadModules } = await import('../registry.js');
     const modules = await loadModules();
 
-    expect(modules.has('trace-route')).toBe(true);
+    expect(modules.has('trace-route')).toBe(false);
   });
 });

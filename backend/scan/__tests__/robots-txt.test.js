@@ -37,7 +37,7 @@ describe('robots-txt module', () => {
       lbl: expect.any(String),
       val: expect.any(String),
     });
-    expect(response.body.duration_ms).toEqual(expect.any(Number));
+    expect(response.body.durationMs).toEqual(expect.any(Number));
   });
 
   it('returns empty robots data gracefully', async () => {
@@ -59,7 +59,7 @@ describe('robots-txt module', () => {
     expect(response.statusCode).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.data.robots).toEqual([]);
-    expect(response.body.error).toBeNull();
+    expect(response.body.error).toBeUndefined();
   });
 
   it('masks unexpected module errors', async () => {

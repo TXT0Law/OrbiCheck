@@ -1,53 +1,52 @@
-import axios from 'axios';
 import xml2js from 'xml2js';
+
+import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
 
-const sitemapHandler = async (url) => {
-  let sitemapUrl = `${url}/sitemap.xml`;
+const SITEMAP_TIMEOUT_MS = 5000;
 
-  const hardTimeOut = 5000;
+async function findSitemapInRobotsTxt(url) {
+  const robotsRes = await http.get(`${url}/robots.txt`, { timeout: SITEMAP_TIMEOUT_MS });
+  if (robotsRes.status >= 400) return null;
+  const lines = String(robotsRes.data).split('\n');
+  for (const line of lines) {
+    if (line.toLowerCase().startsWith('sitemap:')) {
+      return line.split(/\s+/)[1]?.trim() || null;
+    }
+  }
+  return null;
+}
+
+const sitemapHandler = async (url) => {
+  const defaultSitemapUrl = `${url}/sitemap.xml`;
 
   try {
-    // Try to fetch sitemap directly
-    let sitemapRes;
-    try {
-      sitemapRes = await axios.get(sitemapUrl, { timeout: hardTimeOut });
-    } catch (error) {
-      if (error.response && error.response.status === 404) {
-        // If sitemap not found, try to fetch it from robots.txt
-        const robotsRes = await axios.get(`${url}/robots.txt`, { timeout: hardTimeOut });
-        const robotsTxt = robotsRes.data.split('\n');
+    let sitemapUrl = defaultSitemapUrl;
+    let sitemapRes = await http.get(sitemapUrl, { timeout: SITEMAP_TIMEOUT_MS });
 
-        for (let line of robotsTxt) {
-          if (line.toLowerCase().startsWith('sitemap:')) {
-            sitemapUrl = line.split(' ')[1].trim();
-            break;
-          }
-        }
-
-        if (!sitemapUrl) {
-          return { skipped: 'No sitemap found' };
-        }
-
-        sitemapRes = await axios.get(sitemapUrl, { timeout: hardTimeOut });
-      } else {
-        throw error; // If other error, throw it
+    if (sitemapRes.status === 404) {
+      // Fall back to discovering the sitemap location from robots.txt.
+      const discovered = await findSitemapInRobotsTxt(url);
+      if (!discovered) {
+        return { skipped: 'No sitemap found' };
       }
+      sitemapUrl = discovered;
+      sitemapRes = await http.get(sitemapUrl, { timeout: SITEMAP_TIMEOUT_MS });
+    }
+
+    if (sitemapRes.status >= 400) {
+      return { error: `Failed to fetch sitemap (HTTP ${sitemapRes.status})` };
     }
 
     const parser = new xml2js.Parser();
-    const sitemap = await parser.parseStringPromise(sitemapRes.data);
-
-    return sitemap;
+    return await parser.parseStringPromise(sitemapRes.data);
   } catch (error) {
     if (error.code === 'ECONNABORTED') {
-      return { error: `Request timed-out after ${hardTimeOut}ms` };
-    } else {
-      return { error: error.message };
+      return { error: `Request timed-out after ${SITEMAP_TIMEOUT_MS}ms` };
     }
+    return { error: error.message };
   }
 };
 
 export const handler = middleware(sitemapHandler);
 export default handler;
-

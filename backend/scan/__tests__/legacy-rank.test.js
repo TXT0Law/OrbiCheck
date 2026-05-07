@@ -50,6 +50,14 @@ async function loadHandlerWithMocks({
   csvFactory,
 }) {
   jest.resetModules();
+  // The mocked `axios` doesn't carry axios.create; keep _common/http.js
+  // happy by mocking it explicitly to a no-op http instance. legacy-rank.js
+  // itself imports the raw axios default, so it is unaffected.
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: { get: jest.fn(), post: jest.fn() },
+    httpWith: () => ({ get: jest.fn(), post: jest.fn() }),
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
+  }));
   await jest.unstable_mockModule('axios', () => ({
     default: axiosMock,
   }));
@@ -111,7 +119,8 @@ describe('legacy-rank module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({
       domain: 'example.com',
       rank: '42',
       isFound: true,
@@ -141,8 +150,9 @@ describe('legacy-rank module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.isFound).toBe(false);
-    expect(response.body.skipped).toContain('not present in the Umbrella top 1M list');
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.isFound).toBe(false);
+    expect(response.body.data.skipped).toContain('not present in the Umbrella top 1M list');
   });
 
   it('rejects gracefully when the extracted CSV is missing instead of crashing the process (regression for ENOENT)', async () => {
@@ -242,10 +252,12 @@ describe('legacy-rank module', () => {
     const second = await invokeHandler(handler, 'https://one.com');
 
     expect(first.statusCode).toBe(200);
-    expect(first.body.isFound).toBe(true);
-    expect(first.body.rank).toBe('2');
+    expect(first.body.success).toBe(true);
+    expect(first.body.data.isFound).toBe(true);
+    expect(first.body.data.rank).toBe('2');
     expect(second.statusCode).toBe(200);
-    expect(second.body.rank).toBe('1');
+    expect(second.body.success).toBe(true);
+    expect(second.body.data.rank).toBe('1');
     expect(axiosMock).not.toHaveBeenCalled();
     expect(fsMock.createReadStream).toHaveBeenCalledTimes(1);
   });

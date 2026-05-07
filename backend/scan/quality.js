@@ -1,5 +1,4 @@
-import axios from 'axios';
-
+import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
 
 const qualityHandler = async (url) => {
@@ -23,7 +22,7 @@ const qualityHandler = async (url) => {
     + `&key=${apiKey}`;
 
   try {
-    const data = (await axios.get(endpoint)).data;
+    const data = (await http.get(endpoint)).data;
     return { success: true, ...data, duration_ms: Date.now() - startTime };
   } catch (error) {
     const status = error?.response?.status;

@@ -113,7 +113,7 @@ function flattenCertificate(cert) {
   // The Node.js peer certificate object includes a recursive `issuerCertificate`
   // pointer that ultimately self-references the root. Stripping it keeps the
   // payload JSON-serialisable for the scan database.
-  const { raw, issuerCertificate, ...rest } = cert;
+  const { raw: _raw, issuerCertificate: _issuerCert, ...rest } = cert;
   return rest;
 }
 

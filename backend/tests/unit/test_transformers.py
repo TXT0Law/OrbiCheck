@@ -94,7 +94,9 @@ def test_build_scan_detail_returns_renderable_defaults_for_missing_modules():
     assert detail["whois"] is not None
     assert detail["ports"]["entries"] == []
     assert detail["redirects"]["hops"] == []
-    assert detail["traceroute"]["hops"] == []
+    # traceroute module was removed in P1-9; build_scan_detail still surfaces
+    # the key (frontend ScanDetail still types it) but as `None`.
+    assert detail["traceroute"] is None
     assert detail["features"]["features"] == []
     assert detail["screenshot"]["imageUrl"] == ""
 

@@ -88,10 +88,12 @@ describe('security-txt module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.isPresent).toBe(true);
-    expect(response.body.isPgpSigned).toBe(true);
-    expect(response.body.fields.Contact).toBe('mailto:security@example.com');
-    expect(response.body.fields.Contact1).toBe('https://example.com/security');
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.isPresent).toBe(true);
+    expect(data.isPgpSigned).toBe(true);
+    expect(data.fields.Contact).toBe('mailto:security@example.com');
+    expect(data.fields.Contact1).toBe('https://example.com/security');
   });
 
   it('returns not present when both security.txt paths are missing', async () => {
@@ -105,11 +107,12 @@ describe('security-txt module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({ isPresent: false });
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({ isPresent: false });
     expect(httpsGet).toHaveBeenCalledTimes(2);
   });
 
-  it('returns a generic error when fetching security.txt fails', async () => {
+  it('returns a generic error envelope when fetching security.txt fails', async () => {
     const httpsGet = jest.fn((url, callback) => {
       const requestEmitter = createRequestAndResponse({
         error: new Error('redirect failed'),
@@ -122,7 +125,8 @@ describe('security-txt module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toEqual({ error: GENERIC_ERROR_MESSAGE });
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toBe(GENERIC_ERROR_MESSAGE);
   });
 
   it('returns 400 when url query parameter is missing', async () => {

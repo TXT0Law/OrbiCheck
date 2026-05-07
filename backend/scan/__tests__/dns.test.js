@@ -87,11 +87,13 @@ async function runDnsHandlerWithMock(caaMode) {
 describe('dns handler CAA (mocked dns)', () => {
   it('includes formatted CAA when resolveCaa succeeds', async () => {
     const body = await runDnsHandlerWithMock('ok');
-    expect(body.CAA).toEqual(['0 issue "example.net"']);
+    expect(body.success).toBe(true);
+    expect(body.data.CAA).toEqual(['0 issue "example.net"']);
   });
 
   it('returns empty CAA when resolveCaa rejects (e.g. ENODATA)', async () => {
     const body = await runDnsHandlerWithMock('fail');
-    expect(body.CAA).toEqual([]);
+    expect(body.success).toBe(true);
+    expect(body.data.CAA).toEqual([]);
   });
 });

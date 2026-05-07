@@ -11,9 +11,23 @@ module.exports = {
   },
   extends: ["eslint:recommended"],
   rules: {
-    "no-console": "off",
-    "no-unused-vars": "off",
-    "no-undef": "off",
+    // P1-4 follow-up: structured logging via `_common/logger.js` is now
+    // wired through every module, the registry, and the WHOIS retry path.
+    // Tech-stack-worker.js intentionally uses process.send() instead of
+    // logger because it is a child process without stdout pipe ownership.
+    "no-console": "error",
+    // P1-4: re-enable the recommended unused-vars & undef checks; allow
+    // intentionally-ignored args/catches via the leading-underscore
+    // convention so `(_req, _res)` express signatures stay readable.
+    "no-unused-vars": [
+      "error",
+      {
+        argsIgnorePattern: "^_",
+        varsIgnorePattern: "^_",
+        caughtErrorsIgnorePattern: "^_",
+      },
+    ],
+    "no-undef": "error",
     "no-prototype-builtins": "off",
   },
   ignorePatterns: ["coverage/", "node_modules/"],

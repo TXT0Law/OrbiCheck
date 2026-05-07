@@ -36,7 +36,7 @@ describe('sitemap module', () => {
     expect(response.body.success).toBe(true);
     expect(Array.isArray(response.body.data.urlset.url)).toBe(true);
     expect(response.body.data.urlset.url[0].loc[0]).toBe('https://example.com/');
-    expect(response.body.duration_ms).toEqual(expect.any(Number));
+    expect(response.body.durationMs).toEqual(expect.any(Number));
   });
 
   it('returns empty sitemap data gracefully', async () => {
@@ -58,7 +58,8 @@ describe('sitemap module', () => {
     expect(response.statusCode).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.data.urlset.url).toEqual([]);
-    expect(response.body.error).toBeNull();
+    // `error` is omitted from successful envelopes; absence is the contract.
+    expect(response.body.error).toBeUndefined();
   });
 
   it('masks unexpected module errors', async () => {

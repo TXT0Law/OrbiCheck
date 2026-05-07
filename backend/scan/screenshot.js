@@ -1,7 +1,9 @@
 // backend/scan/screenshot.js
-// Screenshot capture using Playwright (replaces Puppeteer)
+// Screenshot capture using Playwright (replaces Puppeteer). Uses the shared
+// browser pool from _common/playwright-browser.js so multi-module batches
+// don't pay the cold-launch cost (~700ms + 200MB) for every scan.
 
-import { launchChromium } from './_common/playwright-browser.js';
+import { withBrowserContext } from './_common/playwright-browser.js';
 import middleware from './_common/middleware.js';
 
 const DEFAULT_VIEWPORT_WIDTH = 1280;
@@ -17,7 +19,7 @@ const screenshotHandler = async (targetUrl, req) => {
   if (!targetUrl) {
     return {
       success: false,
-      image: null,
+      data: { image: null },
       error: 'URL is missing from request',
       duration_ms: Date.now() - startTime,
     };
@@ -35,7 +37,7 @@ const screenshotHandler = async (targetUrl, req) => {
   } catch {
     return {
       success: false,
-      image: null,
+      data: { image: null },
       error: 'URL provided is invalid',
       duration_ms: Date.now() - startTime,
     };
@@ -53,60 +55,38 @@ const screenshotHandler = async (targetUrl, req) => {
     q.fullPage === true ||
     q.fullPage === '1';
 
-  let browser = null;
   try {
-    browser = await launchChromium({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--ignore-certificate-errors',
-      ],
-    });
-
-    const context = await browser.newContext({
-      viewport: {
-        width: viewportWidth,
-        height: viewportHeight,
+    const result = await withBrowserContext(async (_context, page) => {
+      page.setDefaultTimeout(NAV_TIMEOUT_MS);
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+      const screenshotBuffer = await page.screenshot({ type: 'png', fullPage });
+      return screenshotBuffer.toString('base64');
+    }, {
+      contextOptions: {
+        viewport: { width: viewportWidth, height: viewportHeight },
+        ignoreHTTPSErrors: true,
+        colorScheme: 'dark',
       },
-      ignoreHTTPSErrors: true,
-      colorScheme: 'dark',
+      launchOverrides: { args: ['--ignore-certificate-errors'] },
     });
-
-    const page = await context.newPage();
-    page.setDefaultTimeout(NAV_TIMEOUT_MS);
-
-    await page.goto(targetUrl, {
-      waitUntil: 'domcontentloaded',
-    });
-
-    const screenshotBuffer = await page.screenshot({
-      type: 'png',
-      fullPage,
-    });
-    const base64Screenshot =
-      screenshotBuffer.toString('base64');
 
     return {
       success: true,
-      image: base64Screenshot,
-      viewport: `${viewportWidth}x${viewportHeight}`,
-      fullPage,
-      capturedAt: new Date().toISOString(),
+      data: {
+        image: result,
+        viewport: `${viewportWidth}x${viewportHeight}`,
+        fullPage,
+        capturedAt: new Date().toISOString(),
+      },
       duration_ms: Date.now() - startTime,
     };
   } catch (err) {
     return {
       success: false,
-      image: null,
+      data: { image: null },
       error: err?.message || 'Screenshot capture failed',
       duration_ms: Date.now() - startTime,
     };
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
   }
 };
 

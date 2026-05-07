@@ -1,16 +1,24 @@
 // Common middleware for the OrbiCheck scan service.
-// Wraps a pure module handler in an Express-style (req, res) function and
-// enforces the global request timeout + CORS-friendly response shape.
+// Responsibilities (kept minimal so each module can stay focused on its OSINT
+// logic):
+//   1. Maintenance gate (`VITE_DISABLE_EVERYTHING`).
+//   2. Request URL extraction + normalisation.
+//   3. Per-handler timeout.
+//   4. Wrap whatever the inner handler returns into the standard envelope
+//      `{ success, data, error?, durationMs, statusCode }` so callers (and the
+//      Python transformer layer) can rely on a single contract.
+//
+// Each wrapped handler exposes `runDirect(rawUrl, request, options?)` which the
+// scan runner can call without fabricating Express req/res objects.
 
-const normalizeUrl = (url) => {
-  return url.startsWith('http') ? url : `https://${url}`;
-};
+import { logger } from './logger.js';
+import { err, normaliseEnvelope } from './result.js';
+import { normalizeUrl } from './url.js';
 
 const TIMEOUT = process.env.API_TIMEOUT_LIMIT
   ? parseInt(process.env.API_TIMEOUT_LIMIT, 10)
   : 60000;
 
-// Setting `VITE_DISABLE_EVERYTHING` puts the public instance into maintenance mode.
 const DISABLE_EVERYTHING = !!process.env.VITE_DISABLE_EVERYTHING;
 
 const TIMEOUT_ERROR_MESSAGE = 'You can re-trigger this request, by clicking "Retry"\n'
@@ -32,59 +40,81 @@ const DISABLED_ERROR_MESSAGE = 'Error - OrbiCheck Temporarily Disabled.\n\n'
 
 const GENERIC_ERROR_MESSAGE = 'Request failed while processing this scan module.';
 
-const createTimeoutPromise = (timeoutMs) => {
+function createTimeoutPromise(timeoutMs) {
   let timer;
-  const promise = new Promise((_, reject) => {
+  const promise = new Promise((_resolve, reject) => {
     timer = setTimeout(() => {
-      reject(new Error(`Request timed-out after ${timeoutMs} ms`));
+      const error = new Error(`Request timed-out after ${timeoutMs} ms`);
+      error.code = 'MIDDLEWARE_TIMEOUT';
+      reject(error);
     }, timeoutMs);
   });
   return { promise, cancel: () => clearTimeout(timer) };
-};
+}
 
-const commonMiddleware = (handler) => async (request, response) => {
-  if (DISABLE_EVERYTHING) {
-    return response.status(503).json({ error: DISABLED_ERROR_MESSAGE });
-  }
+function isTimeoutError(error) {
+  if (!error) return false;
+  if (error.code === 'MIDDLEWARE_TIMEOUT') return true;
+  const message = (error.message || String(error)).toLowerCase();
+  return message.includes('timed-out') || message.includes('timed out');
+}
 
-  const queryParams = request.query || {};
-  const rawUrl = queryParams.url;
+const commonMiddleware = (handler) => {
+  // Direct invocation entry-point used by the scan runner.
+  // Returns a fully-formed envelope; never throws.
+  const runDirect = async (rawUrl, request = {}, _options = {}) => {
+    const startedAt = Date.now();
+    const log = (request && request.context && request.context.logger) || logger;
 
-  if (!rawUrl) {
-    return response.status(500).json({ error: 'No URL specified' });
-  }
-
-  const url = normalizeUrl(rawUrl);
-  const timeout = createTimeoutPromise(TIMEOUT);
-
-  try {
-    const handlerResponse = await Promise.race([
-      handler(url, request),
-      timeout.promise,
-    ]);
-
-    if (
-      handlerResponse
-      && typeof handlerResponse === 'object'
-      && 'body' in handlerResponse
-      && 'statusCode' in handlerResponse
-    ) {
-      return response.status(handlerResponse.statusCode).json(handlerResponse.body);
+    if (DISABLE_EVERYTHING) {
+      return err(DISABLED_ERROR_MESSAGE, Date.now() - startedAt, { statusCode: 503 });
     }
 
-    const payload = typeof handlerResponse === 'object'
-      ? handlerResponse
-      : JSON.parse(handlerResponse);
-    return response.status(200).json(payload);
-  } catch (error) {
-    const message = (error && error.message) ? error.message : '';
-    if (message.includes('timed-out') || response.statusCode === 504) {
-      return response.status(408).json({ error: TIMEOUT_ERROR_MESSAGE });
+    if (!rawUrl) {
+      return err('No URL specified', Date.now() - startedAt, { statusCode: 400 });
     }
-    return response.status(500).json({ error: GENERIC_ERROR_MESSAGE });
-  } finally {
-    timeout.cancel();
-  }
+
+    const normalisedUrl = normalizeUrl(rawUrl);
+    if (!normalisedUrl) {
+      return err('No URL specified', Date.now() - startedAt, { statusCode: 400 });
+    }
+
+    const timeout = createTimeoutPromise(TIMEOUT);
+    try {
+      const handlerResult = await Promise.race([
+        Promise.resolve().then(() => handler(normalisedUrl, request)),
+        timeout.promise,
+      ]);
+      return normaliseEnvelope(handlerResult, Date.now() - startedAt);
+    } catch (error) {
+      const durationMs = Date.now() - startedAt;
+      if (isTimeoutError(error)) {
+        log.warn({ moduleTimeoutMs: TIMEOUT }, 'module middleware request timed out');
+        return err(TIMEOUT_ERROR_MESSAGE, durationMs, { statusCode: 408, timedOut: true });
+      }
+      // Hide internal error details from external callers; log full message
+      // for operators.
+      log.warn({ error: (error && error.message) ? error.message : String(error) }, 'module handler threw');
+      return err(GENERIC_ERROR_MESSAGE, durationMs);
+    } finally {
+      timeout.cancel();
+    }
+  };
+
+  // Express-style adapter: kept so existing routes / tests can call
+  // `handler(req, res)` unchanged.
+  const expressHandler = async (request, response) => {
+    const queryParams = request && request.query ? request.query : {};
+    const envelope = await runDirect(queryParams.url, request);
+    if (response && typeof response.status === 'function' && typeof response.json === 'function') {
+      const httpStatus = envelope.statusCode || (envelope.success ? 200 : 500);
+      return response.status(httpStatus).json(envelope);
+    }
+    return envelope;
+  };
+
+  expressHandler.runDirect = runDirect;
+  return expressHandler;
 };
 
 export default commonMiddleware;

@@ -33,10 +33,11 @@ describe('get-ip module', () => {
       .query({ url: 'https://example.com' });
 
     expect(response.statusCode).toBe(200);
-    const body = response.body;
-    expect(body?.ip || body?.address).toBe('93.184.216.34');
-    expect(body?.country).toBe('United States');
-    expect(body?.isp).toBe('Fastly');
+    const data = response.body.data || response.body;
+    expect(response.body.success).toBe(true);
+    expect(data.ip || data.address).toBe('93.184.216.34');
+    expect(data.country).toBe('United States');
+    expect(data.isp).toBe('Fastly');
   });
 
   it('graceful degradation when enrichment fails - IP still returned', async () => {
@@ -58,11 +59,12 @@ describe('get-ip module', () => {
       .query({ url: 'https://example.com' });
 
     expect(response.statusCode).toBe(200);
-    const body = response.body;
-    expect(body?.ip || body?.address).toBe('93.184.216.34');
+    const data = response.body.data || response.body;
+    expect(response.body.success).toBe(true);
+    expect(data.ip || data.address).toBe('93.184.216.34');
   });
 
-  it('returns error when DNS resolution fails', async () => {
+  it('returns error envelope when DNS resolution fails', async () => {
     const getIpDnsFail = (_req, res) => {
       res.status(500).json({ error: 'getaddrinfo ENOTFOUND' });
     };
@@ -74,5 +76,7 @@ describe('get-ip module', () => {
       .query({ url: 'https://nonexistent-domain-xyz.com' });
 
     expect(response.statusCode).toBe(500);
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toContain('getaddrinfo');
   });
 });

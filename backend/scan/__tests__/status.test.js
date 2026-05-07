@@ -96,9 +96,10 @@ describe('status module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.isUp).toBe(true);
-    expect(response.body.responseCode).toBe(200);
-    expect(typeof response.body.responseTime).toBe('number');
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.isUp).toBe(true);
+    expect(response.body.data.responseCode).toBe(200);
+    expect(typeof response.body.data.responseTime).toBe('number');
   });
 
   it('treats an empty but successful response as up', async () => {
@@ -109,11 +110,12 @@ describe('status module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.isUp).toBe(true);
-    expect(response.body.responseCode).toBe(204);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.isUp).toBe(true);
+    expect(response.body.data.responseCode).toBe(204);
   });
 
-  it('returns a generic error for non-success status codes', async () => {
+  it('returns a generic error envelope for non-success status codes', async () => {
     const handler = await loadHandlerWithHttps({
       statusCode: 500,
     });
@@ -121,7 +123,8 @@ describe('status module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toEqual({ error: GENERIC_ERROR_MESSAGE });
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toBe(GENERIC_ERROR_MESSAGE);
   });
 
   it('returns 400 when url query parameter is missing', async () => {

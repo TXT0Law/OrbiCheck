@@ -1,17 +1,12 @@
-import axios from 'axios';
+import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
 
-const headersHandler = async (url, event, context) => {
+const headersHandler = async (url) => {
   try {
-    const response = await axios.get(url, {
-      validateStatus: function (status) {
-        return status >= 200 && status < 600; // Resolve only if the status code is less than 600
-      },
-    });
-
+    const response = await http.get(url);
     return response.headers;
   } catch (error) {
-    throw new Error(error.message);
+    throw new Error(error.message, { cause: error });
   }
 };
 

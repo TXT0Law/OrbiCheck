@@ -107,3 +107,115 @@ describe('playwright-browser launchChromium', () => {
     );
   });
 });
+
+describe('withBrowserContext (P1-5 browser pool)', () => {
+  beforeEach(() => {
+    jest.resetModules();
+    delete process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+    process.env.MAX_BROWSER_CONTEXTS = '2';
+  });
+
+  afterAll(() => {
+    delete process.env.MAX_BROWSER_CONTEXTS;
+  });
+
+  function buildBrowserMock() {
+    const newPage = jest.fn().mockResolvedValue({
+      isClosed: () => false,
+      close: jest.fn().mockResolvedValue(undefined),
+    });
+    const newContext = jest.fn().mockResolvedValue({
+      newPage,
+      cookies: jest.fn().mockResolvedValue([]),
+      close: jest.fn().mockResolvedValue(undefined),
+    });
+    return {
+      browser: {
+        newContext,
+        once: jest.fn(),
+        close: jest.fn().mockResolvedValue(undefined),
+      },
+      newContext,
+      newPage,
+    };
+  }
+
+  it('reuses a single browser across consecutive withBrowserContext calls', async () => {
+    const mock = buildBrowserMock();
+    const mockLaunch = jest.fn().mockResolvedValue(mock.browser);
+
+    await jest.unstable_mockModule('playwright', () => ({
+      chromium: { launch: mockLaunch },
+    }));
+    await jest.unstable_mockModule('node:fs', () => ({
+      existsSync: jest.fn().mockReturnValue(false),
+    }));
+
+    const { withBrowserContext, __resetBrowserSingletonForTests } =
+      await import('../_common/playwright-browser.js');
+    __resetBrowserSingletonForTests();
+
+    await withBrowserContext(async () => 'first');
+    await withBrowserContext(async () => 'second');
+
+    expect(mockLaunch).toHaveBeenCalledTimes(1);
+    expect(mock.newContext).toHaveBeenCalledTimes(2);
+  });
+
+  it('respects MAX_BROWSER_CONTEXTS by queueing concurrent contexts', async () => {
+    const mock = buildBrowserMock();
+    const mockLaunch = jest.fn().mockResolvedValue(mock.browser);
+
+    await jest.unstable_mockModule('playwright', () => ({
+      chromium: { launch: mockLaunch },
+    }));
+    await jest.unstable_mockModule('node:fs', () => ({
+      existsSync: jest.fn().mockReturnValue(false),
+    }));
+
+    const { withBrowserContext, __resetBrowserSingletonForTests } =
+      await import('../_common/playwright-browser.js');
+    __resetBrowserSingletonForTests();
+
+    let inFlight = 0;
+    let peak = 0;
+    const work = async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+    };
+
+    await Promise.all(
+      Array.from({ length: 5 }, () => withBrowserContext(work)),
+    );
+
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(mockLaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the context even when the worker function throws', async () => {
+    const mock = buildBrowserMock();
+    const mockLaunch = jest.fn().mockResolvedValue(mock.browser);
+
+    await jest.unstable_mockModule('playwright', () => ({
+      chromium: { launch: mockLaunch },
+    }));
+    await jest.unstable_mockModule('node:fs', () => ({
+      existsSync: jest.fn().mockReturnValue(false),
+    }));
+
+    const { withBrowserContext, __resetBrowserSingletonForTests } =
+      await import('../_common/playwright-browser.js');
+    __resetBrowserSingletonForTests();
+
+    await expect(
+      withBrowserContext(async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+
+    const contextResult = await mock.newContext.mock.results[0].value;
+    expect(contextResult.close).toHaveBeenCalled();
+  });
+});

@@ -25,34 +25,35 @@ function createResponseCapture() {
   };
 }
 
-function createBrowserMock({ screenshotBuffer = Buffer.from('png-data'), gotoError = null }) {
-  return {
-    newContext: jest.fn().mockResolvedValue({
-      newPage: jest.fn().mockResolvedValue({
-        goto: jest.fn().mockImplementation(async () => {
-          if (gotoError) throw gotoError;
-        }),
-        setDefaultTimeout: jest.fn(),
-        screenshot: jest.fn().mockResolvedValue(screenshotBuffer),
-      }),
-    }),
-    close: jest.fn().mockResolvedValue(undefined),
-  };
-}
-
-async function loadHandlerWithMocks({ screenshotBuffer, gotoError, launchError } = {}) {
+async function loadHandlerWithMocks({ screenshotBuffer = Buffer.from('png-data'), gotoError, launchError } = {}) {
   jest.resetModules();
 
-  if (launchError) {
-    await jest.unstable_mockModule('../_common/playwright-browser.js', () => ({
-      launchChromium: jest.fn().mockRejectedValue(launchError),
-    }));
-  } else {
-    const browserMock = createBrowserMock({ screenshotBuffer, gotoError });
-    await jest.unstable_mockModule('../_common/playwright-browser.js', () => ({
-      launchChromium: jest.fn().mockResolvedValue(browserMock),
-    }));
-  }
+  const fakePage = {
+    goto: jest.fn().mockImplementation(async () => {
+      if (gotoError) throw gotoError;
+    }),
+    setDefaultTimeout: jest.fn(),
+    screenshot: jest.fn().mockResolvedValue(screenshotBuffer),
+    isClosed: () => false,
+    close: jest.fn().mockResolvedValue(undefined),
+  };
+  const fakeContext = {
+    cookies: jest.fn().mockResolvedValue([]),
+    close: jest.fn().mockResolvedValue(undefined),
+  };
+
+  const withBrowserContext = jest.fn(async (fn) => {
+    if (launchError) throw launchError;
+    return fn(fakeContext, fakePage);
+  });
+
+  await jest.unstable_mockModule('../_common/playwright-browser.js', () => ({
+    withBrowserContext,
+    launchChromium: jest.fn(),
+    closeSharedBrowser: jest.fn(),
+    __resetBrowserSingletonForTests: jest.fn(),
+    BROWSER_MAX_CONTEXTS: 3,
+  }));
 
   const { handler } = await import('../screenshot.js');
   return handler;
@@ -90,9 +91,9 @@ describe('screenshot module — route level', () => {
     expect(response.statusCode).toBe(200);
     const body = response.body;
     expect(body.success).toBe(true);
-    expect(body.image).toBeDefined();
-    expect(body.viewport).toBe('1280x720');
-    expect(body.duration_ms).toBeGreaterThan(0);
+    expect(body.data.image).toBeDefined();
+    expect(body.data.viewport).toBe('1280x720');
+    expect(body.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it('returns 400 when URL is missing', async () => {
@@ -143,18 +144,19 @@ describe('screenshot module — handler unit tests (mocked launchChromium)', () 
 
     expect(response.statusCode).toBe(200);
     expect(response.body.success).toBe(true);
-    expect(response.body.image).toBe(fakeBuffer.toString('base64'));
-    expect(response.body.viewport).toBe('1280x720');
-    expect(response.body.duration_ms).toBeGreaterThanOrEqual(0);
+    expect(response.body.data.image).toBe(fakeBuffer.toString('base64'));
+    expect(response.body.data.viewport).toBe('1280x720');
+    expect(response.body.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it('returns 500 via middleware when URL is missing', async () => {
+  it('returns 400 via middleware when URL is missing', async () => {
     const handler = await loadHandlerWithMocks();
     const req = { query: {} };
     const res = createResponseCapture();
     await handler(req, res);
 
-    expect(res.statusCode).toBe(500);
+    // Middleware now returns 400 (more accurate) instead of the legacy 500.
+    expect(res.statusCode).toBe(400);
     expect(res.body.error).toMatch(/no url/i);
   });
 
@@ -173,6 +175,7 @@ describe('screenshot module — handler unit tests (mocked launchChromium)', () 
 
     expect(response.statusCode).toBe(200);
     expect(response.body.success).toBe(true);
+    expect(response.body.data.image).toBeDefined();
   });
 
   it('returns error when browser launch fails', async () => {

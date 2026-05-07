@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
 
 const parseRobotsTxt = (content) => {
@@ -45,7 +45,7 @@ const robotsHandler = async function(url) {
   const robotsURL = `${parsedURL.protocol}//${parsedURL.hostname}/robots.txt`;
 
   try {
-    const response = await axios.get(robotsURL);
+    const response = await http.get(robotsURL);
 
     if (response.status === 200) {
       const parsedData = parseRobotsTxt(response.data);

@@ -33,7 +33,7 @@ describe('linked-pages module', () => {
     expect(Array.isArray(response.body.data.internal)).toBe(true);
     expect(Array.isArray(response.body.data.external)).toBe(true);
     expect(response.body.data.internal[0]).toContain('example.com');
-    expect(response.body.duration_ms).toEqual(expect.any(Number));
+    expect(response.body.durationMs).toEqual(expect.any(Number));
   });
 
   it('returns empty link collections gracefully', async () => {

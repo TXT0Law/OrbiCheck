@@ -57,9 +57,11 @@ describe('mail-config module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.mxRecords).toHaveLength(2);
-    expect(response.body.txtRecords).toHaveLength(2);
-    expect(response.body.mailServices).toEqual(
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.mxRecords).toHaveLength(2);
+    expect(data.txtRecords).toHaveLength(2);
+    expect(data.mailServices).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ provider: 'Google Workspace' }),
         expect.objectContaining({ provider: 'Yahoo' }),
@@ -77,10 +79,11 @@ describe('mail-config module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.skipped).toContain('No mail server in use');
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.skipped).toContain('No mail server in use');
   });
 
-  it('returns a 500 payload when dns lookup fails unexpectedly', async () => {
+  it('returns an error envelope when dns lookup fails unexpectedly', async () => {
     const handler = await loadHandlerWithDns({
       resolveMx: jest.fn().mockRejectedValue(new Error('resolver crashed')),
       resolveTxt: jest.fn(),
@@ -89,7 +92,10 @@ describe('mail-config module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toEqual({ error: 'resolver crashed' });
+    expect(response.body.success).toBe(false);
+    // The mail-config handler explicitly returns the original error string in
+    // its catch path; the runner only masks errors that escape via throw.
+    expect(response.body.error).toContain('resolver crashed');
   });
 
   it('returns 400 when url query parameter is missing', async () => {

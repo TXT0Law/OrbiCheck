@@ -1,11 +1,14 @@
+// trace-route.js is intentionally NOT registered in registry.js (P1-9).
+// Kept on disk so a future agent can swap in an `execFile('mtr', ...)` /
+// `traceroute` implementation without re-introducing the file.
+
 import url from 'url';
+
 import middleware from './_common/middleware.js';
 
 const SAFE_HOSTNAME_PATTERN = /^[a-zA-Z0-9.-]+$/;
 
-const traceRouteHandler = async (urlString, context) => {
-  void context;
-  // Parse the URL and get the hostname
+const traceRouteHandler = async (urlString) => {
   const urlObject = url.parse(urlString);
   const host = urlObject.hostname;
 

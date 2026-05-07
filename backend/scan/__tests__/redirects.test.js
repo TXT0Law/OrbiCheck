@@ -54,7 +54,8 @@ describe('redirects module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.redirects).toEqual([
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.redirects).toEqual([
       'https://example.com',
       'https://www.example.com',
       'https://www.example.com/home',
@@ -69,12 +70,13 @@ describe('redirects module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({
       redirects: ['https://example.com'],
     });
   });
 
-  it('returns a generic error when got throws', async () => {
+  it('returns a generic error envelope when got throws', async () => {
     const handler = await loadHandlerWithGot(
       jest.fn().mockRejectedValue(new Error('redirect loop'))
     );
@@ -82,7 +84,8 @@ describe('redirects module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toEqual({ error: GENERIC_ERROR_MESSAGE });
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toBe(GENERIC_ERROR_MESSAGE);
   });
 
   it('returns 400 when url query parameter is missing', async () => {
