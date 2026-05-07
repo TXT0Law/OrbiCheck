@@ -1,22 +1,33 @@
-import axios from 'axios';
 import * as cheerio from 'cheerio';
 import urlLib from 'url';
+
+import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
+import { extractHostname } from './_common/url.js';
 
 const linkedPagesHandler = async (url) => {
-  const response = await axios.get(url);
+  const response = await http.get(url);
   const html = response.data;
   const $ = cheerio.load(html);
   const internalLinksMap = new Map();
   const externalLinksMap = new Map();
+  const targetHost = extractHostname(url).toLowerCase();
 
   // Get all links on the page
   $('a[href]').each((i, link) => {
     const href = $(link).attr('href');
     const absoluteUrl = urlLib.resolve(url, href);
-    
-    // Check if absolute / relative, append to appropriate map or increment occurrence count
-    if (absoluteUrl.startsWith(url)) {
+    let absoluteHost = '';
+    try {
+      absoluteHost = new URL(absoluteUrl).hostname.toLowerCase();
+    } catch {
+      return;
+    }
+
+    // P2-7 fix: same-origin via hostname comparison instead of fragile
+    // `absoluteUrl.startsWith(url)` (which mis-classifies
+    // example.com.evil.com/ as internal).
+    if (targetHost && absoluteHost === targetHost) {
       const count = internalLinksMap.get(absoluteUrl) || 0;
       internalLinksMap.set(absoluteUrl, count + 1);
     } else if (href.startsWith('http://') || href.startsWith('https://')) {
@@ -36,7 +47,7 @@ const linkedPagesHandler = async (url) => {
       body: {
         skipped: 'No internal or external links found. '
           + 'This may be due to the website being dynamically rendered, using a client-side framework (like React), and without SSR enabled. '
-          + 'That would mean that the static HTML returned from the HTTP request doesn\'t contain any meaningful content for OrbiCheck to analyze. '
+          + 'That would mean that the static HTML returned from the HTTP request doesn\'t contain any meaningful content for OrbiCheck to scan. '
           + 'You can rectify this by using a headless browser to render the page instead.',
         },
     };

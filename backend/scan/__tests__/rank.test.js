@@ -21,8 +21,10 @@ function createResponseCapture() {
 
 async function loadHandlerWithAxios(mockGet) {
   jest.resetModules();
-  await jest.unstable_mockModule('axios', () => ({
-    default: { get: mockGet },
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: { get: mockGet },
+    httpWith: () => ({ get: mockGet }),
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
   }));
   const { handler } = await import('../rank.js');
   return handler;
@@ -56,7 +58,8 @@ describe('rank module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.ranks[0].rank).toBe(12345);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.ranks[0].rank).toBe(12345);
     expect(mockGet).toHaveBeenCalledTimes(1);
     const [calledUrl, calledConfig, ...extras] = mockGet.mock.calls[0];
     expect(calledUrl).toBe('https://tranco-list.eu/api/ranks/domain/example.com');
@@ -91,7 +94,8 @@ describe('rank module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.skipped).toContain("isn't ranked");
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.skipped).toContain("isn't ranked");
   });
 
   it('returns an error payload when the ranking provider fails', async () => {
@@ -102,7 +106,8 @@ describe('rank module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.error).toContain('tranco unavailable');
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.error).toContain('tranco unavailable');
   });
 
   it('returns 400 when url query parameter is missing', async () => {

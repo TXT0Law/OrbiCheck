@@ -69,4 +69,28 @@ describe('scan service routes', () => {
     expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
   });
+
+  it('echoes back caller-provided X-Scan-Id / X-Trace-Id (P1-3 trace propagation)', async () => {
+    const response = await request(app)
+      .get('/api/scan/ok')
+      .set('X-Scan-Id', 'scan-abc-123')
+      .set('X-Trace-Id', 'trace-xyz-789')
+      .query({ url: 'https://example.com' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['x-scan-id']).toBe('scan-abc-123');
+    expect(response.headers['x-trace-id']).toBe('trace-xyz-789');
+  });
+
+  it('mints a synthetic X-Scan-Id when caller does not provide one', async () => {
+    const response = await request(app)
+      .get('/api/scan/ok')
+      .query({ url: 'https://example.com' });
+
+    expect(response.statusCode).toBe(200);
+    // Auto-generated UUID v4 (length 36 with 4 dashes).
+    expect(response.headers['x-scan-id']).toMatch(/^[0-9a-f-]{36}$/i);
+    // Trace id falls back to scan id when not explicitly provided.
+    expect(response.headers['x-trace-id']).toBe(response.headers['x-scan-id']);
+  });
 });

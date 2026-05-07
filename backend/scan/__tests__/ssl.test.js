@@ -100,10 +100,11 @@ describe('ssl module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.subject.CN).toBe('example.com');
-    expect(response.body.issuer.CN).toBe('Example CA');
-    expect(response.body.raw).toBeUndefined();
-    expect(response.body.issuerCertificate).toBeUndefined();
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.subject.CN).toBe('example.com');
+    expect(response.body.data.issuer.CN).toBe('Example CA');
+    expect(response.body.data.raw).toBeUndefined();
+    expect(response.body.data.issuerCertificate).toBeUndefined();
   });
 
   it('returns success false when the server presents no certificate', async () => {

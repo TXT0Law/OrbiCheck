@@ -23,8 +23,10 @@ function createResponseCapture() {
 
 async function loadHandlerWithAxios(mockGet) {
   jest.resetModules();
-  await jest.unstable_mockModule('axios', () => ({
-    default: { get: mockGet },
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: { get: mockGet },
+    httpWith: () => ({ get: mockGet }),
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
   }));
   const { handler } = await import('../headers.js');
   return handler;
@@ -55,8 +57,9 @@ describe('headers module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.server).toBe('nginx');
-    expect(response.body['content-type']).toBe('text/html');
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.server).toBe('nginx');
+    expect(response.body.data['content-type']).toBe('text/html');
   });
 
   it('returns an empty object when the response has no headers', async () => {
@@ -69,10 +72,11 @@ describe('headers module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({});
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({});
   });
 
-  it('returns a generic error when the request throws', async () => {
+  it('returns a generic error envelope when the request throws', async () => {
     const handler = await loadHandlerWithAxios(
       jest.fn().mockRejectedValue(new Error('boom'))
     );
@@ -80,7 +84,8 @@ describe('headers module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toEqual({ error: GENERIC_ERROR_MESSAGE });
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toBe(GENERIC_ERROR_MESSAGE);
   });
 
   it('returns 400 when url query parameter is missing', async () => {

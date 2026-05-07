@@ -21,9 +21,13 @@ function createResponseCapture() {
   };
 }
 
-async function loadHandlerWithMocks({ axiosFactory, xmlFactory }) {
+async function loadHandlerWithMocks({ httpMock, xmlFactory }) {
   jest.resetModules();
-  await jest.unstable_mockModule('axios', () => axiosFactory);
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: httpMock,
+    httpWith: () => httpMock,
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
+  }));
   await jest.unstable_mockModule('xml2js', () => xmlFactory);
   const { handler } = await import('../threats.js');
   return handler;
@@ -49,27 +53,27 @@ describe('threats module', () => {
   it('returns threat intelligence data on success', async () => {
     process.env.GOOGLE_CLOUD_API_KEY = 'google-key';
     process.env.CLOUDMERSIVE_API_KEY = 'cloud-key';
-    const axiosMock = jest.fn((configOrUrl) => {
-      if (typeof configOrUrl === 'object' && configOrUrl.url.includes('urlhaus-api')) {
-        return Promise.resolve({ data: { query_status: 'ok', urls: [] } });
-      }
-      throw new Error('Unexpected axios config call');
-    });
-    axiosMock.post = jest.fn((url) => {
-      if (url.includes('phishtank')) {
-        return Promise.resolve({ data: '<response></response>' });
-      }
-      if (url.includes('cloudmersive')) {
-        return Promise.resolve({ data: { CleanResult: true } });
-      }
-      if (url.includes('safebrowsing')) {
-        return Promise.resolve({ data: {} });
-      }
-      throw new Error(`Unexpected post url: ${url}`);
-    });
+    const httpMock = {
+      get: jest.fn(),
+      post: jest.fn((url) => {
+        if (url.includes('urlhaus-api')) {
+          return Promise.resolve({ status: 200, data: { query_status: 'ok', urls: [] } });
+        }
+        if (url.includes('phishtank')) {
+          return Promise.resolve({ status: 200, data: '<response></response>' });
+        }
+        if (url.includes('cloudmersive')) {
+          return Promise.resolve({ status: 200, data: { CleanResult: true } });
+        }
+        if (url.includes('safebrowsing')) {
+          return Promise.resolve({ status: 200, data: {} });
+        }
+        throw new Error(`Unexpected post url: ${url}`);
+      }),
+    };
 
     const handler = await loadHandlerWithMocks({
-      axiosFactory: { default: axiosMock },
+      httpMock,
       xmlFactory: {
         default: {
           parseStringPromise: jest.fn().mockResolvedValue({
@@ -82,20 +86,32 @@ describe('threats module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.urlHaus.query_status).toBe('ok');
-    expect(response.body.phishTank.verified).toBe('false');
-    expect(response.body.cloudmersive.CleanResult).toBe(true);
-    expect(response.body.safeBrowsing.unsafe).toBe(false);
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.urlHaus.query_status).toBe('ok');
+    expect(data.phishTank.verified).toBe('false');
+    expect(data.cloudmersive.CleanResult).toBe(true);
+    expect(data.safeBrowsing.unsafe).toBe(false);
   });
 
   it('returns dependency error payloads gracefully when api keys are missing', async () => {
     delete process.env.GOOGLE_CLOUD_API_KEY;
     delete process.env.CLOUDMERSIVE_API_KEY;
-    const axiosMock = jest.fn().mockResolvedValue({ data: { query_status: 'ok' } });
-    axiosMock.post = jest.fn().mockRejectedValue(new Error('phishtank timeout'));
+    const httpMock = {
+      get: jest.fn(),
+      post: jest.fn((url) => {
+        if (url.includes('urlhaus-api')) {
+          return Promise.resolve({ status: 200, data: { query_status: 'ok' } });
+        }
+        if (url.includes('phishtank')) {
+          return Promise.reject(new Error('phishtank timeout'));
+        }
+        return Promise.reject(new Error('unexpected'));
+      }),
+    };
 
     const handler = await loadHandlerWithMocks({
-      axiosFactory: { default: axiosMock },
+      httpMock,
       xmlFactory: {
         default: {
           parseStringPromise: jest.fn(),
@@ -106,20 +122,24 @@ describe('threats module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.urlHaus.query_status).toBe('ok');
-    expect(response.body.phishTank.error).toContain('PhishTank failed');
-    expect(response.body.cloudmersive.error).toContain('CLOUDMERSIVE_API_KEY');
-    expect(response.body.safeBrowsing.error).toContain('GOOGLE_CLOUD_API_KEY');
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.urlHaus.query_status).toBe('ok');
+    expect(data.phishTank.error).toContain('PhishTank failed');
+    expect(data.cloudmersive.error).toContain('CLOUDMERSIVE_API_KEY');
+    expect(data.safeBrowsing.error).toContain('GOOGLE_CLOUD_API_KEY');
   });
 
-  it('returns a generic error when every provider fails', async () => {
+  it('returns a generic error envelope when every provider fails', async () => {
     process.env.GOOGLE_CLOUD_API_KEY = 'google-key';
     process.env.CLOUDMERSIVE_API_KEY = 'cloud-key';
-    const axiosMock = jest.fn().mockRejectedValue(new Error('urlhaus down'));
-    axiosMock.post = jest.fn().mockRejectedValue(new Error('provider down'));
+    const httpMock = {
+      get: jest.fn().mockRejectedValue(new Error('down')),
+      post: jest.fn().mockRejectedValue(new Error('provider down')),
+    };
 
     const handler = await loadHandlerWithMocks({
-      axiosFactory: { default: axiosMock },
+      httpMock,
       xmlFactory: {
         default: {
           parseStringPromise: jest.fn().mockRejectedValue(new Error('xml parse failed')),
@@ -130,7 +150,8 @@ describe('threats module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toEqual({ error: GENERIC_ERROR_MESSAGE });
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toBe(GENERIC_ERROR_MESSAGE);
   });
 
   it('returns 400 when url query parameter is missing', async () => {
@@ -152,22 +173,27 @@ describe('threats module', () => {
   it('does not double-encode the result body (regression: must return an object, not a JSON string)', async () => {
     process.env.GOOGLE_CLOUD_API_KEY = 'google-key';
     process.env.CLOUDMERSIVE_API_KEY = 'cloud-key';
-    const axiosMock = jest.fn().mockResolvedValue({ data: { query_status: 'ok' } });
-    axiosMock.post = jest.fn().mockImplementation((url) => {
-      if (url.includes('phishtank')) {
-        return Promise.resolve({ data: '<response></response>' });
-      }
-      if (url.includes('cloudmersive')) {
-        return Promise.resolve({ data: { CleanResult: true } });
-      }
-      if (url.includes('safebrowsing')) {
-        return Promise.resolve({ data: {} });
-      }
-      throw new Error(`unexpected url ${url}`);
-    });
+    const httpMock = {
+      get: jest.fn(),
+      post: jest.fn((url) => {
+        if (url.includes('urlhaus')) {
+          return Promise.resolve({ status: 200, data: { query_status: 'ok' } });
+        }
+        if (url.includes('phishtank')) {
+          return Promise.resolve({ status: 200, data: '<response></response>' });
+        }
+        if (url.includes('cloudmersive')) {
+          return Promise.resolve({ status: 200, data: { CleanResult: true } });
+        }
+        if (url.includes('safebrowsing')) {
+          return Promise.resolve({ status: 200, data: {} });
+        }
+        throw new Error(`unexpected url ${url}`);
+      }),
+    };
 
     const handler = await loadHandlerWithMocks({
-      axiosFactory: { default: axiosMock },
+      httpMock,
       xmlFactory: {
         default: {
           parseStringPromise: jest.fn().mockResolvedValue({
@@ -182,10 +208,12 @@ describe('threats module', () => {
     expect(response.statusCode).toBe(200);
     expect(typeof response.body).toBe('object');
     expect(response.body).not.toBeInstanceOf(String);
-    expect(response.body.urlHaus).toBeDefined();
-    expect(response.body.phishTank).toBeDefined();
-    expect(response.body.cloudmersive).toBeDefined();
-    expect(response.body.safeBrowsing).toBeDefined();
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.urlHaus).toBeDefined();
+    expect(data.phishTank).toBeDefined();
+    expect(data.cloudmersive).toBeDefined();
+    expect(data.safeBrowsing).toBeDefined();
   });
 
   it('runs all four providers in parallel (regression: total time < sum of individual delays)', async () => {
@@ -194,17 +222,19 @@ describe('threats module', () => {
     const PROVIDER_DELAY_MS = 80;
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    const axiosMock = jest.fn().mockImplementation(async () => {
-      await sleep(PROVIDER_DELAY_MS);
-      return { data: { query_status: 'ok' } };
-    });
-    axiosMock.post = jest.fn().mockImplementation(async () => {
-      await sleep(PROVIDER_DELAY_MS);
-      return { data: {} };
-    });
+    const httpMock = {
+      get: jest.fn().mockImplementation(async () => {
+        await sleep(PROVIDER_DELAY_MS);
+        return { status: 200, data: { query_status: 'ok' } };
+      }),
+      post: jest.fn().mockImplementation(async () => {
+        await sleep(PROVIDER_DELAY_MS);
+        return { status: 200, data: {} };
+      }),
+    };
 
     const handler = await loadHandlerWithMocks({
-      axiosFactory: { default: axiosMock },
+      httpMock,
       xmlFactory: {
         default: {
           parseStringPromise: jest.fn().mockResolvedValue({
@@ -225,14 +255,16 @@ describe('threats module', () => {
     expect(elapsed).toBeLessThan(PROVIDER_DELAY_MS * 3);
   });
 
-  it('passes a 5s timeout to every axios provider call (regression: prevent hanging requests)', async () => {
+  it('passes a 5s timeout to every provider call (regression: prevent hanging requests)', async () => {
     process.env.GOOGLE_CLOUD_API_KEY = 'google-key';
     process.env.CLOUDMERSIVE_API_KEY = 'cloud-key';
-    const axiosMock = jest.fn().mockResolvedValue({ data: {} });
-    axiosMock.post = jest.fn().mockResolvedValue({ data: '<response></response>' });
+    const httpMock = {
+      get: jest.fn().mockResolvedValue({ status: 200, data: {} }),
+      post: jest.fn().mockResolvedValue({ status: 200, data: '<response></response>' }),
+    };
 
     const handler = await loadHandlerWithMocks({
-      axiosFactory: { default: axiosMock },
+      httpMock,
       xmlFactory: {
         default: {
           parseStringPromise: jest.fn().mockResolvedValue({ response: { results: {} } }),
@@ -242,13 +274,11 @@ describe('threats module', () => {
 
     await invokeHandler(handler);
 
-    const allCalls = [
-      ...axiosMock.mock.calls.map((args) => args[0]),
-      ...axiosMock.post.mock.calls.map((args) => args[2]),
-    ];
-    for (const call of allCalls) {
-      if (call && typeof call === 'object') {
-        expect(call.timeout).toBe(5000);
+    // Every http.post call's third arg (config) carries timeout: 5000.
+    for (const call of httpMock.post.mock.calls) {
+      const config = call[2];
+      if (config) {
+        expect(config.timeout).toBe(5000);
       }
     }
   });

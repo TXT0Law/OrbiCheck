@@ -127,16 +127,18 @@ describe('ports module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.openPorts).toHaveLength(1);
-    expect(response.body.openPorts[0].port).toBe(80);
-    expect(response.body.openPorts[0].banner).toContain('nginx/1.27');
-    expect(response.body.openPorts[0].reason).toBe('syn-ack');
-    expect(response.body.closedPorts).toEqual([{ port: 443, reason: 'conn-refused' }]);
-    expect(response.body.filteredPorts).toEqual([{ port: 8080, reason: 'no-response' }]);
-    expect(response.body.hostStatus).toEqual(
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.openPorts).toHaveLength(1);
+    expect(data.openPorts[0].port).toBe(80);
+    expect(data.openPorts[0].banner).toContain('nginx/1.27');
+    expect(data.openPorts[0].reason).toBe('syn-ack');
+    expect(data.closedPorts).toEqual([{ port: 443, reason: 'conn-refused' }]);
+    expect(data.filteredPorts).toEqual([{ port: 8080, reason: 'no-response' }]);
+    expect(data.hostStatus).toEqual(
       expect.objectContaining({ up: true, method: 'tcp-connect' })
     );
-    expect(response.body.scanSummary).toEqual(
+    expect(data.scanSummary).toEqual(
       expect.objectContaining({
         notShown: 'Not shown: 1 closed ports, 1 filtered ports.',
         closedCount: 1,
@@ -156,9 +158,10 @@ describe('ports module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.openPorts).toEqual([{ port: 80, banner: '', reason: 'syn-ack' }]);
-    expect(response.body.closedPorts).toEqual([{ port: 443, reason: 'conn-refused' }]);
-    expect(response.body.filteredPorts).toEqual([{ port: 8080, reason: 'no-response' }]);
+    const data = response.body.data;
+    expect(data.openPorts).toEqual([{ port: 80, banner: '', reason: 'syn-ack' }]);
+    expect(data.closedPorts).toEqual([{ port: 443, reason: 'conn-refused' }]);
+    expect(data.filteredPorts).toEqual([{ port: 8080, reason: 'no-response' }]);
   });
 
   it('maps reason field for connect, refusal, and timeout states', async () => {
@@ -170,9 +173,10 @@ describe('ports module', () => {
 
     const response = await invokeHandler(handler);
 
-    expect(response.body.openPorts[0].reason).toBe('syn-ack');
-    expect(response.body.closedPorts[0].reason).toBe('conn-refused');
-    expect(response.body.filteredPorts[0].reason).toBe('no-response');
+    const data = response.body.data;
+    expect(data.openPorts[0].reason).toBe('syn-ack');
+    expect(data.closedPorts[0].reason).toBe('conn-refused');
+    expect(data.filteredPorts[0].reason).toBe('no-response');
   });
 
   it('can surface a route-level failure payload', async () => {
@@ -232,13 +236,14 @@ describe('ports module', () => {
         body: JSON.stringify({ target: 'example.com', profile: 'quick' }),
       })
     );
-    expect(response.body.engine).toBe('nmap');
-    expect(response.body.profile).toBe('deep');
-    expect(response.body.openPorts[0].version).toBe('Apache httpd 2.4.58');
-    expect(response.body.openPorts[0].scripts).toEqual({ 'http-title': 'Example' });
-    expect(response.body.startTime).toBe('2026-04-08T00:00:00.000Z');
-    expect(response.body.endTime).toBe('2026-04-08T00:00:09.000Z');
-    expect(response.body.hostStatus).toEqual({ up: true, latency: 123, method: 'tcp-connect' });
+    const data = response.body.data;
+    expect(data.engine).toBe('nmap');
+    expect(data.profile).toBe('deep');
+    expect(data.openPorts[0].version).toBe('Apache httpd 2.4.58');
+    expect(data.openPorts[0].scripts).toEqual({ 'http-title': 'Example' });
+    expect(data.startTime).toBe('2026-04-08T00:00:00.000Z');
+    expect(data.endTime).toBe('2026-04-08T00:00:09.000Z');
+    expect(data.hostStatus).toEqual({ up: true, latency: 123, method: 'tcp-connect' });
   });
 
   it('flags CDN-backed results when all scanned ports are open', async () => {
@@ -257,9 +262,10 @@ describe('ports module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.behindProxy).toBe(true);
-    expect(response.body.proxyProvider).toBe('Cloudflare');
-    expect(response.body.note).toContain('behind a CDN/proxy');
+    const data = response.body.data;
+    expect(data.behindProxy).toBe(true);
+    expect(data.proxyProvider).toBe('Cloudflare');
+    expect(data.note).toContain('behind a CDN/proxy');
   });
 
   it('uses fewer default ports for quick profile than standard profile', async () => {
@@ -276,15 +282,17 @@ describe('ports module', () => {
       { portScanProfile: 'standard' }
     );
 
-    const quickTotal = quickResponse.body.openPorts.length
-      + quickResponse.body.closedPorts.length
-      + quickResponse.body.filteredPorts.length;
-    const standardTotal = standardResponse.body.openPorts.length
-      + standardResponse.body.closedPorts.length
-      + standardResponse.body.filteredPorts.length;
+    const quickData = quickResponse.body.data;
+    const standardData = standardResponse.body.data;
+    const quickTotal = quickData.openPorts.length
+      + quickData.closedPorts.length
+      + quickData.filteredPorts.length;
+    const standardTotal = standardData.openPorts.length
+      + standardData.closedPorts.length
+      + standardData.filteredPorts.length;
 
-    expect(quickResponse.body.profile).toBe('quick');
-    expect(standardResponse.body.profile).toBe('standard');
+    expect(quickData.profile).toBe('quick');
+    expect(standardData.profile).toBe('standard');
     expect(quickTotal).toBeLessThan(standardTotal);
   });
 

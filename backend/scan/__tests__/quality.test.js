@@ -21,8 +21,10 @@ function createResponseCapture() {
 
 async function loadHandlerWithAxios(mockGet) {
   jest.resetModules();
-  await jest.unstable_mockModule('axios', () => ({
-    default: { get: mockGet },
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: { get: mockGet },
+    httpWith: () => ({ get: mockGet }),
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
   }));
   const { handler } = await import('../quality.js');
   return handler;
@@ -57,8 +59,8 @@ describe('quality module', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body.success).toBe(true);
-    expect(response.body.lighthouseResult.categories.performance.score).toBe(0.92);
-    expect(response.body.duration_ms).toEqual(expect.any(Number));
+    expect(response.body.data.lighthouseResult.categories.performance.score).toBe(0.92);
+    expect(response.body.durationMs).toEqual(expect.any(Number));
   });
 
   it('returns a graceful note when the google api key is not configured', async () => {

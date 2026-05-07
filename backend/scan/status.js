@@ -22,13 +22,12 @@ const statusHandler = async (url) => {
 
   try {
     startTime = performance.now();
-    const response = await new Promise((resolve, reject) => {
-      const req = https.get(url, res => {
-        let data = '';
+    await new Promise((resolve, reject) => {
+      const req = https.get(url, (res) => {
         responseCode = res.statusCode;
-        res.on('data', chunk => {
-          data += chunk;
-        });
+        // Drain the response body so the socket can be released; the
+        // contents are intentionally discarded for an uptime probe.
+        res.on('data', () => {});
         res.on('end', () => {
           resolve(res);
         });

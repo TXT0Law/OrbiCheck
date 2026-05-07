@@ -30,11 +30,11 @@ describe('page-source module', () => {
     expect(response.statusCode).toBe(200);
     const body = response.body;
     expect(body.success).toBe(true);
-    expect(body.html).toContain('<!DOCTYPE html>');
-    expect(body.html).toContain('<html>');
-    expect(body.statusCode).toBe(200);
-    expect(body.contentLength).toBeGreaterThan(0);
-    expect(typeof body.duration_ms).toBe('number');
+    expect(body.data.html).toContain('<!DOCTYPE html>');
+    expect(body.data.html).toContain('<html>');
+    expect(body.data.statusCode).toBe(200);
+    expect(body.data.contentLength).toBeGreaterThan(0);
+    expect(typeof body.durationMs).toBe('number');
   });
 
   it('returns error structure for unreachable URL when mock fails', async () => {
@@ -60,7 +60,7 @@ describe('page-source module', () => {
     expect(response.statusCode).toBe(200);
     const body = response.body;
     expect(body.success).toBe(false);
-    expect(body.html).toBe('');
+    expect(body.data.html).toBe('');
     expect(body.error).toBeTruthy();
   });
 

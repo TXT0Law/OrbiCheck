@@ -1,9 +1,11 @@
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
+import { randomUUID } from 'crypto';
 
+import { logger } from './_common/logger.js';
 import { loadModules } from './registry.js';
-import { withTimeout } from './utils/timeout.js';
+import { runModule } from './runner.js';
 
 const PORT = parseInt(process.env.SCAN_SERVICE_PORT || '4000', 10);
 const TIMEOUT_MS = parseInt(process.env.API_TIMEOUT_LIMIT || '60000', 10);
@@ -11,12 +13,13 @@ const MODULE_TIMEOUT_MS = parseInt(process.env.MODULE_TIMEOUT_MS || '30000', 10)
 const EXTENDED_TIMEOUT_MS = parseInt(process.env.EXTENDED_MODULE_TIMEOUT_MS || '60000', 10);
 const EXTENDED_TIMEOUT_MODULES = new Set([
   'whois', // may retry after HK rate limit (~12s)
-  'screenshot', 'tech-stack', 'ports', 'trace-route', 'tls', 'cookies',
+  'screenshot', 'tech-stack', 'ports', 'tls', 'cookies',
 ]);
 const CORS_ORIGIN = process.env.API_CORS_ORIGIN || '*';
 const CORS_METHODS = ['GET', 'POST', 'OPTIONS'];
-const CORS_HEADERS = ['Content-Type', 'Accept'];
-const GENERIC_ERROR_MESSAGE = 'Scan service request failed';
+const CORS_HEADERS = ['Content-Type', 'Accept', 'X-Scan-Id', 'X-Trace-Id'];
+const SCAN_ID_HEADER = 'x-scan-id';
+const TRACE_ID_HEADER = 'x-trace-id';
 
 let modules = new Map();
 
@@ -24,49 +27,17 @@ function getAvailableModules() {
   return [...modules.keys()].sort();
 }
 
-async function runModuleWithFakeReqRes(handlerFn, url, scanOptions = {}) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
+function moduleTimeoutFor(name) {
+  return EXTENDED_TIMEOUT_MODULES.has(name) ? EXTENDED_TIMEOUT_MS : MODULE_TIMEOUT_MS;
+}
 
-    const finish = (payload) => {
-      if (!settled) {
-        settled = true;
-        resolve(payload);
-      }
-    };
-
-    const fakeReq = { query: { url }, body: { scanOptions } };
-    const fakeRes = {
-      headersSent: false,
-      statusCode: 200,
-      status(code) {
-        this.statusCode = code;
-        return this;
-      },
-      json(body) {
-        this.headersSent = true;
-        finish({ statusCode: this.statusCode, body });
-        return this;
-      },
-    };
-
-    Promise.resolve(handlerFn(fakeReq, fakeRes))
-      .then((maybeResult) => {
-        if (!settled) {
-          // Middleware handlers normally reply via res.json().
-          if (maybeResult && typeof maybeResult === 'object' && 'statusCode' in maybeResult && 'body' in maybeResult) {
-            finish(maybeResult);
-          } else {
-            finish({ statusCode: fakeRes.statusCode, body: maybeResult ?? null });
-          }
-        }
-      })
-      .catch((error) => {
-        if (!settled) {
-          reject(error);
-        }
-      });
-  });
+function extractRequestContext(req) {
+  const headerScanId = req.get ? req.get(SCAN_ID_HEADER) : (req.headers || {})[SCAN_ID_HEADER];
+  const headerTraceId = req.get ? req.get(TRACE_ID_HEADER) : (req.headers || {})[TRACE_ID_HEADER];
+  const scanId = (typeof headerScanId === 'string' && headerScanId.trim()) || randomUUID();
+  const traceId = (typeof headerTraceId === 'string' && headerTraceId.trim()) || scanId;
+  const requestLogger = logger.child({ scanId, traceId });
+  return { scanId, traceId, logger: requestLogger };
 }
 
 export function setModulesForTest(nextModules) {
@@ -83,9 +54,20 @@ export function createApp() {
     origin: CORS_ORIGIN,
     methods: CORS_METHODS,
     allowedHeaders: CORS_HEADERS,
+    exposedHeaders: ['X-Scan-Id', 'X-Trace-Id'],
     credentials: true,
   }));
   app.use(express.json());
+
+  // Trace context propagation: ensure every request has a scanId/traceId and
+  // echo them back so callers (Python backend / Celery) can correlate logs.
+  app.use((req, res, next) => {
+    const ctx = extractRequestContext(req);
+    req.context = ctx;
+    res.setHeader('X-Scan-Id', ctx.scanId);
+    res.setHeader('X-Trace-Id', ctx.traceId);
+    next();
+  });
 
   app.get('/health', (_req, res) => {
     res.json({
@@ -104,31 +86,31 @@ export function createApp() {
 
   app.get('/api/scan/:module', async (req, res) => {
     const moduleName = req.params.module;
-    const { url } = req.query;
+    const { url, ...rest } = req.query || {};
 
     if (!url || typeof url !== 'string') {
       return res.status(400).json({ error: 'Missing required query parameter: url' });
     }
 
-    const handlerFn = modules.get(moduleName);
-    if (!handlerFn) {
+    const handler = modules.get(moduleName);
+    if (!handler) {
       return res.status(404).json({
         error: `Unknown module: ${moduleName}`,
         available: getAvailableModules(),
       });
     }
 
-    try {
-      await handlerFn(req, res);
-    } catch (error) {
-      console.error('[scan-service] module execution failed', {
-        moduleName,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      if (!res.headersSent) {
-        res.status(500).json({ error: GENERIC_ERROR_MESSAGE });
-      }
-    }
+    const envelope = await runModule({
+      name: moduleName,
+      handler,
+      url,
+      scanOptions: rest,
+      timeoutMs: moduleTimeoutFor(moduleName),
+      logger: req.context.logger,
+      context: { scanId: req.context.scanId, traceId: req.context.traceId },
+    });
+
+    return res.status(envelope.statusCode || (envelope.success ? 200 : 500)).json(envelope);
   });
 
   app.post('/api/scan/batch', async (req, res) => {
@@ -155,53 +137,25 @@ export function createApp() {
     }
 
     const results = {};
-
     const tasks = moduleNames.map(async (name) => {
-      const startedAt = Date.now();
-      const handlerFn = modules.get(name);
-
-      if (!handlerFn) {
-        results[name] = {
-          success: false,
-          statusCode: 500,
-          data: { error: `Module ${name} not found` },
-          durationMs: 0,
-        };
-        return;
-      }
-
-      const moduleTimeout = EXTENDED_TIMEOUT_MODULES.has(name)
-        ? EXTENDED_TIMEOUT_MS
-        : MODULE_TIMEOUT_MS;
-
-      try {
-        const runPromise = runModuleWithFakeReqRes(handlerFn, url, scanOptions);
-        const output = await withTimeout(runPromise, moduleTimeout, name);
-        const success = output.statusCode >= 200 && output.statusCode < 400;
-
-        results[name] = {
-          success,
-          statusCode: output.statusCode,
-          data: output.body,
-          durationMs: Date.now() - startedAt,
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const timedOut = message.includes('timed out');
-        console.error('[scan-service] batch execution failed', {
-          module: name,
-          error: message,
-        });
-        results[name] = {
-          success: false,
-          statusCode: 408,
-          data: {
-            error: timedOut ? 'Module timed out' : GENERIC_ERROR_MESSAGE,
-            ...(timedOut ? { timedOut: true } : {}),
-          },
-          durationMs: Date.now() - startedAt,
-        };
-      }
+      const handler = modules.get(name);
+      const envelope = await runModule({
+        name,
+        handler,
+        url,
+        scanOptions,
+        timeoutMs: moduleTimeoutFor(name),
+        logger: req.context.logger,
+        context: { scanId: req.context.scanId, traceId: req.context.traceId },
+      });
+      results[name] = {
+        success: envelope.success,
+        statusCode: envelope.statusCode,
+        data: envelope.data,
+        durationMs: envelope.durationMs,
+        ...(envelope.error ? { error: envelope.error } : {}),
+        ...(envelope.timedOut ? { timedOut: true } : {}),
+      };
     });
 
     await Promise.allSettled(tasks);
@@ -225,16 +179,18 @@ export async function startServer() {
   modules = await loadModules();
 
   app.listen(PORT, () => {
-    console.log(`[scan-service] Running on http://localhost:${PORT}`);
-    console.log(`[scan-service] ${modules.size} modules loaded`);
-    console.log(`[scan-service] Timeout: ${TIMEOUT_MS}ms`);
-    console.log(`[scan-service] CORS origin: ${CORS_ORIGIN}`);
+    logger.info({
+      port: PORT,
+      modules: modules.size,
+      timeoutMs: TIMEOUT_MS,
+      corsOrigin: CORS_ORIGIN,
+    }, 'scan-service running');
   });
 }
 
 if (process.env.NODE_ENV !== 'test') {
   startServer().catch((error) => {
-    console.error('[scan-service] Failed to start:', error);
+    logger.error({ error: error?.message || String(error) }, 'scan-service failed to start');
     process.exit(1);
   });
 }

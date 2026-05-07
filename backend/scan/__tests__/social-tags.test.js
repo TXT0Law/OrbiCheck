@@ -21,8 +21,10 @@ function createResponseCapture() {
 
 async function loadHandlerWithAxios(mockGet) {
   jest.resetModules();
-  await jest.unstable_mockModule('axios', () => ({
-    default: { get: mockGet },
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: { get: mockGet },
+    httpWith: () => ({ get: mockGet }),
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
   }));
   const { handler } = await import('../social-tags.js');
   return handler;
@@ -59,10 +61,12 @@ describe('social-tags module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.title).toBe('Example');
-    expect(response.body.description).toBe('Example description');
-    expect(response.body.ogTitle).toBe('OG Example');
-    expect(response.body.twitterCard).toBe('summary_large_image');
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.title).toBe('Example');
+    expect(data.description).toBe('Example description');
+    expect(data.ogTitle).toBe('OG Example');
+    expect(data.twitterCard).toBe('summary_large_image');
   });
 
   it('returns null-ish metadata fields gracefully when tags are absent', async () => {
@@ -75,7 +79,8 @@ describe('social-tags module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual(
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual(
       expect.objectContaining({
         title: '',
         description: undefined,
@@ -84,7 +89,7 @@ describe('social-tags module', () => {
     );
   });
 
-  it('returns a 500 status payload when fetching fails', async () => {
+  it('returns an error envelope when fetching fails', async () => {
     const handler = await loadHandlerWithAxios(
       jest.fn().mockRejectedValue(new Error('network down'))
     );
@@ -92,7 +97,8 @@ describe('social-tags module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toBe(JSON.stringify({ error: 'Failed fetching data' }));
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toContain('Failed fetching data');
   });
 
   it('returns 400 when url query parameter is missing', async () => {

@@ -21,8 +21,10 @@ function createResponseCapture() {
 
 async function loadHandlerWithAxios(mockGet) {
   jest.resetModules();
-  await jest.unstable_mockModule('axios', () => ({
-    default: { get: mockGet },
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: { get: mockGet },
+    httpWith: () => ({ get: mockGet }),
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
   }));
   const { handler } = await import('../http-security.js');
   return handler;
@@ -56,7 +58,8 @@ describe('http-security module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({
       strictTransportPolicy: true,
       xFrameOptions: true,
       xContentTypeOptions: true,
@@ -75,7 +78,8 @@ describe('http-security module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({
       strictTransportPolicy: false,
       xFrameOptions: false,
       xContentTypeOptions: false,
@@ -84,7 +88,7 @@ describe('http-security module', () => {
     });
   });
 
-  it('returns a 500 payload when the upstream request fails', async () => {
+  it('returns an error envelope when the upstream request fails', async () => {
     const handler = await loadHandlerWithAxios(
       jest.fn().mockRejectedValue(new Error('network down'))
     );
@@ -92,7 +96,8 @@ describe('http-security module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toBe(JSON.stringify({ error: 'network down' }));
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toContain('network down');
   });
 
   it('returns 400 when url query parameter is missing', async () => {

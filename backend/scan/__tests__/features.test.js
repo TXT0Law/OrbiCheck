@@ -25,9 +25,10 @@ describe('features module', () => {
 
     const body = capturedBody ?? {};
     expect(body.success).toBe(true);
-    expect(Array.isArray(body.features)).toBe(true);
-    expect(body.features).toHaveLength(0);
-    const note = body.note || body.data?.note || '';
+    const data = body.data || {};
+    expect(Array.isArray(data.features)).toBe(true);
+    expect(data.features).toHaveLength(0);
+    const note = data.note || '';
     expect(note.toLowerCase()).toContain('not configured');
     expect(note).toMatch(/BUILT_WITH_API_KEY|\.env\.example/);
   });

@@ -1,6 +1,6 @@
-import axios from 'axios';
 import xml2js from 'xml2js';
 
+import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
 
 const PROVIDER_TIMEOUT_MS = parseInt(process.env.THREATS_PROVIDER_TIMEOUT_MS || '5000', 10);
@@ -28,10 +28,13 @@ const getGoogleSafeBrowsingResult = async (url) => {
   }
   try {
     const apiEndpoint = `https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${apiKey}`;
-    const response = await axios.post(apiEndpoint, buildSafeBrowsingBody(url), {
+    const response = await http.post(apiEndpoint, buildSafeBrowsingBody(url), {
       timeout: PROVIDER_TIMEOUT_MS,
       headers: { 'User-Agent': USER_AGENT },
     });
+    if (response.status >= 400) {
+      return { error: `Google Safe Browsing returned HTTP ${response.status}` };
+    }
     if (response.data && Array.isArray(response.data.matches) && response.data.matches.length > 0) {
       return { unsafe: true, details: response.data.matches };
     }
@@ -44,16 +47,20 @@ const getGoogleSafeBrowsingResult = async (url) => {
 const getUrlHausResult = async (url) => {
   try {
     const domain = new URL(url).hostname;
-    const response = await axios({
-      method: 'post',
-      url: 'https://urlhaus-api.abuse.ch/v1/host/',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': USER_AGENT,
+    const response = await http.post(
+      'https://urlhaus-api.abuse.ch/v1/host/',
+      `host=${domain}`,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': USER_AGENT,
+        },
+        timeout: PROVIDER_TIMEOUT_MS,
       },
-      timeout: PROVIDER_TIMEOUT_MS,
-      data: `host=${domain}`,
-    });
+    );
+    if (response.status >= 400) {
+      return { error: `URLHaus returned HTTP ${response.status}` };
+    }
     return response.data;
   } catch (error) {
     return { error: `Request to URLHaus failed: ${error.message}` };
@@ -64,10 +71,13 @@ const getPhishTankResult = async (url) => {
   try {
     const encodedUrl = Buffer.from(url).toString('base64');
     const endpoint = `https://checkurl.phishtank.com/checkurl/?url=${encodedUrl}`;
-    const response = await axios.post(endpoint, null, {
+    const response = await http.post(endpoint, null, {
       headers: { 'User-Agent': USER_AGENT },
       timeout: PROVIDER_TIMEOUT_MS,
     });
+    if (response.status >= 400) {
+      return { error: `Request to PhishTank failed: HTTP ${response.status}` };
+    }
     const parsed = await xml2js.parseStringPromise(response.data, { explicitArray: false });
     return parsed.response.results;
   } catch (error) {
@@ -88,10 +98,13 @@ const getCloudmersiveResult = async (url) => {
       Apikey: apiKey,
     };
     const data = `Url=${encodeURIComponent(url)}`;
-    const response = await axios.post(endpoint, data, {
+    const response = await http.post(endpoint, data, {
       headers,
       timeout: PROVIDER_TIMEOUT_MS,
     });
+    if (response.status >= 400) {
+      return { error: `Cloudmersive returned HTTP ${response.status}` };
+    }
     return response.data;
   } catch (error) {
     return { error: `Request to Cloudmersive failed: ${error.message}` };

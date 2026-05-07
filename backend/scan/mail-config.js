@@ -4,7 +4,7 @@ import middleware from './_common/middleware.js';
 
 const dnsPromises = dns.promises;
 
-const mailConfigHandler = async (url, event, context) => {
+const mailConfigHandler = async (url) => {
   try {
     const domain = new URL(url).hostname || new URL(url).pathname;
 

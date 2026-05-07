@@ -32,7 +32,7 @@ describe('txt-records module', () => {
     expect(response.body.success).toBe(true);
     expect(response.body.data.v).toEqual(expect.any(String));
     expect(response.body.data['google-site-verification']).toEqual(expect.any(String));
-    expect(response.body.duration_ms).toEqual(expect.any(Number));
+    expect(response.body.durationMs).toEqual(expect.any(Number));
   });
 
   it('returns empty TXT record data gracefully', async () => {
@@ -54,7 +54,7 @@ describe('txt-records module', () => {
     expect(response.statusCode).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.data).toEqual({});
-    expect(response.body.error).toBeNull();
+    expect(response.body.error).toBeUndefined();
   });
 
   it('masks unexpected module errors', async () => {

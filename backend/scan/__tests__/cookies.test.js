@@ -19,34 +19,50 @@ function createResponseCapture() {
   };
 }
 
-function createBrowserMock({ clientCookies = [], browserError = null }) {
-  return {
-    newContext: jest.fn().mockResolvedValue({
-      newPage: jest.fn().mockResolvedValue({
-        goto: jest.fn().mockImplementation(async () => {
-          if (browserError) throw browserError;
-        }),
-      }),
-      cookies: jest.fn().mockResolvedValue(clientCookies),
-    }),
+function createWithBrowserContextMock({ clientCookies = [], browserError = null }) {
+  const fakeContext = {
+    cookies: jest.fn().mockResolvedValue(clientCookies),
     close: jest.fn().mockResolvedValue(undefined),
   };
+  const fakePage = {
+    goto: jest.fn().mockImplementation(async () => {
+      if (browserError) throw browserError;
+    }),
+    isClosed: () => false,
+    close: jest.fn().mockResolvedValue(undefined),
+  };
+  return jest.fn(async (fn) => fn(fakeContext, fakePage));
 }
 
 async function loadHandlerWithMocks({ axiosResult, axiosError, clientCookies, browserError }) {
   jest.resetModules();
 
-  await jest.unstable_mockModule('axios', () => ({
-    default: {
-      get: axiosError
-        ? jest.fn().mockRejectedValue(axiosError)
-        : jest.fn().mockResolvedValue(axiosResult),
-    },
+  // The cookies.js module now uses _common/http.js (which validateStatus =>
+  // any). To preserve the original test for "request failed with status",
+  // map an `axiosError` with `error.response.status` into a fake successful
+  // resolution with that status code (since http never throws on HTTP 4xx).
+  const httpGetMock = (() => {
+    if (axiosError) {
+      const status = axiosError?.response?.status;
+      if (status) {
+        return jest.fn().mockResolvedValue({ status, headers: {} });
+      }
+      return jest.fn().mockRejectedValue(axiosError);
+    }
+    return jest.fn().mockResolvedValue({ ...axiosResult, status: axiosResult?.status || 200 });
+  })();
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: { get: httpGetMock },
+    httpWith: () => ({ get: httpGetMock }),
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
   }));
 
-  const browserMock = createBrowserMock({ clientCookies, browserError });
   await jest.unstable_mockModule('../_common/playwright-browser.js', () => ({
-    launchChromium: jest.fn().mockResolvedValue(browserMock),
+    withBrowserContext: createWithBrowserContextMock({ clientCookies, browserError }),
+    launchChromium: jest.fn(),
+    closeSharedBrowser: jest.fn(),
+    __resetBrowserSingletonForTests: jest.fn(),
+    BROWSER_MAX_CONTEXTS: 3,
   }));
 
   const { handler } = await import('../cookies.js');
@@ -78,9 +94,11 @@ describe('cookies module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.headerCookies).toEqual(['session=abc; HttpOnly']);
-    expect(response.body.clientCookies).toHaveLength(1);
-    expect(response.body.clientCookies[0].name).toBe('session');
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.headerCookies).toEqual(['session=abc; HttpOnly']);
+    expect(data.clientCookies).toHaveLength(1);
+    expect(data.clientCookies[0].name).toBe('session');
   });
 
   it('returns skipped when neither header nor browser cookies exist', async () => {
@@ -94,7 +112,8 @@ describe('cookies module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({ skipped: 'No cookies' });
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({ skipped: 'No cookies' });
   });
 
   it('returns an error object when the HTTP request fails', async () => {
@@ -109,8 +128,12 @@ describe('cookies module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.error).toContain('Request failed with status 500');
-    expect(response.body.error).toContain('upstream failure');
+    // cookies.js explicitly returns `{ error: '...' }` rather than throwing,
+    // so the envelope's `data` carries the error string. After P1-2 the
+    // module no longer surfaces the original axios error message; it
+    // detects 4xx/5xx via `response.status` from the shared http instance.
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.error).toContain('Request failed with status 500');
   });
 
   it('returns 400 when url query parameter is missing', async () => {
@@ -143,8 +166,9 @@ describe('cookies module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.headerCookies).toEqual(['lang=en; Path=/']);
-    expect(response.body.clientCookies).toBeNull();
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.headerCookies).toEqual(['lang=en; Path=/']);
+    expect(response.body.data.clientCookies).toBeNull();
   });
 
   it('returns skipped when axios returns no set-cookie and browser throws', async () => {
@@ -157,7 +181,8 @@ describe('cookies module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({ skipped: 'No cookies' });
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({ skipped: 'No cookies' });
   });
 
   it('is registered in module registry', async () => {

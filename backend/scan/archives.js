@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { http as axios } from './_common/http.js';
 import middleware from './_common/middleware.js';
 
 const convertTimestampToDate = (timestamp) => {

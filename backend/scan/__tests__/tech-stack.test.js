@@ -27,9 +27,10 @@ describe('tech-stack module', () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.body;
-    expect(Array.isArray(body.technologies)).toBe(true);
-    expect(body.technologies).toHaveLength(1);
-    expect(body.technologies[0].name).toBe('React');
+    expect(body.success).toBe(true);
+    expect(Array.isArray(body.data.technologies)).toBe(true);
+    expect(body.data.technologies).toHaveLength(1);
+    expect(body.data.technologies[0].name).toBe('React');
   });
 
   it('returns empty technologies when blocked or timed out', async () => {
@@ -49,7 +50,7 @@ describe('tech-stack module', () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.body;
-    expect(Array.isArray(body.technologies)).toBe(true);
-    expect(body.technologies).toHaveLength(0);
+    expect(Array.isArray(body.data.technologies)).toBe(true);
+    expect(body.data.technologies).toHaveLength(0);
   });
 });

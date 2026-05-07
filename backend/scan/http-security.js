@@ -1,11 +1,12 @@
-import axios from 'axios';
+import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
+import { normalizeUrl } from './_common/url.js';
 
 const httpsSecHandler = async (url) => {
-  const fullUrl = url.startsWith('http') ? url : `http://${url}`;
-  
+  const fullUrl = normalizeUrl(url, { defaultProtocol: 'http://' });
+
   try {
-    const response = await axios.get(fullUrl);
+    const response = await http.get(fullUrl);
     const headers = response.headers;
     return {
       strictTransportPolicy: headers['strict-transport-security'] ? true : false,
@@ -13,7 +14,7 @@ const httpsSecHandler = async (url) => {
       xContentTypeOptions: headers['x-content-type-options'] ? true : false,
       xXSSProtection: headers['x-xss-protection'] ? true : false,
       contentSecurityPolicy: headers['content-security-policy'] ? true : false,
-    }
+    };
   } catch (error) {
     return {
       statusCode: 500,

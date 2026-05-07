@@ -21,8 +21,10 @@ function createResponseCapture() {
 
 async function loadHandlerWithAxios(mockGet) {
   jest.resetModules();
-  await jest.unstable_mockModule('axios', () => ({
-    default: { get: mockGet },
+  await jest.unstable_mockModule('../_common/http.js', () => ({
+    http: { get: mockGet },
+    httpWith: () => ({ get: mockGet }),
+    HTTP_DEFAULT_TIMEOUT_MS: 1000,
   }));
   const { handler } = await import('../archives.js');
   return handler;
@@ -55,10 +57,12 @@ describe('archives module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.totalScans).toBe(3);
-    expect(response.body.changeCount).toBe(1);
-    expect(response.body.averagePageSize).toBe(1100);
-    expect(response.body.scanUrl).toBe('https://example.com');
+    expect(response.body.success).toBe(true);
+    const data = response.body.data;
+    expect(data.totalScans).toBe(3);
+    expect(data.changeCount).toBe(1);
+    expect(data.averagePageSize).toBe(1100);
+    expect(data.scanUrl).toBe('https://example.com');
   });
 
   it('returns a skipped payload when the site has no archive history', async () => {
@@ -71,7 +75,8 @@ describe('archives module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.skipped).toContain('never before been archived');
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.skipped).toContain('never before been archived');
   });
 
   it('returns an error payload when wayback lookup fails', async () => {
@@ -82,7 +87,8 @@ describe('archives module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.error).toContain('wayback unavailable');
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.error).toContain('wayback unavailable');
   });
 
   it('returns 400 when url query parameter is missing', async () => {

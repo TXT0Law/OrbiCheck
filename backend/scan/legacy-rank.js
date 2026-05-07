@@ -37,6 +37,9 @@ const ensureCsvDownloaded = () => {
       method: 'GET',
       url: FILE_URL,
       responseType: 'stream',
+      // Explicit timeout: the Umbrella zip is ~10 MB; set a generous ceiling
+      // so the streaming download cannot hang the worker indefinitely.
+      timeout: parseInt(process.env.LEGACY_RANK_DOWNLOAD_TIMEOUT_MS || '120000', 10),
     });
     await new Promise((resolve, reject) => {
       response.data

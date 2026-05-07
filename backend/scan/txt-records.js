@@ -1,7 +1,7 @@
 import dns from 'dns/promises';
 import middleware from './_common/middleware.js';
 
-const txtRecordHandler = async (url, event, context) => {
+const txtRecordHandler = async (url) => {
   try {
     const parsedUrl = new URL(url);
     

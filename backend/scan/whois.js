@@ -1,6 +1,7 @@
 import net from 'net';
 import psl from 'psl';
 
+import { logger } from './_common/logger.js';
 import middleware from './_common/middleware.js';
 
 const WHOIS_TIMEOUT_MS = parseInt(process.env.WHOIS_TIMEOUT_MS || '15000', 10);
@@ -249,7 +250,7 @@ async function whoisHandler(url) {
         }
       } catch (internicErr) {
         const msg = `${whoisErr?.message || whoisErr}, ${internicErr?.message || internicErr}`;
-        console.warn(`WHOIS lookup failed for ${domain}: ${msg}`);
+        logger.warn({ domain, error: msg }, 'whois: lookup failed');
       }
     }
 

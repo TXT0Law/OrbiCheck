@@ -65,8 +65,9 @@ describe('carbon module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.statistics.adjustedBytes).toBe(1024);
-    expect(response.body.scanUrl).toBe('https://example.com');
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.statistics.adjustedBytes).toBe(1024);
+    expect(response.body.data.scanUrl).toBe('https://example.com');
   });
 
   it('returns a skipped payload when carbon statistics are empty', async () => {
@@ -82,7 +83,8 @@ describe('carbon module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toBe(JSON.stringify({ skipped: 'Not enough info to get carbon data' }));
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.skipped).toBe('Not enough info to get carbon data');
   });
 
   it('returns a generic error when the upstream response is invalid', async () => {
@@ -98,7 +100,8 @@ describe('carbon module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(500);
-    expect(response.body).toEqual({ error: GENERIC_ERROR_MESSAGE });
+    expect(response.body.success).toBe(false);
+    expect(response.body.error).toBe(GENERIC_ERROR_MESSAGE);
   });
 
   it('returns 400 when url query parameter is missing', async () => {

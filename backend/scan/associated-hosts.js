@@ -4,7 +4,6 @@ import tls from 'tls';
 import middleware from './_common/middleware.js';
 
 const TLS_TIMEOUT_MS = 10000;
-const DNS_TIMEOUT_MS = 5000;
 
 /**
  * Discover hosts associated with the target domain via:

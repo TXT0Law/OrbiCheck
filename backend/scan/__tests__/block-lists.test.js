@@ -55,9 +55,11 @@ describe('block-lists module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(Array.isArray(response.body.blocklists)).toBe(true);
-    expect(response.body.blocklists.length).toBeGreaterThan(10);
-    expect(response.body.blocklists[0]).toEqual(
+    expect(response.body.success).toBe(true);
+    const blocklists = response.body.data.blocklists;
+    expect(Array.isArray(blocklists)).toBe(true);
+    expect(blocklists.length).toBeGreaterThan(10);
+    expect(blocklists[0]).toEqual(
       expect.objectContaining({
         server: expect.any(String),
         serverIp: expect.any(String),
@@ -65,10 +67,10 @@ describe('block-lists module', () => {
         isBlocked: expect.any(Boolean),
       }),
     );
-    const blockedRows = response.body.blocklists.filter((row) => row.isBlocked);
+    const blockedRows = blocklists.filter((row) => row.isBlocked);
     expect(blockedRows.length).toBeGreaterThan(0);
     expect(blockedRows.every((row) => row.state === 'blocked')).toBe(true);
-    const clearRows = response.body.blocklists.filter((row) => row.state === 'clear');
+    const clearRows = blocklists.filter((row) => row.state === 'clear');
     expect(clearRows.length).toBeGreaterThan(0);
     expect(clearRows.every((row) => row.isBlocked === false)).toBe(true);
   });
@@ -82,8 +84,10 @@ describe('block-lists module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.blocklists.every((row) => row.state === 'clear')).toBe(true);
-    expect(response.body.blocklists.every((row) => row.isBlocked === false)).toBe(true);
+    expect(response.body.success).toBe(true);
+    const blocklists = response.body.data.blocklists;
+    expect(blocklists.every((row) => row.state === 'clear')).toBe(true);
+    expect(blocklists.every((row) => row.isBlocked === false)).toBe(true);
   });
 
   it('treats ENOTFOUND on both record types as unknown (regression for false positives)', async () => {
@@ -95,8 +99,10 @@ describe('block-lists module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.blocklists.every((row) => row.state === 'unknown')).toBe(true);
-    expect(response.body.blocklists.every((row) => row.isBlocked === false)).toBe(true);
+    expect(response.body.success).toBe(true);
+    const blocklists = response.body.data.blocklists;
+    expect(blocklists.every((row) => row.state === 'unknown')).toBe(true);
+    expect(blocklists.every((row) => row.isBlocked === false)).toBe(true);
   });
 
   it('treats SERVFAIL on the A record as a deliberate block, without consulting AAAA', async () => {
@@ -109,8 +115,10 @@ describe('block-lists module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.blocklists.every((row) => row.state === 'blocked')).toBe(true);
-    expect(response.body.blocklists.every((row) => row.isBlocked === true)).toBe(true);
+    expect(response.body.success).toBe(true);
+    const blocklists = response.body.data.blocklists;
+    expect(blocklists.every((row) => row.state === 'blocked')).toBe(true);
+    expect(blocklists.every((row) => row.isBlocked === true)).toBe(true);
     expect(resolve6).not.toHaveBeenCalled();
   });
 
@@ -123,8 +131,10 @@ describe('block-lists module', () => {
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
-    expect(response.body.blocklists.every((row) => row.state === 'blocked')).toBe(true);
-    expect(response.body.blocklists.every((row) => row.isBlocked === true)).toBe(true);
+    expect(response.body.success).toBe(true);
+    const blocklists = response.body.data.blocklists;
+    expect(blocklists.every((row) => row.state === 'blocked')).toBe(true);
+    expect(blocklists.every((row) => row.isBlocked === true)).toBe(true);
   });
 
   it('queries DNS_SERVERS in parallel using Promise.allSettled', async () => {
