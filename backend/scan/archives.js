@@ -61,6 +61,15 @@ const getScanFrequency = (firstScan, lastScan, totalScans, changeCount) => {
   };
 };
 
+/**
+ * Scan module: Wayback Machine archive history (snapshot count, frequency,
+ * average page size). See `_common/types.js` for the inner-handler shape.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{firstScan?: string, lastScan?: string, totalScans: number,
+ *   changeCount?: number, scanFrequency?: object|null, averagePageSize?: number,
+ *   scans?: any, scanUrl?: string, error?: string, skipped?: string}>}
+ */
 const wayBackHandler = async (url) => {
   const cdxUrl = `https://web.archive.org/cdx/search/cdx?url=${url}&output=json&fl=timestamp,statuscode,digest,length,offset`;
 

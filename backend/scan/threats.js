@@ -111,6 +111,15 @@ const getCloudmersiveResult = async (url) => {
   }
 };
 
+/**
+ * Scan module: query 4 threat-intel providers (URLHaus, PhishTank,
+ * Cloudmersive, Google Safe Browsing) in parallel (P0-4) and aggregate
+ * verdicts.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{urlHaus?: object, phishTank?: object,
+ *   cloudmersive?: object, safeBrowsing?: object, error?: string}>}
+ */
 const threatsHandler = async (url) => {
   const [urlHaus, phishTank, cloudmersive, safeBrowsing] = await Promise.all([
     getUrlHausResult(url),

@@ -40,6 +40,13 @@ const isPgpSigned = (result) => {
   return false;
 };
 
+/**
+ * Scan module: fetch `/.well-known/security.txt` and parse the RFC-9116
+ * fields (Contact, Expires, Encryption, etc.).
+ *
+ * @param {string} urlParam Normalised target URL.
+ * @returns {Promise<{isPresent: boolean, fields?: object, error?: string}>}
+ */
 const securityTxtHandler = async (urlParam) => {
 
   let url;

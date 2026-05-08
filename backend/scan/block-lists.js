@@ -131,6 +131,15 @@ const checkDomainAgainstDnsServers = async (domain) => {
   });
 };
 
+/**
+ * Scan module: probe the domain against 17 well-known DNS-based block
+ * lists (Pi-hole / Cisco Umbrella / OpenDNS Family Shield / etc.) using
+ * the tri-state model from P0-3 (blocked / clear / unknown).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{blocklists: Array<{server: string, isBlocked: boolean,
+ *   state?: string, error?: string}>}>}
+ */
 export const blockListHandler = async (url) => {
   const domain = new URL(url).hostname;
   const results = await checkDomainAgainstDnsServers(domain);

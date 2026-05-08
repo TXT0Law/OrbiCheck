@@ -32,6 +32,14 @@ const extractLookupHost = (url) => {
   }
 };
 
+/**
+ * Scan module: resolve the IPv4 / IPv6 address for the target hostname
+ * and enrich it via `_common/ip-enrichment.js` (geo, ASN, ISP).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{ip?: string, ipv6?: string, geo?: object, asn?: object,
+ *   error?: string}>}
+ */
 const ipHandler = async (url) => {
   const address = extractLookupHost(url);
   const { ip } = await lookupAsync(address);

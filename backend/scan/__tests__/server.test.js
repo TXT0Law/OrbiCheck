@@ -93,4 +93,61 @@ describe('scan service routes', () => {
     // Trace id falls back to scan id when not explicitly provided.
     expect(response.headers['x-trace-id']).toBe(response.headers['x-scan-id']);
   });
+
+  // P3-2: Prometheus exposition endpoint
+  it('exposes Prometheus metrics under /metrics with default + module counters', async () => {
+    // Drive at least one module run so the counter is non-empty.
+    await request(app).get('/api/scan/ok').query({ url: 'https://example.com' });
+
+    const response = await request(app).get('/metrics');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/plain');
+    expect(response.text).toContain('scan_module_runs_total');
+    expect(response.text).toMatch(/scan_module_runs_total\{[^}]*module="ok"[^}]*\}/);
+    // Default Node.js process metrics carry the scan_ prefix from collectDefaultMetrics.
+    expect(response.text).toContain('scan_process_resident_memory_bytes');
+  });
+
+  // P3-3: config snapshot endpoint
+  it('returns a config snapshot under /api/scan/config', async () => {
+    const response = await request(app).get('/api/scan/config');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toHaveProperty('moduleTimeoutMs');
+    expect(response.body).toHaveProperty('extendedTimeoutMs');
+    expect(response.body).toHaveProperty('batchConcurrency');
+    expect(response.body).toHaveProperty('httpRetry');
+    expect(response.body.batchConcurrency).toBeGreaterThan(0);
+  });
+
+  // P3-4: batch concurrency throttling — verify cap is enforced when many
+  // modules are requested at once. We register 5 slow modules and set the
+  // limit to 2; the maximum simultaneously-active count must not exceed 2.
+  it('caps batch concurrency at SCAN_BATCH_CONCURRENCY (P3-4)', async () => {
+    process.env.SCAN_BATCH_CONCURRENCY = '2';
+    let inFlight = 0;
+    let peak = 0;
+    const slow = async (_req, res) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      inFlight -= 1;
+      res.status(200).json({ success: true, data: {} });
+    };
+    setModulesForTest(new Map([
+      ['m1', slow], ['m2', slow], ['m3', slow], ['m4', slow], ['m5', slow],
+    ]));
+
+    const response = await request(app)
+      .post('/api/scan/batch')
+      .send({ url: 'https://example.com', modules: ['m1', 'm2', 'm3', 'm4', 'm5'] });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.totalModules).toBe(5);
+    expect(response.body.successCount).toBe(5);
+    expect(peak).toBeLessThanOrEqual(2);
+
+    delete process.env.SCAN_BATCH_CONCURRENCY;
+  });
 });

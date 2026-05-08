@@ -2,6 +2,13 @@ import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
 import { normalizeUrl } from './_common/url.js';
 
+/**
+ * Scan module: check the standard security headers (CSP, X-Frame-Options,
+ * X-Content-Type-Options, Referrer-Policy, Permissions-Policy, etc.).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<object>} Header analysis with present/missing flags.
+ */
 const httpsSecHandler = async (url) => {
   const fullUrl = normalizeUrl(url, { defaultProtocol: 'http://' });
 

@@ -27,6 +27,14 @@ const FALLBACK_BUDGET_MS = Math.min(
  * from affecting the main scan service. Falls back to HTTP header hints
  * when Wappalyzer returns nothing or errors.
  */
+/**
+ * Scan module: identify the technology stack via Wappalyzer (run in a
+ * worker subprocess, see `tech-stack-worker.js`). Falls back to a
+ * lightweight heuristic detector when wappalyzer is unavailable.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{technologies?: Array, source?: string, error?: string}>}
+ */
 const techStackHandler = async (url) => {
   const result = await new Promise((resolve) => {
     const child = fork(WORKER_PATH, [url], {

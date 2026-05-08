@@ -9,6 +9,14 @@ const CARBON_REQUEST_TIMEOUT_MS = parseInt(
   10,
 );
 
+/**
+ * Scan module: estimate the page's carbon footprint using the Website
+ * Carbon Calculator API. Falls back gracefully when the page or API is
+ * unreachable. See `_common/types.js#ScanInnerHandler`.
+ *
+ * @param {string} rawUrl Normalised target URL.
+ * @returns {Promise<object>} Carbon API payload, `{error}`, or `{skipped}`.
+ */
 const carbonHandler = async (rawUrl) => {
   // Follow-up to P0-6 / P2: middleware already normalises the inbound URL,
   // but be defensive in case carbon.js is ever invoked through a code path

@@ -100,6 +100,14 @@ export const __resetLegacyRankCacheForTests = () => {
   cachedRanks = null;
 };
 
+/**
+ * Scan module: look up the target domain in the locally-cached Tranco /
+ * Cisco Umbrella top-1m CSV. Cache uses `os.tmpdir()` and a module-level
+ * promise lock to avoid concurrent downloads (P0-8).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{domain?: string, rank?: number, error?: string}>}
+ */
 const rankHandler = async (url) => {
   let domain;
   try {

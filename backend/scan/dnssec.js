@@ -57,6 +57,14 @@ async function fetchRecordWithFallback(domain, type) {
   throw lastError || new Error('All DoH providers failed');
 }
 
+/**
+ * Scan module: query DNSKEY / DS / RRSIG records over DoH (Google DNS)
+ * with `Promise.allSettled` so a single record type failure does not sink
+ * the whole module (P1-7).
+ *
+ * @param {string} rawUrl Normalised target URL.
+ * @returns {Promise<{DNSKEY?: object, DS?: object, RRSIG?: object}>}
+ */
 async function dnsSecHandler(rawUrl) {
   const domain = extractHostname(rawUrl) || rawUrl;
 

@@ -508,6 +508,16 @@ async function scanPortsWithNmap(domain, profile) {
   }
 }
 
+/**
+ * Scan module: probe a profile of TCP ports (quick / standard / deep) via
+ * either nmap (when `NMAP_SCANNER_URL` is set) or a native TCP-connect
+ * fallback. P2-3 redesigned the env-override + nmap-fallback decision tree.
+ *
+ * @param {string} url Normalised target URL.
+ * @param {object} request Per-request payload (carries `scanOptions`).
+ * @returns {Promise<{ports?: Array<{port: number, state: string,
+ *   service?: string}>, source?: string, error?: string}>}
+ */
 const portsHandler = async (url, request) => {
   const domain = new URL(url).hostname;
   const profile = normalizeProfile(

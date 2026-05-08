@@ -55,6 +55,13 @@ export function classifyLinks(html, pageUrl) {
   return { internal, external };
 }
 
+/**
+ * Scan module: fetch the homepage HTML and classify outgoing links into
+ * internal / external groups via `classifyLinks` + `isSameOrigin` (P2-7).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{internal?: object, external?: object, error?: string}>}
+ */
 const linkedPagesHandler = async (url) => {
   const response = await http.get(url);
   const html = response.data;

@@ -11,6 +11,13 @@ const TLS_TIMEOUT_MS = 10000;
  * 2. Reverse DNS (PTR records)
  * 3. Same-IP detection (resolve SAN domains, check if same IP)
  */
+/**
+ * Scan module: enumerate hostnames associated with the target via SSL SAN,
+ * reverse DNS, and same-IP discovery. See `_common/types.js#ScanInnerHandler`.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<object>} Domains grouped by discovery source.
+ */
 async function associatedHostsHandler(url) {
   const startTime = Date.now();
 

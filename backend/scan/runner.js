@@ -3,6 +3,7 @@
 // path (POST /api/scan/batch) share a single execution contract.
 
 import { logger as defaultLogger } from './_common/logger.js';
+import { observeModuleRun } from './_common/metrics.js';
 import { err, normaliseEnvelope } from './_common/result.js';
 
 const GENERIC_ERROR_MESSAGE = 'Scan service request failed';
@@ -64,6 +65,9 @@ export async function runModule({
     };
   }
 
+  // P3-2: track in-flight modules + completion counters/histograms so /metrics
+  // can answer "which module is the slowest p95?" without touching call sites.
+  const completeMetrics = observeModuleRun(name);
   const { signal, timeoutPromise, cancel } = createCancellableTimeout(timeoutMs);
   // Build a request-like object for the inner handler. Modules that were
   // already migrated to call `handler.runDirect()` get scanOptions/context
@@ -107,6 +111,7 @@ export async function runModule({
     envelope.durationMs = Date.now() - startedAt;
   }
 
+  completeMetrics(envelope);
   return envelope;
 }
 

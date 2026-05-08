@@ -14,6 +14,14 @@ const getPlaywrightCookies = async (url) => {
   });
 };
 
+/**
+ * Scan module: collect both HTTP-set cookies (Set-Cookie header) and
+ * client-side cookies via Playwright. See `_common/types.js#ScanInnerHandler`.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{httpCookies?: Array, clientCookies?: Array,
+ *   error?: string, skipped?: string}>}
+ */
 const cookieHandler = async (url) => {
   let headerCookies = null;
   let clientCookies = null;

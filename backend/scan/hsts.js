@@ -109,6 +109,14 @@ const requestOnce = (url, method) => new Promise((resolve) => {
   req.end();
 });
 
+/**
+ * Scan module: report HSTS posture (header presence, max-age,
+ * includeSubDomains, preload eligibility).
+ *
+ * @param {string} rawUrl Normalised target URL.
+ * @returns {Promise<{enabled?: boolean, preloadReady?: boolean,
+ *   maxAge?: number, includeSubDomains?: boolean, error?: string}>}
+ */
 const hstsHandler = async (rawUrl) => {
   const url = ensureHttps(rawUrl);
   let outcome = await requestOnce(url, 'HEAD');

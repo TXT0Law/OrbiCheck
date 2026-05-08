@@ -208,6 +208,18 @@ async function runTlsProbe(rawUrl, tlsModule) {
   };
 }
 
+/**
+ * Build a TLS scan handler (factory pattern allows the test suite to
+ * inject a mocked `tls` module). The returned handler probes multiple TLS
+ * versions via `tls.connect()` and reports negotiated protocol / cipher /
+ * cert chain (P0-2 replacement of the now-defunct Mozilla TLS Observatory).
+ *
+ * @param {object} tlsModule Node `tls` module (real or mocked).
+ * @returns {(rawUrl: string) => Promise<{
+ *   protocols?: object, cipher?: object, cert_chain?: Array,
+ *   error?: string, timedOut?: boolean
+ * }>}
+ */
 export const buildTlsHandler = (tlsModule) => async (rawUrl) => {
   const startedAt = Date.now();
   try {

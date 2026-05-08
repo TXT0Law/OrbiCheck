@@ -10,6 +10,13 @@ const resolveCaaAsync =
     ? (hostname) => dns.promises.resolveCaa(hostname)
     : util.promisify(dns.resolveCaa);
 
+/**
+ * Scan module: resolve A / AAAA / MX / NS / SOA / TXT / CAA records for
+ * the target host. See `_common/types.js#ScanInnerHandler`.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<object>} DNS record map keyed by record type.
+ */
 const dnsHandler = async (url) => {
   let hostname = url;
 

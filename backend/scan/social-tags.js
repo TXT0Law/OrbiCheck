@@ -4,6 +4,14 @@ import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
 import { normalizeUrl } from './_common/url.js';
 
+/**
+ * Scan module: extract OpenGraph / Twitter / favicon / generic meta tags
+ * from the target's HTML.
+ *
+ * @param {string} rawUrl Normalised target URL.
+ * @returns {Promise<{title?: string, description?: string,
+ *   openGraph?: object, twitter?: object, error?: string}>}
+ */
 const socialTagsHandler = async (rawUrl) => {
   const url = normalizeUrl(rawUrl, { defaultProtocol: 'http://' });
 

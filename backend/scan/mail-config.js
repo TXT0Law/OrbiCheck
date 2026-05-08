@@ -4,6 +4,14 @@ import middleware from './_common/middleware.js';
 
 const dnsPromises = dns.promises;
 
+/**
+ * Scan module: summarise the domain's email security posture (MX, SPF,
+ * DMARC, DKIM, BIMI).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{mx?: Array, spf?: object, dmarc?: object,
+ *   dkim?: object, bimi?: object, error?: string}>}
+ */
 const mailConfigHandler = async (url) => {
   try {
     const domain = new URL(url).hostname || new URL(url).pathname;

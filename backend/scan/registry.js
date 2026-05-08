@@ -2,6 +2,11 @@ import { readdir } from 'fs/promises';
 import { basename, dirname, extname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
+import {
+  getDisabledModules,
+  getEnabledModules,
+  isModuleEnabled,
+} from './_common/config.js';
 import { logger } from './_common/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,8 +36,20 @@ export async function loadModules() {
     .filter((file) => !file.startsWith('._'))
     .filter((file) => !EXCLUDED_FILES.has(file));
 
+  // P3-3: capture op-time toggles up-front so we can log them once instead of
+  // on every module — operators get a single, scannable line at boot.
+  const disabledList = getDisabledModules();
+  const enabledList = getEnabledModules();
+  const skipped = [];
+
   for (const file of jsFiles) {
     const moduleName = basename(file, '.js');
+
+    if (!isModuleEnabled(moduleName)) {
+      skipped.push(moduleName);
+      continue;
+    }
+
     const modulePath = pathToFileURL(join(__dirname, file)).href;
 
     try {
@@ -48,6 +65,17 @@ export async function loadModules() {
       const message = error instanceof Error ? error.message : String(error);
       logger.error({ file, error: message }, 'registry: failed to load module');
     }
+  }
+
+  if (skipped.length > 0) {
+    logger.info(
+      {
+        skipped: skipped.sort(),
+        disabledList,
+        enabledList,
+      },
+      'registry: modules skipped via SCAN_MODULES_DISABLED / SCAN_MODULES_ENABLED',
+    );
   }
 
   logger.info(

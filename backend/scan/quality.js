@@ -1,6 +1,12 @@
 import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
 
+/**
+ * Scan module: fetch Lighthouse / PageSpeed Insights metrics for the URL.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<object>} PageSpeed payload, `{error}`, or `{skipped}`.
+ */
 const qualityHandler = async (url) => {
   const startTime = Date.now();
   const apiKey = process.env.GOOGLE_CLOUD_API_KEY;
