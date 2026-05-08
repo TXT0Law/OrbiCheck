@@ -6,6 +6,14 @@ import { extractHostname } from './_common/url.js';
 // Probing arbitrary IPs for DoH was removed in favour of standard PTR/RDNS
 // resolution: probing CDN edge IPs over HTTPS produced near-zero useful data
 // and tripped IDS/abuse alarms in many corporate networks.
+/**
+ * Scan module: report PTR / RDNS info for the resolved IPs. The legacy DoH
+ * probing was removed in P1-6 to avoid abusive outbound traffic to random
+ * IPs.
+ *
+ * @param {string} rawUrl Normalised target URL.
+ * @returns {Promise<object>} `{ ips, ptr, ... }`.
+ */
 const dnsHandler = async (rawUrl) => {
   try {
     const domain = extractHostname(rawUrl) || rawUrl;

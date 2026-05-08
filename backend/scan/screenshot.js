@@ -13,6 +13,16 @@ const MIN_VIEWPORT = 320;
 const MAX_VIEWPORT_W = 3840;
 const MAX_VIEWPORT_H = 2160;
 
+/**
+ * Scan module: capture a Playwright screenshot of the target URL using a
+ * shared browser pool (P1-5). Returns the image as a base64-encoded data
+ * URI so the frontend can embed it directly.
+ *
+ * @param {string} targetUrl Normalised target URL.
+ * @param {object} req Per-request context (carries scanOptions for
+ *   per-request overrides like viewport / device emulation).
+ * @returns {Promise<{image?: string, error?: string}>}
+ */
 const screenshotHandler = async (targetUrl, req) => {
   const startTime = Date.now();
 

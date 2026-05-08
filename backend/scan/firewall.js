@@ -48,6 +48,14 @@ function inspectErrorResponse(error) {
   return null;
 }
 
+/**
+ * Scan module: detect WAF / CDN by inspecting both the success response
+ * headers and the *blocked* response (403/429/503 + signature) per P1-8.
+ * Signatures live in `_common/waf-signatures.js`.
+ *
+ * @param {string} rawUrl Normalised target URL.
+ * @returns {Promise<{firewall?: string, evidence?: object, error?: string}>}
+ */
 const firewallHandler = async (rawUrl) => {
   const url = normalizeUrl(rawUrl, { defaultProtocol: 'http://' });
 

@@ -2,6 +2,14 @@ import https from 'https';
 import { performance, PerformanceObserver } from 'perf_hooks';
 import middleware from './_common/middleware.js';
 
+/**
+ * Scan module: HEAD-check the URL and report HTTP status, response time,
+ * and observed Server header.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{statusCode?: number, statusText?: string,
+ *   responseTime?: number, isUp?: boolean, error?: string}>}
+ */
 const statusHandler = async (url) => {
   if (!url) {
     throw new Error('You must provide a URL query parameter!');

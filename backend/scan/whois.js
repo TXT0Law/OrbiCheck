@@ -246,6 +246,14 @@ function parseWhoisResponse(rawText) {
   return parsed;
 }
 
+/**
+ * Scan module: query WHOIS for the registrable domain. Uses the LRU cache
+ * (P2-4) and rate-limit-aware retry (Hong Kong WHOIS server backs off
+ * ~12s) to keep a high-traffic batch cheap.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<object>} Parsed WHOIS fields.
+ */
 async function whoisHandler(url) {
   const startTime = Date.now();
 

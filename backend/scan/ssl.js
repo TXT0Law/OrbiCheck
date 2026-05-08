@@ -4,6 +4,14 @@ import middleware from './_common/middleware.js';
 
 const SSL_TIMEOUT_MS = parseInt(process.env.SSL_TIMEOUT_MS || '15000', 10);
 
+/**
+ * Scan module: fetch the leaf SSL certificate via `tls.connect()` and
+ * report subject / issuer / valid-from / valid-to / SAN list.
+ *
+ * @param {string} urlString Normalised target URL.
+ * @returns {Promise<{subject?: object, issuer?: object, valid_from?: string,
+ *   valid_to?: string, subjectaltname?: string, error?: string}>}
+ */
 const sslHandler = async (urlString) => {
   const startTime = Date.now();
 

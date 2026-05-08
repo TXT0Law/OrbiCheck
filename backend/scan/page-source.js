@@ -16,6 +16,14 @@ const USER_AGENT =
   'AppleWebKit/537.36 (KHTML, like Gecko) ' +
   'Chrome/120.0.0.0 Safari/537.36';
 
+/**
+ * Scan module: fetch the raw HTML page source. Tolerates broken SSL
+ * (`rejectUnauthorized: false`) because OSINT must work on misconfigured
+ * sites — see http.js technical exemptions list.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{html?: string, statusCode?: number, error?: string}>}
+ */
 const pageSourceHandler = async (url) => {
   const startTime = Date.now();
 

@@ -28,6 +28,14 @@ function redactApiKey(value, apiKey) {
     .split(encoded).join('***REDACTED***');
 }
 
+/**
+ * Scan module: query BuiltWith Free API for technology features used by
+ * the target. The API key is auto-redacted from any returned error
+ * message (P2-9).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<object>} BuiltWith payload, `{error}`, or `{skipped}`.
+ */
 const featuresHandler = async (url) => {
   const startTime = Date.now();
   const apiKey = process.env.BUILT_WITH_API_KEY;

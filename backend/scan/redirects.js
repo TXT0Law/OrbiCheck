@@ -1,6 +1,13 @@
 import got from 'got';
 import middleware from './_common/middleware.js';
 
+/**
+ * Scan module: trace HTTP redirect chain for the target URL, including
+ * the final destination URL (P2-6).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{redirects: string[], finalStatus?: number, error?: string}>}
+ */
 const redirectsHandler = async (url) => {
   const redirects = [url];
   try {

@@ -17,6 +17,14 @@ async function findSitemapInRobotsTxt(url) {
   return null;
 }
 
+/**
+ * Scan module: fetch `/sitemap.xml`, parse with `xml2js`, and return
+ * declared URLs (with a hard limit so giant sitemaps don't blow memory).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{urls?: string[], total?: number, error?: string,
+ *   skipped?: string}>}
+ */
 const sitemapHandler = async (url) => {
   const defaultSitemapUrl = `${url}/sitemap.xml`;
 

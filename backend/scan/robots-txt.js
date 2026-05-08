@@ -31,6 +31,14 @@ const parseRobotsTxt = (content) => {
   return { robots: rules };
 }
 
+/**
+ * Scan module: fetch and parse `/robots.txt`, summarising disallow rules
+ * and sitemap declarations.
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<{robots?: object, sitemaps?: string[], error?: string,
+ *   skipped?: string}>}
+ */
 const robotsHandler = async function(url) {
   let parsedURL;
   try {

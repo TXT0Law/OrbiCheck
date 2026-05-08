@@ -1,6 +1,13 @@
 import dns from 'dns/promises';
 import middleware from './_common/middleware.js';
 
+/**
+ * Scan module: resolve TXT records and classify common ones (SPF, DMARC,
+ * verification tokens for Google / Microsoft / Apple, etc.).
+ *
+ * @param {string} url Normalised target URL.
+ * @returns {Promise<object>} TXT classification map.
+ */
 const txtRecordHandler = async (url) => {
   try {
     const parsedUrl = new URL(url);

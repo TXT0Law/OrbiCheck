@@ -2,19 +2,20 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { randomUUID } from 'crypto';
+import pLimit from 'p-limit';
 
+import {
+  describeConfig,
+  getBatchConcurrency,
+  getModuleTimeoutMs,
+} from './_common/config.js';
 import { logger } from './_common/logger.js';
+import { metricsRegistry, recordBatchRun } from './_common/metrics.js';
 import { loadModules } from './registry.js';
 import { runModule } from './runner.js';
 
 const PORT = parseInt(process.env.SCAN_SERVICE_PORT || '4000', 10);
 const TIMEOUT_MS = parseInt(process.env.API_TIMEOUT_LIMIT || '60000', 10);
-const MODULE_TIMEOUT_MS = parseInt(process.env.MODULE_TIMEOUT_MS || '30000', 10);
-const EXTENDED_TIMEOUT_MS = parseInt(process.env.EXTENDED_MODULE_TIMEOUT_MS || '60000', 10);
-const EXTENDED_TIMEOUT_MODULES = new Set([
-  'whois', // may retry after HK rate limit (~12s)
-  'screenshot', 'tech-stack', 'ports', 'tls', 'cookies',
-]);
 const CORS_ORIGIN = process.env.API_CORS_ORIGIN || '*';
 const CORS_METHODS = ['GET', 'POST', 'OPTIONS'];
 const CORS_HEADERS = ['Content-Type', 'Accept', 'X-Scan-Id', 'X-Trace-Id'];
@@ -28,7 +29,10 @@ function getAvailableModules() {
 }
 
 function moduleTimeoutFor(name) {
-  return EXTENDED_TIMEOUT_MODULES.has(name) ? EXTENDED_TIMEOUT_MS : MODULE_TIMEOUT_MS;
+  // P3-3: timeout resolution lives in `_common/config.js` so per-module
+  // overrides (`MODULE_TIMEOUT_TLS_MS=...`) and the extended-modules set
+  // don't have to be edited in two places.
+  return getModuleTimeoutMs(name);
 }
 
 function extractRequestContext(req) {
@@ -84,6 +88,24 @@ export function createApp() {
     });
   });
 
+  // P3-2: Prometheus scrape endpoint. Plain text exposition format so Grafana
+  // / VictoriaMetrics / Datadog OpenMetrics scrape can consume directly.
+  app.get('/metrics', async (_req, res) => {
+    try {
+      res.setHeader('Content-Type', metricsRegistry.contentType);
+      res.send(await metricsRegistry.metrics());
+    } catch (error) {
+      logger.error({ error: error?.message || String(error) }, 'metrics: failed to render');
+      res.status(500).send('# metrics rendering failed');
+    }
+  });
+
+  // Operator-friendly snapshot of the current config. Read-only; useful when
+  // diagnosing prod incidents like "is the env override active here?".
+  app.get('/api/scan/config', (_req, res) => {
+    res.json(describeConfig());
+  });
+
   app.get('/api/scan/:module', async (req, res) => {
     const moduleName = req.params.module;
     const { url, ...rest } = req.query || {};
@@ -137,7 +159,13 @@ export function createApp() {
     }
 
     const results = {};
-    const tasks = moduleNames.map(async (name) => {
+    // P3-4: cap per-batch concurrency. Default is 10 (configurable via
+    // SCAN_BATCH_CONCURRENCY) to prevent socket exhaustion when a batch
+    // requests all 34 modules against a slow target. Without a limit, a
+    // single hostile target could OOM the scan service via outbound
+    // connection storms.
+    const limit = pLimit(getBatchConcurrency());
+    const tasks = moduleNames.map((name) => limit(async () => {
       const handler = modules.get(name);
       const envelope = await runModule({
         name,
@@ -156,16 +184,18 @@ export function createApp() {
         ...(envelope.error ? { error: envelope.error } : {}),
         ...(envelope.timedOut ? { timedOut: true } : {}),
       };
-    });
+    }));
 
     await Promise.allSettled(tasks);
 
     const successCount = Object.values(results).filter((item) => item.success).length;
+    const failedCount = moduleNames.length - successCount;
+    recordBatchRun({ totalModules: moduleNames.length, failedCount });
     res.json({
       url,
       totalModules: moduleNames.length,
       successCount,
-      failedCount: moduleNames.length - successCount,
+      failedCount,
       results,
     });
   });
