@@ -42,12 +42,12 @@ describe('redirects module', () => {
     setModulesForTest(new Map());
   });
 
-  it('returns redirect chain captured from got hooks', async () => {
+  it('returns redirect chain captured from got hooks plus final URL', async () => {
     const mockGot = jest.fn(async (_url, options) => {
       const beforeRedirect = options.hooks.beforeRedirect[0];
       beforeRedirect({}, { headers: { location: 'https://www.example.com' } });
       beforeRedirect({}, { headers: { location: 'https://www.example.com/home' } });
-      return { statusCode: 200 };
+      return { statusCode: 200, url: 'https://www.example.com/home' };
     });
 
     const handler = await loadHandlerWithGot(mockGot);
@@ -62,7 +62,27 @@ describe('redirects module', () => {
     ]);
   });
 
-  it('returns only the original URL when there are no redirects', async () => {
+  it('appends the final URL when it differs from the last beforeRedirect target (P2-6)', async () => {
+    // Real got behaviour: server can rewrite the final hop (e.g. add trailing
+    // slash, normalise hostname). beforeRedirect captures the Location header
+    // value, but the resolved response.url is the truth. Make sure we add it.
+    const mockGot = jest.fn(async (_url, options) => {
+      const beforeRedirect = options.hooks.beforeRedirect[0];
+      beforeRedirect({}, { headers: { location: 'https://www.example.com/home' } });
+      return { statusCode: 200, url: 'https://www.example.com/home/' };
+    });
+
+    const handler = await loadHandlerWithGot(mockGot);
+    const response = await invokeHandler(handler);
+
+    expect(response.body.data.redirects).toEqual([
+      'https://example.com',
+      'https://www.example.com/home',
+      'https://www.example.com/home/',
+    ]);
+  });
+
+  it('returns only the original URL when there are no redirects and no final URL info', async () => {
     const handler = await loadHandlerWithGot(
       jest.fn().mockResolvedValue({ statusCode: 200 })
     );
@@ -74,6 +94,22 @@ describe('redirects module', () => {
     expect(response.body.data).toEqual({
       redirects: ['https://example.com'],
     });
+  });
+
+  it('does not double-append final URL when it matches the last hop (P2-6 dedupe)', async () => {
+    const mockGot = jest.fn(async (_url, options) => {
+      const beforeRedirect = options.hooks.beforeRedirect[0];
+      beforeRedirect({}, { headers: { location: 'https://www.example.com/home' } });
+      return { statusCode: 200, url: 'https://www.example.com/home' };
+    });
+
+    const handler = await loadHandlerWithGot(mockGot);
+    const response = await invokeHandler(handler);
+
+    expect(response.body.data.redirects).toEqual([
+      'https://example.com',
+      'https://www.example.com/home',
+    ]);
   });
 
   it('returns a generic error envelope when got throws', async () => {

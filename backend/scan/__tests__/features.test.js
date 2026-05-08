@@ -49,4 +49,34 @@ describe('features module', () => {
 
     await handler(fakeReq, fakeRes);
   });
+
+  // P2-9: BuiltWith API key handling regressions ----------------------------
+  describe('redactApiKey (P2-9 secret hygiene)', () => {
+    it('redacts the raw API key from arbitrary strings', async () => {
+      const { redactApiKey } = await import('../features.js');
+      const key = 'secret-builtwith-key-12345';
+      const url = `https://api.builtwith.com/free1/api.json?KEY=${key}&LOOKUP=example.com`;
+      expect(redactApiKey(url, key)).not.toContain(key);
+      expect(redactApiKey(url, key)).toContain('***REDACTED***');
+    });
+
+    it('redacts URL-encoded variants too', async () => {
+      const { redactApiKey } = await import('../features.js');
+      const key = 'has spaces+and/specials';
+      const encoded = encodeURIComponent(key);
+      expect(redactApiKey(`url ${encoded} more`, key)).not.toContain(encoded);
+    });
+
+    it('returns the input unchanged when no key is configured', async () => {
+      const { redactApiKey } = await import('../features.js');
+      expect(redactApiKey('plain string', '')).toBe('plain string');
+      expect(redactApiKey('plain string', undefined)).toBe('plain string');
+    });
+
+    it('handles non-string input safely', async () => {
+      const { redactApiKey } = await import('../features.js');
+      expect(redactApiKey(null, 'k')).toBeNull();
+      expect(redactApiKey(undefined, 'k')).toBeUndefined();
+    });
+  });
 });

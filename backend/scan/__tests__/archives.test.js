@@ -106,4 +106,69 @@ describe('archives module', () => {
 
     expect(modules.has('archives')).toBe(true);
   });
+
+  // P2-5 divide-by-zero regression --------------------------------------------
+  it('returns null scan-frequency fields instead of Infinity/NaN for single scan', async () => {
+    const handler = await loadHandlerWithAxios(
+      jest.fn().mockResolvedValue({
+        data: [
+          ['timestamp', 'statuscode', 'digest', 'length', 'offset'],
+          ['20240101000000', '200', 'abc', '1000', '0'],
+        ],
+      })
+    );
+
+    const response = await invokeHandler(handler);
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(true);
+    const freq = response.body.data.scanFrequency;
+    expect(freq).toBeDefined();
+    // dayFactor === 0 -> *all* derived metrics are null (regression).
+    expect(freq.daysBetweenScans).toBeNull();
+    expect(freq.daysBetweenChanges).toBeNull();
+    expect(freq.scansPerDay).toBeNull();
+    expect(freq.changesPerDay).toBeNull();
+  });
+
+  it('returns null scan-frequency fields when first==last timestamp (zero day-factor)', async () => {
+    const handler = await loadHandlerWithAxios(
+      jest.fn().mockResolvedValue({
+        data: [
+          ['timestamp', 'statuscode', 'digest', 'length', 'offset'],
+          ['20240101000000', '200', 'a', '1000', '0'],
+          ['20240101000000', '200', 'b', '1000', '1'],
+          ['20240101000000', '200', 'c', '1000', '2'],
+        ],
+      })
+    );
+
+    const response = await invokeHandler(handler);
+    const freq = response.body.data.scanFrequency;
+    // first==last -> dayFactor = 0 -> previously yielded Infinity in
+    // scansPerDay / changesPerDay. Now uniformly null.
+    expect(freq.scansPerDay).toBeNull();
+    expect(freq.changesPerDay).toBeNull();
+    expect(freq.daysBetweenScans).toBeNull();
+  });
+
+  it('produces finite scan-frequency numbers for multi-day scans with changes', async () => {
+    const handler = await loadHandlerWithAxios(
+      jest.fn().mockResolvedValue({
+        data: [
+          ['timestamp', 'statuscode', 'digest', 'length', 'offset'],
+          ['20240101000000', '200', 'a', '1000', '0'],
+          ['20240201000000', '200', 'b', '1100', '1'],
+          ['20240301000000', '200', 'b', '1200', '2'],
+          ['20240401000000', '200', 'c', '1300', '3'],
+        ],
+      })
+    );
+
+    const response = await invokeHandler(handler);
+    const freq = response.body.data.scanFrequency;
+    expect(Number.isFinite(freq.daysBetweenScans)).toBe(true);
+    expect(Number.isFinite(freq.scansPerDay)).toBe(true);
+    expect(freq.daysBetweenScans).toBeGreaterThan(0);
+    expect(freq.scansPerDay).toBeGreaterThan(0);
+  });
 });

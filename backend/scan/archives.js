@@ -33,16 +33,31 @@ const getAveragePageSize = (scans) => {
 const getScanFrequency = (firstScan, lastScan, totalScans, changeCount) => {
   const formatToTwoDecimal = num => parseFloat(num.toFixed(2));
 
-  const dayFactor = (lastScan - firstScan) / (1000 * 60 * 60 * 24);  
-  const daysBetweenScans = formatToTwoDecimal(dayFactor / totalScans);
-  const daysBetweenChanges = formatToTwoDecimal(dayFactor / changeCount);
-  const scansPerDay = formatToTwoDecimal((totalScans - 1) / dayFactor);
-  const changesPerDay = formatToTwoDecimal(changeCount / dayFactor);
+  const dayFactor = (lastScan - firstScan) / (1000 * 60 * 60 * 24);
+
+  // P2-5: guard against divide-by-zero. When the wayback history contains
+  // a single scan (or several scans captured at the exact same instant),
+  // `dayFactor` is 0 and the derived per-day metrics become Infinity/NaN
+  // which serialises to invalid JSON and broke the frontend table. Return
+  // null in those cases so the UI can render "—" instead.
+  if (!Number.isFinite(dayFactor) || dayFactor <= 0) {
+    return {
+      daysBetweenScans: null,
+      daysBetweenChanges: null,
+      scansPerDay: null,
+      changesPerDay: null,
+    };
+  }
+
   return {
-    daysBetweenScans,
-    daysBetweenChanges,
-    scansPerDay,
-    changesPerDay,
+    daysBetweenScans: totalScans > 0
+      ? formatToTwoDecimal(dayFactor / totalScans)
+      : null,
+    daysBetweenChanges: changeCount > 0
+      ? formatToTwoDecimal(dayFactor / changeCount)
+      : null,
+    scansPerDay: formatToTwoDecimal((totalScans - 1) / dayFactor),
+    changesPerDay: formatToTwoDecimal(changeCount / dayFactor),
   };
 };
 
