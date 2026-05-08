@@ -16,22 +16,71 @@ function sleep(ms) {
 const WHOIS_CACHE_TTL_MS = parseInt(process.env.WHOIS_CACHE_TTL_MS || '86400000', 10); // 24h default
 const WHOIS_CACHE_MAX = parseInt(process.env.WHOIS_CACHE_MAX || '500', 10);
 
-/** In-memory cache: domain -> { data, expiresAt } */
+/**
+ * In-memory LRU cache: domain -> { data, expiresAt }.
+ *
+ * P2-4: previous implementation used FIFO eviction (always dropped the oldest
+ * insertion regardless of access pattern), which evicted hot entries even when
+ * they were being queried repeatedly. We now exploit the JavaScript Map's
+ * insertion-ordered iteration: on every read, delete-and-reinsert moves the
+ * entry to the tail so the next eviction targets the truly least-recently-used
+ * key.
+ */
 const cache = new Map();
 
 function getCached(domain) {
-  const entry = cache.get(domain.toLowerCase());
-  if (!entry || Date.now() > entry.expiresAt) return null;
+  const key = domain.toLowerCase();
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    cache.delete(key);
+    return null;
+  }
+  // LRU bump: re-insert to mark as most-recently-used.
+  cache.delete(key);
+  cache.set(key, entry);
   return entry.data;
 }
 
 function setCache(domain, data) {
   const key = domain.toLowerCase();
-  if (cache.size >= WHOIS_CACHE_MAX) {
-    const oldest = cache.keys().next().value;
-    if (oldest) cache.delete(oldest);
+  if (cache.has(key)) {
+    cache.delete(key);
+  } else if (cache.size >= WHOIS_CACHE_MAX) {
+    const lruKey = cache.keys().next().value;
+    if (lruKey) cache.delete(lruKey);
   }
   cache.set(key, { data, expiresAt: Date.now() + WHOIS_CACHE_TTL_MS });
+}
+
+/** @internal Exported for tests only. Resets the in-memory LRU. */
+export function _resetWhoisCacheForTest() {
+  cache.clear();
+}
+
+/** @internal Exported for tests only. Returns current cache size. */
+export function _whoisCacheSizeForTest() {
+  return cache.size;
+}
+
+/** @internal Exported for tests only. Returns insertion-order keys. */
+export function _whoisCacheKeysForTest() {
+  return [...cache.keys()];
+}
+
+/** @internal Exported for tests only. Direct cache reader (does NOT bump LRU). */
+export function _whoisCachePeekForTest(domain) {
+  return cache.get(domain.toLowerCase()) || null;
+}
+
+/** @internal Exported for tests only. Bump LRU via the public read path. */
+export function _whoisCacheGetForTest(domain) {
+  return getCached(domain);
+}
+
+/** @internal Exported for tests only. Insert via the public write path. */
+export function _whoisCacheSetForTest(domain, data) {
+  setCache(domain, data);
 }
 
 function getBaseDomain(url) {

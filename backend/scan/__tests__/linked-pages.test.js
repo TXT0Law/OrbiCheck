@@ -98,4 +98,78 @@ describe('linked-pages module', () => {
 
     expect(modules.has('linked-pages')).toBe(true);
   });
+
+  // P2-7 hostname-based same-origin classification regression -----------------
+  describe('classifyLinks (P2-7 hostname check)', () => {
+    let classifyLinks;
+
+    beforeAll(async () => {
+      ({ classifyLinks } = await import('../linked-pages.js'));
+    });
+
+    it('treats links with the exact same hostname as internal', () => {
+      const html = `
+        <a href="/about">About</a>
+        <a href="https://example.com/contact">Contact</a>
+        <a href="https://example.com/team?x=1">Team</a>
+      `;
+      const { internal, external } = classifyLinks(html, 'https://example.com');
+      expect(internal).toEqual(expect.arrayContaining([
+        'https://example.com/about',
+        'https://example.com/contact',
+        'https://example.com/team?x=1',
+      ]));
+      expect(external).toEqual([]);
+    });
+
+    it('does NOT classify suffix-matching attacker domains as internal', () => {
+      const html = `
+        <a href="https://example.com.evil.com/x">Phish</a>
+        <a href="https://example.com/legit">Legit</a>
+      `;
+      const { internal, external } = classifyLinks(html, 'https://example.com');
+      expect(internal).toEqual(['https://example.com/legit']);
+      expect(external).toEqual(['https://example.com.evil.com/x']);
+    });
+
+    it('treats third-party http/https links as external', () => {
+      const html = `
+        <a href="https://github.com/orbicheck">Github</a>
+        <a href="http://google.com/">Google</a>
+        <a href="/internal">Internal</a>
+      `;
+      const { internal, external } = classifyLinks(html, 'https://example.com');
+      expect(internal).toEqual(['https://example.com/internal']);
+      // urlLib.resolve normalises bare hostnames to include a trailing slash;
+      // we just care that both end up in the external bucket.
+      expect(external).toEqual(expect.arrayContaining([
+        'https://github.com/orbicheck',
+        'http://google.com/',
+      ]));
+      expect(external).toHaveLength(2);
+    });
+
+    it('skips invalid href values without crashing', () => {
+      const html = `
+        <a href="">Empty</a>
+        <a href="javascript:void(0)">JS</a>
+        <a href="https://example.com/ok">Good</a>
+      `;
+      const { internal, external } = classifyLinks(html, 'https://example.com');
+      expect(internal).toEqual(['https://example.com/ok']);
+      expect(external).toEqual([]);
+    });
+
+    it('counts duplicates and sorts most-frequent first', () => {
+      const html = `
+        <a href="/a">A</a>
+        <a href="/b">B</a>
+        <a href="/a">A again</a>
+        <a href="/a">A again 2</a>
+      `;
+      const { internal } = classifyLinks(html, 'https://example.com');
+      expect(internal[0]).toBe('https://example.com/a');
+      expect(internal[1]).toBe('https://example.com/b');
+    });
+  });
 });

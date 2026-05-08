@@ -354,4 +354,66 @@ describe('ports module', () => {
 
     expect(modules.has('ports')).toBe(true);
   });
+
+  // P2-3 regressions ------------------------------------------------------
+  it('falls back to native scan with a logged warning when nmap scanner errors', async () => {
+    process.env.NMAP_SCANNER_URL = 'http://scanner:5000';
+    process.env.PORTS_TO_CHECK = '80,443,8080';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: 'scanner offline' }),
+    });
+
+    const warnSpy = jest.fn();
+    jest.resetModules();
+    await jest.unstable_mockModule('../_common/logger.js', () => ({
+      logger: { warn: warnSpy, info: () => {}, error: () => {}, debug: () => {}, child: () => ({ warn: warnSpy, info: () => {}, error: () => {}, debug: () => {} }) },
+    }));
+    await jest.unstable_mockModule('net', () => createNetMock({
+      80: { dataOnWrite: 'HTTP/1.1 200 OK\r\nServer: nginx\r\n\r\n' },
+      443: { errorCode: 'ECONNREFUSED' },
+      8080: { errorCode: 'ECONNREFUSED' },
+    }));
+    const { handler } = await import('../ports.js');
+    const response = await invokeHandler(handler, 'https://example.com');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.data.engine).toBe('native');
+    const fallbackWarnings = warnSpy.mock.calls.filter(([meta]) =>
+      typeof meta === 'object' && meta !== null && 'error' in meta,
+    );
+    expect(fallbackWarnings.length).toBeGreaterThan(0);
+  });
+
+  it('does not contain the misleading legacy "function timed out" string in source', async () => {
+    // Regression for P2-3: the previous implementation rewrote *every* error
+    // (including nmap fallback failures) to "The function timed out before
+    // completing." which masked the real root cause. Make sure that string
+    // is not reintroduced.
+    const fs = await import('fs');
+    const path = await import('path');
+    const { fileURLToPath } = await import('url');
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    const source = fs.readFileSync(path.join(dir, '..', 'ports.js'), 'utf8');
+    expect(source).not.toMatch(/function timed out before completing/i);
+  });
+
+  it('warns when PORTS_TO_CHECK env shadows an explicit profile', async () => {
+    process.env.PORTS_TO_CHECK = '80,443';
+    const warnSpy = jest.fn();
+    jest.resetModules();
+    await jest.unstable_mockModule('../_common/logger.js', () => ({
+      logger: { warn: warnSpy, info: () => {}, error: () => {}, debug: () => {} },
+    }));
+    await jest.unstable_mockModule('net', () => createNetMock({}));
+    const { getPortsForProfile } = await import('../ports.js');
+
+    getPortsForProfile('deep');
+
+    const overrideWarning = warnSpy.mock.calls.find(([_meta, msg]) =>
+      typeof msg === 'string' && msg.includes('overrides scan profile'),
+    );
+    expect(overrideWarning).toBeDefined();
+  });
 });

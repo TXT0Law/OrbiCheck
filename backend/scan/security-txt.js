@@ -46,7 +46,8 @@ const securityTxtHandler = async (urlParam) => {
   try {
     url = new URL(urlParam.includes('://') ? urlParam : 'https://' + urlParam);
   } catch (error) {
-    throw new Error('Invalid URL format');
+    // P2-8: keep the underlying URL parser failure as cause for diagnosis.
+    throw new Error('Invalid URL format', { cause: error });
   }
   url.pathname = '';
   
@@ -64,7 +65,9 @@ const securityTxtHandler = async (urlParam) => {
         };
       }
     } catch (error) {
-      throw new Error(error.message);
+      // P2-8: preserve the original cause/stack instead of dropping it via
+      // `throw new Error(error.message)`.
+      throw new Error(`Failed to fetch ${path}: ${error.message}`, { cause: error });
     }
   }
   

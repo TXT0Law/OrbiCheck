@@ -38,7 +38,9 @@ async function runDetection(url) {
       await wappalyzer.destroy();
     }
   } catch (err) {
-    throw new Error(err?.message || String(err));
+    // P2-8: forward the original cause so the parent process logger sees the
+    // wappalyzer failure context rather than a flattened message.
+    throw new Error(err?.message || String(err), { cause: err });
   }
 }
 

@@ -3,31 +3,40 @@ import urlLib from 'url';
 
 import { http } from './_common/http.js';
 import middleware from './_common/middleware.js';
-import { extractHostname } from './_common/url.js';
+import { isSameOrigin } from './_common/url.js';
 
-const linkedPagesHandler = async (url) => {
-  const response = await http.get(url);
-  const html = response.data;
+/**
+ * @internal Exported for direct unit testing of the link classification logic.
+ *
+ * Splits the rendered anchors of `html` into internal vs external collections,
+ * counting duplicate occurrences. Internal-vs-external is decided by
+ * hostname-equality (`isSameOrigin`) so that adversarial domains like
+ * `example.com.evil.com` are NOT mistaken for the target site
+ * (regression for P2-7 / P2-9).
+ *
+ * @param {string} html
+ * @param {string} pageUrl
+ * @returns {{ internal: string[], external: string[] }}
+ */
+export function classifyLinks(html, pageUrl) {
   const $ = cheerio.load(html);
   const internalLinksMap = new Map();
   const externalLinksMap = new Map();
-  const targetHost = extractHostname(url).toLowerCase();
 
-  // Get all links on the page
-  $('a[href]').each((i, link) => {
+  $('a[href]').each((_index, link) => {
     const href = $(link).attr('href');
-    const absoluteUrl = urlLib.resolve(url, href);
-    let absoluteHost = '';
+    if (!href) return;
+
+    const absoluteUrl = urlLib.resolve(pageUrl, href);
     try {
-      absoluteHost = new URL(absoluteUrl).hostname.toLowerCase();
+      // Validate parseability up-front; isSameOrigin tolerates failure but
+      // we want to skip outright invalid hrefs cleanly.
+      new URL(absoluteUrl);
     } catch {
       return;
     }
 
-    // P2-7 fix: same-origin via hostname comparison instead of fragile
-    // `absoluteUrl.startsWith(url)` (which mis-classifies
-    // example.com.evil.com/ as internal).
-    if (targetHost && absoluteHost === targetHost) {
+    if (isSameOrigin(pageUrl, absoluteUrl)) {
       const count = internalLinksMap.get(absoluteUrl) || 0;
       internalLinksMap.set(absoluteUrl, count + 1);
     } else if (href.startsWith('http://') || href.startsWith('https://')) {
@@ -36,12 +45,22 @@ const linkedPagesHandler = async (url) => {
     }
   });
 
-  // Sort by most occurrences, remove supplicates, and convert to array
-  const internalLinks = [...internalLinksMap.entries()].sort((a, b) => b[1] - a[1]).map(entry => entry[0]);
-  const externalLinks = [...externalLinksMap.entries()].sort((a, b) => b[1] - a[1]).map(entry => entry[0]);
+  const internal = [...internalLinksMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map((entry) => entry[0]);
+  const external = [...externalLinksMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map((entry) => entry[0]);
 
-  // If there were no links, then mark as skipped and show reasons
-  if (internalLinks.length === 0 && externalLinks.length === 0) {
+  return { internal, external };
+}
+
+const linkedPagesHandler = async (url) => {
+  const response = await http.get(url);
+  const html = response.data;
+  const { internal, external } = classifyLinks(html, url);
+
+  if (internal.length === 0 && external.length === 0) {
     return {
       statusCode: 400,
       body: {
@@ -53,7 +72,7 @@ const linkedPagesHandler = async (url) => {
     };
   }
 
-  return { internal: internalLinks, external: externalLinks };
+  return { internal, external };
 };
 
 export const handler = middleware(linkedPagesHandler);

@@ -2,6 +2,32 @@ import https from 'https';
 
 import middleware from './_common/middleware.js';
 
+// P2-9: BuiltWith's Free API (`free1`) only supports query-parameter auth via
+// `?KEY=<apikey>` — there is no header alternative. That means the API key is
+// embedded in the request URL. Mitigations applied here:
+//   1. The URL is constructed locally and passed straight to `https.get`; we
+//      never log it, never put it in an Error message, and never echo it in
+//      the response body.
+//   2. `redactApiKey()` strips the key from any error string before it
+//      crosses a module / log boundary, so even if upstream tooling
+//      accidentally captures the URL we will not leak the credential.
+//   3. The frontend / structured logger should treat the entire `apiUrl` as
+//      a secret. The middleware envelope produced by this handler does not
+//      include it.
+
+const BUILTWITH_API_HOST = 'api.builtwith.com';
+const BUILTWITH_FREE_API_PATH = '/free1/api.json';
+
+function redactApiKey(value, apiKey) {
+  if (!apiKey || typeof value !== 'string') return value;
+  // Defence in depth: also redact URL-encoded variants if upstream wrappers
+  // round-trip the key through encodeURIComponent.
+  const encoded = encodeURIComponent(apiKey);
+  return value
+    .split(apiKey).join('***REDACTED***')
+    .split(encoded).join('***REDACTED***');
+}
+
 const featuresHandler = async (url) => {
   const startTime = Date.now();
   const apiKey = process.env.BUILT_WITH_API_KEY;
@@ -29,7 +55,8 @@ const featuresHandler = async (url) => {
     };
   }
 
-  const apiUrl = `https://api.builtwith.com/free1/api.json?KEY=${apiKey}&LOOKUP=${encodeURIComponent(url)}`;
+  const apiUrl = `https://${BUILTWITH_API_HOST}${BUILTWITH_FREE_API_PATH}`
+    + `?KEY=${apiKey}&LOOKUP=${encodeURIComponent(url)}`;
 
   try {
     const response = await new Promise((resolve, reject) => {
@@ -44,13 +71,17 @@ const featuresHandler = async (url) => {
           if (res.statusCode >= 200 && res.statusCode <= 299) {
             resolve(data);
           } else {
-            reject(new Error(`Request failed with status code: ${res.statusCode}`));
+            // Status-only error: never include the URL/key.
+            reject(new Error(`BuiltWith API returned status ${res.statusCode}`));
           }
         });
       });
 
       req.on('error', error => {
-        reject(error);
+        // Wrap to ensure the key cannot leak via error.message even if
+        // Node ever decides to embed the URL in network errors.
+        const sanitisedMessage = redactApiKey(error.message || 'Network error', apiKey);
+        reject(new Error(sanitisedMessage));
       });
 
       req.end();
@@ -70,11 +101,14 @@ const featuresHandler = async (url) => {
     return {
       success: false,
       data: { Results: [], features: [] },
-      error: error.message || 'Feature detection failed',
+      error: redactApiKey(error.message || 'Feature detection failed', apiKey),
       duration_ms: Date.now() - startTime,
     };
   }
 };
+
+/** @internal Exported for testing. */
+export { redactApiKey };
 
 export const handler = middleware(featuresHandler);
 export default handler;

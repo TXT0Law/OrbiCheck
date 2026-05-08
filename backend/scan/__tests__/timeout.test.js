@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import { withTimeout } from '../utils/timeout.js';
 
 describe('module timeout wrapper', () => {
@@ -29,5 +29,35 @@ describe('module timeout wrapper', () => {
     expect(r2.status).toBe('rejected');
     expect(r3.status).toBe('fulfilled');
     expect(r3.value).toEqual({ id: 2 });
+  });
+
+  it('clears the pending timer once the inner promise settles (P2-2 regression)', async () => {
+    // Spy on clearTimeout so we can prove the wrapper actively cancels the
+    // pending timer instead of letting it fire naturally. Without this, fast
+    // modules would keep timers alive in the event loop and cause Jest's
+    // "Force exiting" warning.
+    const clearSpy = jest.spyOn(global, 'clearTimeout');
+
+    try {
+      await withTimeout(Promise.resolve('ok'), 60_000, 'fast');
+      // The spy is shared with other timers in the runtime, so we can only
+      // assert it was invoked at least once during this call.
+      expect(clearSpy).toHaveBeenCalled();
+    } finally {
+      clearSpy.mockRestore();
+    }
+  });
+
+  it('clears the timer even when the inner promise rejects', async () => {
+    const clearSpy = jest.spyOn(global, 'clearTimeout');
+
+    try {
+      await expect(
+        withTimeout(Promise.reject(new Error('boom')), 60_000, 'rejecter'),
+      ).rejects.toThrow('boom');
+      expect(clearSpy).toHaveBeenCalled();
+    } finally {
+      clearSpy.mockRestore();
+    }
   });
 });

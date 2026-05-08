@@ -63,7 +63,10 @@ const dnsHandler = async (url) => {
       CAA,
     };
   } catch (error) {
-    throw new Error(error.message);
+    // P2-8: preserve the original cause/stack so failed lookups are
+    // diagnosable from the structured logs instead of being flattened to a
+    // bare message.
+    throw new Error(`DNS resolution failed: ${error.message}`, { cause: error });
   }
 };
 

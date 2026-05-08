@@ -22,10 +22,11 @@ const txtRecordHandler = async (url) => {
 
   } catch (error) {
     if (error.code === 'ERR_INVALID_URL') {
-      throw new Error(`Invalid URL ${error}`);
-    } else {
-      throw error;
+      // P2-8: preserve the underlying URL parse error as `cause` instead of
+      // string-coercing the whole error object.
+      throw new Error(`Invalid URL: ${error.message}`, { cause: error });
     }
+    throw error;
   }
 };
 

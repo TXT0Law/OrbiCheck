@@ -1,5 +1,6 @@
 import net from 'net';
 
+import { logger } from './_common/logger.js';
 import middleware from './_common/middleware.js';
 
 const QUICK_PORTS = [
@@ -103,9 +104,17 @@ function sanitizeBanner(data) {
 }
 
 function getPortsForProfile(profile) {
-  const configuredPorts = parsePortsSetting(process.env.PORTS_TO_CHECK);
+  // P2-3: PORTS_TO_CHECK is a hard override (intentional escape hatch for
+  // operators), but log a warning whenever it shadows an explicit profile so
+  // misconfiguration is visible instead of silent.
   if (process.env.PORTS_TO_CHECK) {
-    return configuredPorts;
+    if (profile && profile !== DEFAULT_PORT_SCAN_PROFILE) {
+      logger.warn(
+        { profile, portsToCheck: process.env.PORTS_TO_CHECK },
+        'ports: PORTS_TO_CHECK env overrides scan profile',
+      );
+    }
+    return parsePortsSetting(process.env.PORTS_TO_CHECK);
   }
 
   return PROFILE_PORTS[normalizeProfile(profile)] || QUICK_PORTS;
@@ -506,21 +515,45 @@ const portsHandler = async (url, request) => {
       ?? request?.body?.scan_options?.port_scan_profile
   );
 
+  // P2-3: explicit decision tree. We only attempt nmap when the operator
+  // configured NMAP_SCANNER_URL; otherwise we go straight to the native TCP
+  // scan. Errors from either path are surfaced with their real message so we
+  // do not mislead callers with a generic "function timed out" string.
+  const useNmap = Boolean(process.env.NMAP_SCANNER_URL);
+
   try {
     return await Promise.race([
       (async () => {
-        try {
-          return await scanPortsWithNmap(domain, profile);
-        } catch (error) {
-          return await scanPortsWithNative(domain, profile);
+        if (useNmap) {
+          try {
+            return await scanPortsWithNmap(domain, profile);
+          } catch (nmapError) {
+            // P2-3: log the real reason the nmap scanner failed before we
+            // silently fall back to the native scan. Without this,
+            // misconfigurations or scanner outages were invisible.
+            logger.warn(
+              { domain, profile, error: nmapError?.message || String(nmapError) },
+              'ports: nmap scanner failed, falling back to native scan',
+            );
+          }
         }
+        return scanPortsWithNative(domain, profile);
       })(),
       delay(GLOBAL_TIMEOUT_MS).then(() => {
-        throw new Error('Port scan timed out before completing.');
+        const error = new Error(
+          `Port scan timed out after ${GLOBAL_TIMEOUT_MS}ms`,
+        );
+        error.code = 'PORTS_GLOBAL_TIMEOUT';
+        throw error;
       }),
     ]);
-  } catch {
-    return errorResponse('The function timed out before completing.');
+  } catch (error) {
+    if (error?.code === 'PORTS_GLOBAL_TIMEOUT') {
+      return errorResponse(error.message);
+    }
+    return errorResponse(
+      `Port scan failed: ${error?.message || String(error)}`,
+    );
   }
 };
 
