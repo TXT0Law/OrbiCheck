@@ -526,6 +526,31 @@ async def list_visual_captures(
     return SuccessResponse(data=data, meta=meta)
 
 
+@router.post(
+    "/{monitor_id}/visual/captures/now",
+    response_model=SuccessResponse[MonitorVisualCaptureResponse],
+    summary="Trigger a synchronous visual capture (V-2)",
+    description=(
+        "Forces an immediate screenshot via the scan service so the operator "
+        "can establish a baseline even when the periodic check has been "
+        "failing (Cloudflare interstitial, 5xx, TLS handshake error). "
+        "Rate-limited per monitor — see `MONITOR_VISUAL_CAPTURE_NOW_*` "
+        "settings."
+    ),
+)
+async def trigger_visual_capture_now(
+    monitor_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    capture = await monitor_service.trigger_visual_capture_now(
+        monitor_id, current_user.id, db, redis
+    )
+    await db.commit()
+    return SuccessResponse(data=capture)
+
+
 @router.get(
     "/{monitor_id}/visual/captures/{capture_id}/png",
     summary="Download capture PNG (authenticated)",

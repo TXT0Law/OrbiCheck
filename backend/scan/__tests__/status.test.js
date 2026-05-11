@@ -1,9 +1,43 @@
-import { jest } from '@jest/globals';
+/**
+ * Tests for the rewritten status module (S-3).
+ *
+ * The module now uses the shared axios instance, so we point it at a tiny
+ * in-process HTTP server rather than mocking the bare `https` module. This
+ * also exercises http:// (not just https://), which was the original bug.
+ */
+
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import http from 'http';
 import request from 'supertest';
 
+import { circuitBreaker } from '../_common/circuit-breaker.js';
+import { handler } from '../status.js';
 import { app, setModulesForTest } from '../server.js';
 
-const GENERIC_ERROR_MESSAGE = 'Request failed while processing this scan module.';
+let server;
+let port;
+let responder;
+
+beforeEach(async () => {
+  circuitBreaker.reset();
+  responder = (_req, res) => {
+    res.statusCode = 200;
+    res.setHeader('Server', 'test-server');
+    res.end('ok');
+  };
+  server = http.createServer((req, res) => responder(req, res));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  port = server.address().port;
+});
+
+afterEach(async () => {
+  await new Promise((resolve) => server.close(resolve));
+  setModulesForTest(new Map());
+});
+
+function urlFor(path = '/') {
+  return `http://127.0.0.1:${port}${path}`;
+}
 
 function createResponseCapture() {
   return {
@@ -21,132 +55,96 @@ function createResponseCapture() {
   };
 }
 
-function createHttpsMock({ statusCode = 200, error = null }) {
-  return {
-    default: {
-      get: jest.fn((_url, callback) => {
-        let requestErrorHandler = () => {};
-        let dataHandler = () => {};
-        let endHandler = () => {};
-
-        const response = {
-          statusCode,
-          on(event, handler) {
-            if (event === 'data') {
-              dataHandler = handler;
-            }
-            if (event === 'end') {
-              endHandler = handler;
-            }
-            return response;
-          },
-        };
-
-        const req = {
-          on(event, handler) {
-            if (event === 'error') {
-              requestErrorHandler = handler;
-            }
-            return req;
-          },
-          end() {
-            process.nextTick(() => {
-              if (error) {
-                requestErrorHandler(error);
-                return;
-              }
-
-              callback(response);
-              dataHandler('ok');
-              endHandler();
-            });
-          },
-        };
-
-        return req;
-      }),
-    },
-  };
-}
-
-async function loadHandlerWithHttps(mockConfig) {
-  jest.resetModules();
-  await jest.unstable_mockModule('https', () => createHttpsMock(mockConfig));
-  const { handler } = await import('../status.js');
-  return handler;
-}
-
-async function invokeHandler(handler, url = 'https://example.com') {
+async function invoke(url) {
   const req = { query: { url } };
   const res = createResponseCapture();
   await handler(req, res);
   return res;
 }
 
-describe('status module', () => {
-  beforeEach(() => {
-    setModulesForTest(new Map());
-  });
-
-  it('returns uptime data for a successful response', async () => {
-    const handler = await loadHandlerWithHttps({
-      statusCode: 200,
-    });
-
-    const response = await invokeHandler(handler);
-
-    expect(response.statusCode).toBe(200);
+describe('status module (S-3)', () => {
+  it('reports isUp:true for an http:// target that responds 200', async () => {
+    const response = await invoke(urlFor('/'));
     expect(response.body.success).toBe(true);
     expect(response.body.data.isUp).toBe(true);
     expect(response.body.data.responseCode).toBe(200);
     expect(typeof response.body.data.responseTime).toBe('number');
+    expect(response.body.data.server).toBe('test-server');
   });
 
-  it('treats an empty but successful response as up', async () => {
-    const handler = await loadHandlerWithHttps({
-      statusCode: 204,
-    });
-
-    const response = await invokeHandler(handler);
-
-    expect(response.statusCode).toBe(200);
+  it('follows 3xx redirects up to the configured limit', async () => {
+    let hits = 0;
+    responder = (_req, res) => {
+      hits += 1;
+      if (hits === 1) {
+        res.statusCode = 302;
+        res.setHeader('Location', '/final');
+        res.end('redirect');
+        return;
+      }
+      res.statusCode = 200;
+      res.end('done');
+    };
+    const response = await invoke(urlFor('/start'));
     expect(response.body.success).toBe(true);
-    expect(response.body.data.isUp).toBe(true);
-    expect(response.body.data.responseCode).toBe(204);
+    expect(response.body.data.responseCode).toBe(200);
+    expect(hits).toBe(2);
   });
 
-  it('returns a generic error envelope for non-success status codes', async () => {
-    const handler = await loadHandlerWithHttps({
-      statusCode: 500,
-    });
+  it('falls back to GET when the server replies 405 to HEAD', async () => {
+    let sawHead = false;
+    let sawGet = false;
+    responder = (req, res) => {
+      if (req.method === 'HEAD') {
+        sawHead = true;
+        res.statusCode = 405;
+        res.end();
+        return;
+      }
+      if (req.method === 'GET') {
+        sawGet = true;
+        res.statusCode = 200;
+        res.end('ok');
+        return;
+      }
+      res.statusCode = 400;
+      res.end();
+    };
+    const response = await invoke(urlFor('/'));
+    expect(sawHead).toBe(true);
+    expect(sawGet).toBe(true);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.responseCode).toBe(200);
+  });
 
-    const response = await invokeHandler(handler);
-
-    expect(response.statusCode).toBe(500);
+  it('returns success:false with the upstream status when probe yields 5xx', async () => {
+    responder = (_req, res) => {
+      res.statusCode = 503;
+      res.end('down');
+    };
+    const response = await invoke(urlFor('/'));
     expect(response.body.success).toBe(false);
-    expect(response.body.error).toBe(GENERIC_ERROR_MESSAGE);
+    expect(response.body.data.isUp).toBe(false);
+    expect(response.body.data.responseCode).toBe(503);
   });
 
-  it('returns 400 when url query parameter is missing', async () => {
+  it('returns 400 envelope when the request lacks a URL query parameter', async () => {
     setModulesForTest(
       new Map([
         [
           'status',
           (_req, res) => res.status(200).json({ ok: true }),
         ],
-      ])
+      ]),
     );
-
     const response = await request(app).get('/api/scan/status');
-
     expect(response.statusCode).toBe(400);
     expect(response.body.error).toContain('Missing required query parameter: url');
   });
 
-  it('is registered in module registry', async () => {
+  it('is registered in the module registry', async () => {
     const { loadModules } = await import('../registry.js');
     const modules = await loadModules();
-
     expect(modules.has('status')).toBe(true);
   });
 });

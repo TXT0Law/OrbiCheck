@@ -28,10 +28,58 @@ export function MonitorContentThresholdsForm({ value, onChange }: MonitorContent
 
   const normalizeOn = value.normalizeVolatileTokens !== false;
   const suppressDegradedOn = value.suppressDegradedPageChanges !== false;
+  const selectorCount = value.selectorExtraction?.selectors?.length ?? 0;
 
   return (
     <div className="space-y-4">
       <p className="text-xs leading-relaxed text-muted-foreground">{t.settingsIntervalProductNote}</p>
+
+      {/*
+        C-1: Selector scoping is now first-class because it is the single
+        most effective way to cut content_change noise on dynamic pages.
+        The old "<details>" advanced block was hiding the field from new
+        users who never realised they could opt-in.
+      */}
+      <section className="rounded-md border border-purple-200 bg-purple-50/40 p-3 dark:border-purple-900/40 dark:bg-purple-950/20">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            {t.settingsSelectorListLabel}
+          </span>
+          {selectorCount > 0 ? (
+            <span className="text-[11px] font-medium uppercase tracking-wide text-purple-700 dark:text-purple-200">
+              {selectorCount} active
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          {t.settingsSelectorAdvancedHint}
+        </p>
+        <textarea
+          className="mt-3 min-h-[88px] w-full rounded-md border-2 border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          placeholder={t.settingsSelectorListPlaceholder}
+          value={selectorText}
+          onChange={(e) => {
+            const next = e.target.value;
+            setSelectorText(next);
+            const lines = next
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            if (lines.length === 0) {
+              onChange({ ...value, selectorExtraction: null });
+            } else {
+              onChange({
+                ...value,
+                selectorExtraction: {
+                  selectors: lines,
+                  mergeStrategy: "concat_ordered",
+                },
+              });
+            }
+          }}
+        />
+      </section>
+
       <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
         <input
           type="checkbox"
@@ -159,39 +207,6 @@ export function MonitorContentThresholdsForm({ value, onChange }: MonitorContent
         />
         <span>{t.settingsSuppressDegradedLabel}</span>
       </label>
-      <details className="rounded-md border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-900 dark:text-zinc-100">
-          {t.settingsSelectorAdvancedTitle}
-        </summary>
-        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{t.settingsSelectorAdvancedHint}</p>
-        <label className="mt-3 flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-900 dark:text-white">{t.settingsSelectorListLabel}</span>
-          <textarea
-            className="min-h-[88px] rounded-md border-2 border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-            placeholder={t.settingsSelectorListPlaceholder}
-            value={selectorText}
-            onChange={(e) => {
-              const next = e.target.value;
-              setSelectorText(next);
-              const lines = next
-                .split("\n")
-                .map((s) => s.trim())
-                .filter(Boolean);
-              if (lines.length === 0) {
-                onChange({ ...value, selectorExtraction: null });
-              } else {
-                onChange({
-                  ...value,
-                  selectorExtraction: {
-                    selectors: lines,
-                    mergeStrategy: "concat_ordered",
-                  },
-                });
-              }
-            }}
-          />
-        </label>
-      </details>
     </div>
   );
 }

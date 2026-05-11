@@ -1698,11 +1698,19 @@ async def _run_content_change_capture(
 
 async def _run_visual_change_capture(
     monitor: Monitor,
-    check: MonitorCheck,
+    check: MonitorCheck | None,
     db: AsyncSession,
     redis: Redis | None,
-) -> None:
-    """Store PNG capture and optional MonitorVisualChange when dHash similarity drops."""
+    *,
+    is_diagnostic: bool = False,
+) -> MonitorVisualCapture | None:
+    """Store PNG capture and optional MonitorVisualChange when dHash similarity drops.
+
+    V-1: when ``is_diagnostic`` is True the capture is persisted but
+    excluded from baseline / change comparison. This is how we surface a
+    screenshot even when the HTTP probe failed (bot wall, 5xx, TLS error).
+    Returns the created capture (or ``None`` if no capture was stored).
+    """
     vth = get_visual_thresholds(monitor.capabilities)
     try:
         payload = await call_screenshot_service(
@@ -1715,20 +1723,22 @@ async def _run_visual_change_capture(
         logger.warning(
             "visual_screenshot_http_error",
             monitor_id=str(monitor.id),
+            is_diagnostic=is_diagnostic,
             error=str(exc)[:400],
         )
-        return
+        return None
     except Exception as exc:
         logger.warning(
             "visual_screenshot_unexpected",
             monitor_id=str(monitor.id),
+            is_diagnostic=is_diagnostic,
             error=str(exc)[:400],
         )
-        return
+        return None
 
     decoded = decode_screenshot_payload(payload)
     if decoded is None:
-        return
+        return None
     png_bytes, w_px, h_px = decoded
     try:
         phash = await asyncio.to_thread(compute_dhash_hex, png_bytes)
@@ -1736,13 +1746,23 @@ async def _run_visual_change_capture(
         logger.warning(
             "visual_dhash_failed",
             monitor_id=str(monitor.id),
+            is_diagnostic=is_diagnostic,
             error=str(exc)[:300],
         )
-        return
+        # Even when the hash fails we keep the bytes as a diagnostic so the
+        # operator can see what the page rendered like (no comparison).
+        if not is_diagnostic:
+            return None
+        phash = None
 
+    # Compare only against the most recent NON-diagnostic capture; diagnostic
+    # rows would otherwise pull the baseline in arbitrary directions.
     q_prev = (
         select(MonitorVisualCapture)
-        .where(MonitorVisualCapture.monitor_id == monitor.id)
+        .where(
+            MonitorVisualCapture.monitor_id == monitor.id,
+            MonitorVisualCapture.is_diagnostic.is_(False),
+        )
         .order_by(MonitorVisualCapture.captured_at.desc())
         .limit(1)
     )
@@ -1750,7 +1770,11 @@ async def _run_visual_change_capture(
 
     cap = MonitorVisualCapture(
         monitor_id=monitor.id,
-        check_id=check.id,
+        check_id=check.id if check is not None else None,
+        # Set the timestamp explicitly so callers that do not rely on the
+        # Postgres server_default (unit tests with mocked DB, V-2 capture-
+        # now) still see a usable `captured_at` on the returned row.
+        captured_at=datetime.now(timezone.utc),
         image_png=png_bytes,
         width_px=w_px,
         height_px=h_px,
@@ -1759,12 +1783,18 @@ async def _run_visual_change_capture(
         full_page=vth.full_page,
         perceptual_hash_hex=phash,
         dhash_algo="dhash",
+        is_diagnostic=is_diagnostic,
     )
     db.add(cap)
     await db.flush()
 
-    if prev is None or not prev.perceptual_hash_hex:
-        return
+    # Diagnostic captures intentionally short-circuit the change pipeline:
+    # we never want a Cloudflare interstitial to fire a visual_change alert.
+    if is_diagnostic:
+        return cap
+
+    if prev is None or not prev.perceptual_hash_hex or not phash:
+        return cap
 
     try:
         ham = hamming_between_hex(prev.perceptual_hash_hex, phash)
@@ -1773,7 +1803,7 @@ async def _run_visual_change_capture(
     sim = similarity_percent_from_hamming(ham)
 
     if not is_visual_change_detected(sim, vth.similarity_threshold_percent):
-        return
+        return cap
 
     summary: dict[str, Any] = {
         "hammingDistance": ham,
@@ -1813,6 +1843,7 @@ async def _run_visual_change_capture(
         },
         dispatch_webhook=False,
     )
+    return cap
 
 
 def _format_dns_diff_summary(diff: DnsRecordDiff) -> str:
@@ -2154,10 +2185,21 @@ async def execute_check(
                     ssl_result.error_message or "SSL probe failed"
                 )[:500]
 
-    if check.success and "visual_change" in enabled:
+    if "visual_change" in enabled:
         if "visual_change" not in evaluated:
             evaluated.append("visual_change")
-        await _run_visual_change_capture(monitor, check, db, redis)
+        vth_gate = get_visual_thresholds(monitor.capabilities)
+        if check.success:
+            await _run_visual_change_capture(monitor, check, db, redis)
+        elif vth_gate.capture_on_failure:
+            # V-1: even when the HTTP / SSL probe failed, take a screenshot
+            # so the operator can see what OrbiCheck observed (Cloudflare
+            # interstitial, 5xx error page, TLS handshake failure rendered
+            # by the browser, etc.). The capture is flagged is_diagnostic
+            # so it never participates in dHash similarity comparison.
+            await _run_visual_change_capture(
+                monitor, check, db, redis, is_diagnostic=True
+            )
 
     if "dns_change" in enabled:
         evaluated.append("dns_change")
@@ -2875,6 +2917,7 @@ def _visual_capture_to_response(c: MonitorVisualCapture) -> MonitorVisualCapture
         full_page=c.full_page,
         perceptual_hash_hex=c.perceptual_hash_hex,
         dhash_algo=c.dhash_algo,
+        is_diagnostic=bool(getattr(c, "is_diagnostic", False)),
     )
 
 
@@ -2887,6 +2930,72 @@ def _visual_change_to_response(ch: MonitorVisualChange) -> MonitorVisualChangeRe
         current_capture_id=str(ch.current_capture_id),
         diff_summary=ch.diff_summary if isinstance(ch.diff_summary, dict) else {},
     )
+
+
+async def trigger_visual_capture_now(
+    monitor_id: uuid.UUID,
+    user_id: int,
+    db: AsyncSession,
+    redis: Redis | None,
+) -> MonitorVisualCaptureResponse:
+    """V-2: Synchronously trigger a screenshot for `monitor_id`.
+
+    Rate-limit (default 5 / minute / monitor) via a Redis counter keyed on
+    the monitor. The capture is stored as a regular (non-diagnostic) row so
+    operators can use this to establish a baseline against a target that
+    keeps returning 5xx during the scheduled interval.
+
+    Raises:
+        NotFoundError: monitor doesn't exist or isn't owned by ``user_id``.
+        AppException: rate-limit exceeded.
+        ValidationError: visual_change capability isn't enabled.
+    """
+    monitor = await db.get(Monitor, monitor_id)
+    if not monitor or monitor.user_id != user_id:
+        raise NotFoundError(code="MONITOR_NOT_FOUND", message="Monitor not found")
+
+    capabilities = monitor.capabilities or {}
+    visual_cap = (
+        capabilities.get("visual_change") if isinstance(capabilities, dict) else None
+    )
+    if not isinstance(visual_cap, dict) or not visual_cap.get("enabled"):
+        raise ValidationError(
+            code="VISUAL_CHANGE_DISABLED",
+            message="visual_change capability is not enabled for this monitor",
+        )
+
+    if redis is not None:
+        rate_key = f"monitor:visual_capture_now:{monitor_id}"
+        limit_window = settings.MONITOR_VISUAL_CAPTURE_NOW_WINDOW_SECONDS
+        max_per_window = settings.MONITOR_VISUAL_CAPTURE_NOW_MAX_PER_WINDOW
+        current = int(await redis.incr(rate_key))
+        if current == 1:
+            await redis.expire(rate_key, limit_window)
+        if current > max_per_window:
+            ttl = int(await redis.ttl(rate_key) or 0)
+            raise AppException(
+                code="VISUAL_CAPTURE_RATE_LIMITED",
+                message=(
+                    "Manual capture limit reached for this monitor. "
+                    f"Try again in {max(ttl, 1)} seconds."
+                ),
+                status_code=429,
+            )
+
+    capture = await _run_visual_change_capture(
+        monitor,
+        None,
+        db,
+        redis,
+        is_diagnostic=False,
+    )
+    if capture is None:
+        raise AppException(
+            code="VISUAL_CAPTURE_FAILED",
+            message="Screenshot service did not return a usable image",
+            status_code=502,
+        )
+    return _visual_capture_to_response(capture)
 
 
 async def get_visual_captures(

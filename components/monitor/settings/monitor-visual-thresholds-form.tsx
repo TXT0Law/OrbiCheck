@@ -82,6 +82,38 @@ export function MonitorVisualThresholdsForm({ value, onChange }: MonitorVisualTh
           Full-page screenshot (taller pages, slower / larger images)
         </label>
       </div>
+      {/*
+        V-1: when this is on (default), failed probes still produce a
+        screenshot so operators can see what OrbiCheck saw (bot wall, 5xx,
+        TLS error). The capture is marked is_diagnostic server-side and
+        never participates in dHash similarity comparison.
+      */}
+      <div className="flex items-start gap-2">
+        <input
+          id="visual-capture-on-failure"
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300"
+          checked={value.captureOnFailure !== false}
+          onChange={(e) =>
+            onChange({
+              ...value,
+              captureOnFailure: e.target.checked,
+            })
+          }
+        />
+        <label
+          htmlFor="visual-capture-on-failure"
+          className="font-normal text-zinc-800 dark:text-zinc-200"
+        >
+          <span className="font-medium text-zinc-900 dark:text-white">
+            Capture screenshots even when the probe fails
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            Diagnostic captures (bot wall, 5xx, TLS error) are stored separately
+            and never affect the similarity baseline.
+          </span>
+        </label>
+      </div>
       <label className="flex flex-col gap-1">
         <span className="font-medium text-zinc-900 dark:text-white">
           Content ↔ screenshot time window (seconds)

@@ -310,6 +310,8 @@ class VisualThresholdsSchema(BaseModel):
     viewport_height: int | None = Field(default=720, ge=240, le=2160)
     full_page: bool | None = False
     content_correlation_window_seconds: int | None = Field(default=None, ge=0, le=86400)
+    # V-1: keep True so failed-probe screenshots are stored as diagnostics.
+    capture_on_failure: bool | None = True
 
 
 class VisualThresholdsUpdateSchema(BaseModel):
@@ -320,6 +322,7 @@ class VisualThresholdsUpdateSchema(BaseModel):
     viewport_height: int | None = Field(default=None, ge=240, le=2160)
     full_page: bool | None = None
     content_correlation_window_seconds: int | None = Field(default=None, ge=0, le=86400)
+    capture_on_failure: bool | None = None
 
 
 class PerCapabilityConfigSchema(BaseModel):
@@ -838,6 +841,9 @@ class MonitorVisualCaptureResponse(BaseModel):
     full_page: bool
     perceptual_hash_hex: str | None = None
     dhash_algo: str = "dhash"
+    # V-1: True for captures stored even though the probe failed (bot wall,
+    # TLS error, 5xx). Excluded from dHash baseline comparison.
+    is_diagnostic: bool = False
 
 
 class MonitorVisualChangeResponse(BaseModel):
