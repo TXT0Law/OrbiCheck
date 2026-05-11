@@ -125,6 +125,15 @@ class Settings(BaseSettings):
     MONITOR_MAX_VISUAL_CHANGES_PER_MONITOR: int = 500
     MONITOR_MAX_VISUAL_CHANGE_AGE_DAYS: int = 90
     MONITOR_MIN_RETAINED_VISUAL_CHANGES: int = 20
+    # V-1: cap how many diagnostic (failure-time) captures we retain per
+    # monitor before the retention task drops the oldest. Kept smaller than
+    # the success cap because Cloudflare interstitial screenshots have
+    # significantly lower diagnostic value past the first few examples.
+    MONITOR_MAX_DIAGNOSTIC_CAPTURES_PER_MONITOR: int = 10
+    # V-2: per-monitor rate limit for the manual "capture now" endpoint.
+    # Default mirrors middleReport §V-2 (5 per minute per monitor).
+    MONITOR_VISUAL_CAPTURE_NOW_WINDOW_SECONDS: int = 60
+    MONITOR_VISUAL_CAPTURE_NOW_MAX_PER_WINDOW: int = 5
     # Nearest visual capture search for content / screenshot linking (fallback to check_id).
     CONTENT_VISUAL_CORRELATION_WINDOW_SECONDS: int = 120
 
@@ -150,8 +159,11 @@ class Settings(BaseSettings):
     MONITOR_NORMALIZATION_CUSTOM_RULES_MAX: int = 10
     # P3: future rendered-DOM / headless pipeline. Must stay off unless explicitly enabled.
     MONITOR_RENDERED_DOM_PIPELINE_ENABLED: bool = False
-    # Optional CSS selector extraction for content_change (BeautifulSoup; server-side HTML only).
-    CONTENT_SELECTOR_EXTRACTION_ENABLED: bool = False
+    # CSS selector extraction for content_change (BeautifulSoup; server-side HTML only).
+    # C-1: defaulted to True so the UI's per-monitor "selectors" field can take
+    # effect without requiring an opt-in env flag. Operators that explicitly
+    # do not want selector scoping can still set this to False globally.
+    CONTENT_SELECTOR_EXTRACTION_ENABLED: bool = True
     CONTENT_SELECTOR_MAX_COUNT: int = 8
     CONTENT_SELECTOR_MAX_EXTRACTED_CHARS: int = 500_000
     CONTENT_SELECTOR_MAX_NODES_PER_SELECTOR: int = 2_000

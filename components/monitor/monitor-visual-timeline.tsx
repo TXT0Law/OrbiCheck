@@ -1,19 +1,27 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { monitorVisualCapturePngUrl } from "@/lib/api/monitors";
-import { useMonitorVisualCaptures, useMonitorVisualChanges } from "@/lib/hooks/use-monitors";
+import {
+  useMonitor,
+  useMonitorVisualCaptures,
+  useMonitorVisualChanges,
+  useTriggerVisualCaptureNow,
+} from "@/lib/hooks/use-monitors";
 import { cn } from "@/lib/utils";
 
 interface MonitorVisualTimelineProps {
   monitorId: string;
 }
+
+const CAPTURE_NOW_COOLDOWN_SECONDS = 12; // Matches MONITOR_MANUAL_CHECK_COOLDOWN by default; server enforces real limit.
 
 function formatTs(iso: string): string {
   try {
@@ -23,19 +31,69 @@ function formatTs(iso: string): string {
   }
 }
 
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "just now";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remSec = Math.round(seconds % 60);
+  if (minutes < 60) return remSec ? `${minutes}m ${remSec}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remMin = minutes % 60;
+  return remMin ? `${hours}h ${remMin}m` : `${hours}h`;
+}
+
+function computeNextCaptureLabel(
+  lastCheckAtIso: string | null | undefined,
+  intervalSeconds: number | null | undefined,
+): { label: string; etaSeconds: number | null } {
+  if (!intervalSeconds || intervalSeconds <= 0) {
+    return { label: "Waiting for the first scheduled check", etaSeconds: null };
+  }
+  if (!lastCheckAtIso) {
+    return {
+      label: "First check has not run yet — usually within the next minute.",
+      etaSeconds: null,
+    };
+  }
+  const last = new Date(lastCheckAtIso).getTime();
+  if (Number.isNaN(last)) {
+    return { label: "Next capture is scheduled by the monitor interval.", etaSeconds: null };
+  }
+  const nextMs = last + intervalSeconds * 1000;
+  const etaSeconds = Math.max(0, (nextMs - Date.now()) / 1000);
+  return {
+    label: `Next automatic capture in ~${formatDuration(etaSeconds)}`,
+    etaSeconds,
+  };
+}
+
 export function MonitorVisualTimeline({ monitorId }: MonitorVisualTimelineProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [wipePct, setWipePct] = useState(50);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
 
+  const monitorQ = useMonitor(monitorId);
   const changesQ = useMonitorVisualChanges(monitorId, { limit: 50, page: 1 });
   const capturesQ = useMonitorVisualCaptures(monitorId, { limit: 30, page: 1 });
+  const captureNowMutation = useTriggerVisualCaptureNow(monitorId);
 
-  const changes = changesQ.data?.data ?? [];
-  const captures = capturesQ.data?.data ?? [];
+  // Memoising the empty fallback prevents the `useMemo`s below from
+  // re-running on every render when the queries return `undefined`.
+  const changes = useMemo(() => changesQ.data?.data ?? [], [changesQ.data?.data]);
+  const captures = useMemo(() => capturesQ.data?.data ?? [], [capturesQ.data?.data]);
+
+  useEffect(() => {
+    if (cooldownRemaining <= 0) return;
+    const id = setInterval(() => {
+      setCooldownRemaining((s) => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [cooldownRemaining]);
 
   const selected = useMemo(
     () => changes.find((c) => c.id === selectedId) ?? changes[0] ?? null,
-    [changes, selectedId]
+    [changes, selectedId],
   );
 
   const beforeUrl = selected
@@ -46,6 +104,39 @@ export function MonitorVisualTimeline({ monitorId }: MonitorVisualTimelineProps)
     : null;
 
   const loading = changesQ.isLoading || capturesQ.isLoading;
+
+  const monitor = monitorQ.data;
+  const baselineCapture = useMemo(() => {
+    const successful = captures.filter((c) => c.isDiagnostic !== true);
+    if (successful.length === 0) return null;
+    return successful[successful.length - 1];
+  }, [captures]);
+
+  const totals = useMemo(() => {
+    const success = captures.filter((c) => c.isDiagnostic !== true).length;
+    const diagnostic = captures.filter((c) => c.isDiagnostic === true).length;
+    return { success, diagnostic };
+  }, [captures]);
+
+  const { label: nextCaptureLabel } = computeNextCaptureLabel(
+    monitor?.lastCheckAt,
+    monitor?.intervalSeconds,
+  );
+
+  const triggerCaptureNow = async () => {
+    setActionError(null);
+    try {
+      await captureNowMutation.mutateAsync();
+      setCooldownRemaining(CAPTURE_NOW_COOLDOWN_SECONDS);
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message ? err.message : "Capture failed";
+      setActionError(message);
+    }
+  };
+
+  const captureNowDisabled =
+    captureNowMutation.isPending || cooldownRemaining > 0;
 
   if (loading) {
     return (
@@ -69,8 +160,9 @@ export function MonitorVisualTimeline({ monitorId }: MonitorVisualTimelineProps)
         <CardContent className="p-0">
           {changes.length === 0 ? (
             <p className="px-6 pb-6 text-sm text-muted-foreground">
-              No visual regressions detected yet. Screenshots are stored on each successful check
-              when this capability is enabled; the first capture establishes the baseline.
+              No visual regressions detected yet. Screenshots are stored on each successful
+              check when this capability is enabled; the first capture establishes the
+              baseline.
             </p>
           ) : (
             <ScrollArea className="h-[320px] px-6">
@@ -91,7 +183,7 @@ export function MonitorVisualTimeline({ monitorId }: MonitorVisualTimelineProps)
                           "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
                           active
                             ? "border-purple-500 bg-purple-50 dark:bg-purple-950/40"
-                            : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900/60"
+                            : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900/60",
                         )}
                       >
                         <div className="font-medium text-zinc-900 dark:text-zinc-100">
@@ -166,31 +258,97 @@ export function MonitorVisualTimeline({ monitorId }: MonitorVisualTimelineProps)
           )}
 
           <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Recent captures
-            </h4>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Recent captures
+                </h4>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {totals.success} successful · {totals.diagnostic} diagnostic
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={captureNowDisabled}
+                  onClick={triggerCaptureNow}
+                  data-testid="visual-capture-now-button"
+                >
+                  {captureNowMutation.isPending ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Capturing…
+                    </span>
+                  ) : cooldownRemaining > 0 ? (
+                    <span>Capture now ({cooldownRemaining}s)</span>
+                  ) : (
+                    <span>Capture now</span>
+                  )}
+                </Button>
+                <span className="text-[11px] text-muted-foreground">
+                  {nextCaptureLabel}
+                </span>
+              </div>
+            </div>
+            {actionError ? (
+              <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
+                {actionError}
+              </p>
+            ) : null}
             {captures.length === 0 ? (
-              <p className="mt-2 text-sm text-muted-foreground">
-                No captures yet. Trigger a check or wait for the next scheduled run. Failures (bot
-                walls, timeouts) may skip storage.
+              <p className="mt-3 text-sm text-muted-foreground">
+                No captures yet. Click <strong>Capture now</strong> to trigger a synchronous
+                screenshot, or wait for the next scheduled check. Failures (bot walls,
+                timeouts) are still stored as diagnostic captures so you can see what the
+                target looked like.
               </p>
             ) : (
-              <ul className="mt-2 flex flex-wrap gap-2">
-                {captures.slice(0, 12).map((c) => (
-                  <li
-                    key={c.id}
-                    className="overflow-hidden rounded border border-zinc-200 dark:border-zinc-700"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={monitorVisualCapturePngUrl(monitorId, c.id)}
-                      alt=""
-                      width={120}
-                      height={68}
-                      className="h-16 w-28 object-cover"
-                    />
-                  </li>
-                ))}
+              <ul className="mt-3 flex flex-wrap gap-2">
+                {captures.slice(0, 12).map((c) => {
+                  const isBaseline = baselineCapture?.id === c.id;
+                  const isDiagnostic = c.isDiagnostic === true;
+                  return (
+                    <li
+                      key={c.id}
+                      className={cn(
+                        "relative overflow-hidden rounded border",
+                        isDiagnostic
+                          ? "border-amber-300/70 dark:border-amber-700/70"
+                          : "border-zinc-200 dark:border-zinc-700",
+                      )}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={monitorVisualCapturePngUrl(monitorId, c.id)}
+                        alt=""
+                        width={120}
+                        height={68}
+                        className={cn(
+                          "h-16 w-28 object-cover",
+                          isDiagnostic && "opacity-70 grayscale",
+                        )}
+                      />
+                      {isBaseline ? (
+                        <Badge
+                          variant="secondary"
+                          className="absolute left-1 top-1 px-1 py-0 text-[10px] uppercase tracking-wide"
+                        >
+                          Baseline
+                        </Badge>
+                      ) : null}
+                      {isDiagnostic ? (
+                        <Badge
+                          variant="outline"
+                          className="absolute right-1 top-1 border-amber-400 bg-amber-50 px-1 py-0 text-[10px] uppercase tracking-wide text-amber-700 dark:border-amber-600 dark:bg-amber-950/60 dark:text-amber-200"
+                        >
+                          Failed
+                        </Badge>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

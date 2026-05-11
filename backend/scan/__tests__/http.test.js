@@ -1,11 +1,14 @@
 /**
- * Integration tests for `_common/http.js` (TASK-P3-5).
+ * Integration tests for `_common/http.js` (TASK-P3-5, updated for S-1/S-2).
  *
  * Spins up a tiny in-process HTTP server and verifies that the shared
  * axios instance:
  *
- *   - retries idempotent requests on 5xx and 429 responses,
- *   - eventually surfaces the *last* response when retries are exhausted,
+ *   - retries idempotent requests on 429 responses,
+ *   - by default leaves 5xx alone (S-2): caller surfaces the upstream
+ *     status without amplifying load on a target that is already in
+ *     distress,
+ *   - opt-in retries 5xx when `SCAN_HTTP_RETRY_5XX=true`,
  *   - honours the `SCAN_HTTP_RETRY_COUNT=0` kill-switch (no retry, just one
  *     request — important when an operator wants to reproduce a flaky
  *     upstream without retry noise).
@@ -18,6 +21,7 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import http from 'http';
 
+import { circuitBreaker } from '../_common/circuit-breaker.js';
 import { httpWith } from '../_common/http.js';
 
 let server;
@@ -26,6 +30,9 @@ let requestCount;
 let respondWith;
 
 beforeEach(async () => {
+  // S-1: prevent earlier tests from leaking an open breaker into this case
+  // (all of them target 127.0.0.1, so cross-test state would be visible).
+  circuitBreaker.reset();
   requestCount = 0;
   respondWith = [];
   server = http.createServer((req, res) => {
@@ -49,20 +56,37 @@ function urlFor(path) {
   return `http://127.0.0.1:${port}${path}`;
 }
 
-describe('http.js — axios-retry wiring (P3-5)', () => {
-  it('retries on 503 then succeeds, surfacing the final 200 response', async () => {
+describe('http.js — axios-retry + circuit breaker wiring', () => {
+  it('does NOT retry on 5xx by default (S-2: avoid amplifying load on degraded targets)', async () => {
     respondWith = [
       { status: 503, body: 'unavailable' },
-      { status: 503, body: 'unavailable' },
-      { status: 200, body: 'finally' },
+      { status: 200, body: 'never reached' },
     ];
     const client = httpWith({ timeout: 2000 });
 
     const response = await client.get(urlFor('/health'));
 
-    expect(response.status).toBe(200);
-    expect(response.data).toBe('finally');
-    expect(requestCount).toBe(3);
+    expect(response.status).toBe(503);
+    expect(requestCount).toBe(1);
+  });
+
+  it('retries 5xx when SCAN_HTTP_RETRY_5XX=true is set', async () => {
+    process.env.SCAN_HTTP_RETRY_5XX = 'true';
+    try {
+      respondWith = [
+        { status: 503, body: 'down' },
+        { status: 503, body: 'down' },
+        { status: 200, body: 'recovered' },
+      ];
+      const client = httpWith({ timeout: 2000 });
+
+      const response = await client.get(urlFor('/health'));
+
+      expect(response.status).toBe(200);
+      expect(requestCount).toBe(3);
+    } finally {
+      delete process.env.SCAN_HTTP_RETRY_5XX;
+    }
   });
 
   it('retries on 429 (rate limited)', async () => {
@@ -78,38 +102,35 @@ describe('http.js — axios-retry wiring (P3-5)', () => {
     expect(requestCount).toBe(2);
   });
 
-  it('returns the last 5xx response when retry budget is exhausted', async () => {
+  it('surfaces the last 5xx response without retrying (default policy)', async () => {
     respondWith = [
       { status: 503, body: 'down' },
       { status: 503, body: 'down' },
-      { status: 503, body: 'down' },
-      { status: 503, body: 'down' },
     ];
-    const client = httpWith({ timeout: 2000 });
-
-    const response = await client.get(urlFor('/'));
-
-    // SCAN_HTTP_RETRY_COUNT defaults to 2 (so 1 initial + 2 retries = 3 total)
-    expect(response.status).toBe(503);
-    expect(requestCount).toBe(3);
-  });
-
-  it('honours SCAN_HTTP_RETRY_COUNT=0 (disable retries)', async () => {
-    process.env.SCAN_HTTP_RETRY_COUNT = '0';
-    respondWith = [
-      { status: 503, body: 'down' },
-      { status: 200, body: 'never reached' },
-    ];
-    // httpWith() reads the policy at instance-creation time so we must
-    // create the instance *after* mutating the env variable.
     const client = httpWith({ timeout: 2000 });
 
     const response = await client.get(urlFor('/'));
 
     expect(response.status).toBe(503);
     expect(requestCount).toBe(1);
+  });
 
-    delete process.env.SCAN_HTTP_RETRY_COUNT;
+  it('honours SCAN_HTTP_RETRY_COUNT=0 (disable retries)', async () => {
+    process.env.SCAN_HTTP_RETRY_COUNT = '0';
+    try {
+      respondWith = [
+        { status: 503, body: 'down' },
+        { status: 200, body: 'never reached' },
+      ];
+      const client = httpWith({ timeout: 2000 });
+
+      const response = await client.get(urlFor('/'));
+
+      expect(response.status).toBe(503);
+      expect(requestCount).toBe(1);
+    } finally {
+      delete process.env.SCAN_HTTP_RETRY_COUNT;
+    }
   });
 
   it('does not retry on 4xx (non-429) — those are caller errors', async () => {
@@ -123,5 +144,23 @@ describe('http.js — axios-retry wiring (P3-5)', () => {
 
     expect(response.status).toBe(404);
     expect(requestCount).toBe(1);
+  });
+
+  it('short-circuits to 503 once the per-host breaker is open (S-1)', async () => {
+    // Pre-trip the breaker by recording 3 consecutive failures directly,
+    // matching the default threshold. The next request must NOT touch the
+    // network.
+    circuitBreaker.recordFailure(urlFor('/'));
+    circuitBreaker.recordFailure(urlFor('/'));
+    circuitBreaker.recordFailure(urlFor('/'));
+
+    const client = httpWith({ timeout: 2000 });
+    const response = await client.get(urlFor('/'));
+
+    expect(response.status).toBe(503);
+    expect(response.data).toEqual(
+      expect.objectContaining({ error: 'circuit_breaker_open' }),
+    );
+    expect(requestCount).toBe(0);
   });
 });

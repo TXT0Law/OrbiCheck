@@ -300,13 +300,26 @@ def cleanup_monitor_snapshots() -> dict:
                 .order_by(MonitorVisualCapture.captured_at.asc())
             ).all()
             if v_caps:
-                plan_vc = [_VisCap(c.id, c.captured_at) for c in v_caps]
+                # V-1: forward is_diagnostic so the planner can apply a
+                # separate (typically smaller) cap to failure-time captures.
+                # Defaults to False on legacy rows that pre-date the column.
+                plan_vc = [
+                    _VisCap(
+                        c.id,
+                        c.captured_at,
+                        is_diagnostic=bool(getattr(c, "is_diagnostic", False)),
+                    )
+                    for c in v_caps
+                ]
                 vc_ids = plan_visual_capture_ids_to_delete(
                     plan_vc,
                     now=now,
                     max_age_days=settings.MONITOR_MAX_VISUAL_CAPTURE_AGE_DAYS,
                     max_per_monitor=settings.MONITOR_MAX_VISUAL_CAPTURES_PER_MONITOR,
                     min_retained=settings.MONITOR_MIN_RETAINED_VISUAL_CAPTURES,
+                    max_diagnostic_per_monitor=(
+                        settings.MONITOR_MAX_DIAGNOSTIC_CAPTURES_PER_MONITOR
+                    ),
                 )
                 if vc_ids:
                     db.execute(

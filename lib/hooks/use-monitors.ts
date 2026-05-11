@@ -290,3 +290,19 @@ export function useTriggerCheck(id: string) {
     },
   });
 }
+
+/**
+ * V-2: trigger a synchronous visual capture for a monitor. Cooldown / 429
+ * handling lives on the caller — the mutation simply surfaces the server
+ * message so the UI can render a toast.
+ */
+export function useTriggerVisualCaptureNow(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => monitorsApi.triggerMonitorVisualCaptureNow(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: monitorKeys.visualCaptures(id) });
+      void queryClient.invalidateQueries({ queryKey: monitorKeys.visualChanges(id) });
+    },
+  });
+}

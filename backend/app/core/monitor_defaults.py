@@ -84,6 +84,11 @@ DEFAULT_CAPABILITIES: dict[str, Any] = {
             "viewportHeight": 720,
             "fullPage": False,
             "contentCorrelationWindowSeconds": None,
+            # V-1: still attempt a screenshot when the probe failed so the
+            # UI can render a "this is what we saw" diagnostic. The capture
+            # is flagged is_diagnostic=True so it never poisons the dHash
+            # baseline. Operators can opt out by setting this to False.
+            "captureOnFailure": True,
         },
         "intervalOverrideSeconds": None,
     },

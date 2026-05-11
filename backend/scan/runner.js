@@ -2,6 +2,7 @@
 // abort-signal propagation so server.js (single-module GET) and the batch
 // path (POST /api/scan/batch) share a single execution contract.
 
+import { getHostLimiter } from './_common/host-limiter.js';
 import { logger as defaultLogger } from './_common/logger.js';
 import { observeModuleRun } from './_common/metrics.js';
 import { err, normaliseEnvelope } from './_common/result.js';
@@ -15,19 +16,32 @@ function isTimeoutError(error) {
   return message.includes('timed out') || message.includes('timed-out');
 }
 
-function createCancellableTimeout(ms) {
+function createDeferredTimeout(ms) {
+  // B-5: the host limiter (S-7) may queue this module behind other
+  // requests for the same hostname; queue wait must NOT count toward the
+  // module timeout. We expose `start()` so the caller can begin the timer
+  // only after the limiter slot has been acquired. Until `start()` is
+  // called, `timeoutPromise` stays pending forever, so a Promise.race
+  // against it is effectively a no-op gate.
   const controller = new AbortController();
   let timer;
+  let rejectFn;
   const timeoutPromise = new Promise((_resolve, reject) => {
+    rejectFn = reject;
+  });
+  const start = () => {
+    if (timer !== undefined) return;
     timer = setTimeout(() => {
       const error = new Error(`Module timed out after ${ms}ms`);
       error.code = 'RUNNER_TIMEOUT';
       controller.abort(error);
-      reject(error);
+      rejectFn(error);
     }, ms);
-  });
-  const cancel = () => clearTimeout(timer);
-  return { signal: controller.signal, timeoutPromise, cancel };
+  };
+  const cancel = () => {
+    if (timer !== undefined) clearTimeout(timer);
+  };
+  return { signal: controller.signal, timeoutPromise, cancel, start };
 }
 
 /**
@@ -68,7 +82,7 @@ export async function runModule({
   // P3-2: track in-flight modules + completion counters/histograms so /metrics
   // can answer "which module is the slowest p95?" without touching call sites.
   const completeMetrics = observeModuleRun(name);
-  const { signal, timeoutPromise, cancel } = createCancellableTimeout(timeoutMs);
+  const { signal, timeoutPromise, cancel, start: startTimeout } = createDeferredTimeout(timeoutMs);
   // Build a request-like object for the inner handler. Modules that were
   // already migrated to call `handler.runDirect()` get scanOptions/context
   // explicitly; legacy Express-style handlers see the familiar req shape.
@@ -79,16 +93,28 @@ export async function runModule({
     context: { ...context, logger: log, signal },
   };
 
+  // S-7: cap concurrent module runs against the same hostname so a 30-
+  // module batch can't fan out 30 sockets at once against a CDN edge /
+  // WAF. The limiter is shared across the batch so single-module GET and
+  // batch entries that target the same host serialise correctly.
+  const hostLimiter = getHostLimiter(url);
+
   let envelope;
   try {
-    let invocation;
-    if (typeof handler.runDirect === 'function') {
-      invocation = handler.runDirect(url, fakeReq, { scanOptions, signal });
-    } else {
-      invocation = invokeExpressHandler(handler, fakeReq);
-    }
-
-    const result = await Promise.race([invocation, timeoutPromise]);
+    const result = await Promise.race([
+      hostLimiter.run(() => {
+        // B-5: only start the module timeout once the limiter slot is
+        // acquired. Queue wait counts against the batch wall-clock but
+        // not against the per-module budget — see S-7 acceptance
+        // criteria in prompt_dev/middleReport.md.
+        startTimeout();
+        if (typeof handler.runDirect === 'function') {
+          return handler.runDirect(url, fakeReq, { scanOptions, signal });
+        }
+        return invokeExpressHandler(handler, fakeReq);
+      }),
+      timeoutPromise,
+    ]);
     envelope = normaliseEnvelope(result, Date.now() - startedAt);
   } catch (error) {
     const durationMs = Date.now() - startedAt;

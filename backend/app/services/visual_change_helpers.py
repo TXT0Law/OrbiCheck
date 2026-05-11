@@ -28,6 +28,10 @@ class VisualThresholds:
     viewport_width: int
     viewport_height: int
     full_page: bool
+    # V-1: store a screenshot even when the probe failed (bot wall, 5xx,
+    # TLS error). Diagnostic captures are persisted with is_diagnostic=True
+    # so they never participate in dHash similarity comparison.
+    capture_on_failure: bool
 
 
 def get_visual_thresholds(capabilities: dict[str, Any] | None) -> VisualThresholds:
@@ -63,11 +67,17 @@ def get_visual_thresholds(capabilities: dict[str, Any] | None) -> VisualThreshol
     fp = th.get("fullPage", False)
     full_page = bool(fp)
 
+    # Default True for new monitors (see DEFAULT_CAPABILITIES); legacy rows
+    # that omit the field also opt in so existing users immediately benefit
+    # from the diagnostic screenshots.
+    capture_on_failure = bool(th.get("captureOnFailure", True))
+
     return VisualThresholds(
         similarity_threshold_percent=similarity,
         viewport_width=viewport_width,
         viewport_height=viewport_height,
         full_page=full_page,
+        capture_on_failure=capture_on_failure,
     )
 
 

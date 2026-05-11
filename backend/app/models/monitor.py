@@ -304,6 +304,15 @@ class MonitorVisualCapture(Base):
     full_page: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     perceptual_hash_hex: Mapped[str | None] = mapped_column(String(32), nullable=True)
     dhash_algo: Mapped[str] = mapped_column(String(16), nullable=False, default="dhash")
+    # V-1: when True the capture came from a probe that failed (`check.success
+    # == False`) — e.g. Cloudflare interstitial, 5xx, TLS handshake error.
+    # Diagnostic captures are stored so the operator can SEE what the target
+    # looks like to OrbiCheck, but they are NOT used for dHash similarity
+    # comparison (would corrupt the baseline). Older rows pre-dating the
+    # migration default to False.
+    is_diagnostic: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
     monitor: Mapped[Monitor] = relationship(back_populates="visual_captures")
 

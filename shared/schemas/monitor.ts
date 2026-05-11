@@ -83,6 +83,10 @@ const visualThresholdsSchema = z.object({
   viewportHeight: z.number().int().min(240).max(2160).optional(),
   fullPage: z.boolean().optional(),
   contentCorrelationWindowSeconds: z.number().int().min(0).max(86400).nullable().optional(),
+  // V-1: keep optional so legacy capability payloads without the field
+  // still pass validation (backend `monitor_defaults` already supplies the
+  // default).
+  captureOnFailure: z.boolean().nullable().optional(),
 });
 
 const dnsThresholdsSchema = z.object({
@@ -714,6 +718,8 @@ export const monitorVisualCaptureSchema = z
     fullPage: z.boolean(),
     perceptualHashHex: z.string().nullable(),
     dhashAlgo: z.string(),
+    // V-1: optional for backward compat with older API responses.
+    isDiagnostic: z.boolean().optional(),
   })
   .passthrough();
 

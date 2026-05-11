@@ -559,6 +559,27 @@ export async function getMonitorVisualCaptures(
   return { data: rows, meta: readMeta(res as object) };
 }
 
+/**
+ * V-2: synchronously trigger a screenshot capture for a monitor. Rate-limited
+ * server-side (default 5 / minute / monitor); callers should surface the
+ * error message from the mutation result rather than retry blindly.
+ */
+export async function triggerMonitorVisualCaptureNow(
+  id: string,
+): Promise<MonitorVisualCapture> {
+  if (isMonitorMockMode()) {
+    throw new Error("Mock mode does not support capture-now");
+  }
+  const { data } = await apiClient.post<unknown>(
+    `${BASE}/${id}/visual/captures/now`,
+  );
+  return parseSingle<MonitorVisualCapture>(
+    monitorVisualCaptureSchema,
+    data,
+    "monitor visual capture now",
+  );
+}
+
 export async function getMonitorVisualChanges(
   id: string,
   params?: {

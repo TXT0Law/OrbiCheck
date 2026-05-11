@@ -1,64 +1,97 @@
-import https from 'https';
-import { performance, PerformanceObserver } from 'perf_hooks';
+// Scan module: probe target URL with HEAD (falling back to GET if HEAD is
+// disallowed) and report HTTP status, response time, and observed
+// `Server` header.
+//
+// History:
+//   - Pre S-3 (middleReport.md): hand-rolled `https.get` only.  Could not
+//     probe http://, had no User-Agent, would `throw` on 4xx/5xx which
+//     cost the entire module timeout (~30 s) via middleware bubbling.
+//   - S-3: switch to the shared `_common/http.js` axios instance so we
+//     pick up timeouts, circuit-breaker, retry policy (off for 5xx since
+//     S-2), and standardised User-Agent. Module now also supports both
+//     http:// and https:// inputs.
+
+import { performance } from 'perf_hooks';
+
+import { http, HTTP_DEFAULT_TIMEOUT_MS } from './_common/http.js';
 import middleware from './_common/middleware.js';
+import { err, ok } from './_common/result.js';
+
+const PROBE_TIMEOUT_MS = parseInt(
+  process.env.MODULE_STATUS_PROBE_TIMEOUT_MS || `${HTTP_DEFAULT_TIMEOUT_MS}`,
+  10,
+);
+const STATUS_UP_FLOOR = 200;
+const STATUS_UP_CEILING = 400;
+const MAX_REDIRECTS = 3;
+
+function isUpStatus(status) {
+  return Number.isFinite(status) && status >= STATUS_UP_FLOOR && status < STATUS_UP_CEILING;
+}
+
+async function probe(url, method) {
+  const startedAt = performance.now();
+  const response = await http.request({
+    url,
+    method,
+    timeout: PROBE_TIMEOUT_MS,
+    maxRedirects: MAX_REDIRECTS,
+  });
+  const responseTime = performance.now() - startedAt;
+  return { response, responseTime };
+}
 
 /**
- * Scan module: HEAD-check the URL and report HTTP status, response time,
- * and observed Server header.
+ * Probe a URL with HEAD; fall back to GET when the server replies 405 or
+ * 501 (some hosts disallow HEAD even for uptime probes).
+ */
+async function probeWithFallback(url) {
+  const head = await probe(url, 'HEAD');
+  if (head.response.status === 405 || head.response.status === 501) {
+    return probe(url, 'GET');
+  }
+  return head;
+}
+
+/**
+ * Scan module: lightweight uptime probe for the target URL.
  *
- * @param {string} url Normalised target URL.
- * @returns {Promise<{statusCode?: number, statusText?: string,
- *   responseTime?: number, isUp?: boolean, error?: string}>}
+ * @param {string} url Normalised target URL (middleware injects http/https).
+ * @returns {Promise<object>}
  */
 const statusHandler = async (url) => {
   if (!url) {
-    throw new Error('You must provide a URL query parameter!');
+    return err('Missing required URL', 0, { statusCode: 400 });
   }
 
-  let dnsLookupTime;
-  let responseCode;
-  let startTime;
-
-  const obs = new PerformanceObserver((items) => {
-    dnsLookupTime = items.getEntries()[0].duration;
-    performance.clearMarks();
-  });
-
-  obs.observe({ entryTypes: ['measure'] });
-
-  performance.mark('A');
-
   try {
-    startTime = performance.now();
-    await new Promise((resolve, reject) => {
-      const req = https.get(url, (res) => {
-        responseCode = res.statusCode;
-        // Drain the response body so the socket can be released; the
-        // contents are intentionally discarded for an uptime probe.
-        res.on('data', () => {});
-        res.on('end', () => {
-          resolve(res);
-        });
-      });
-
-      req.on('error', reject);
-      req.end();
-    });
-
-    if (responseCode < 200 || responseCode >= 400) {
-      throw new Error(`Received non-success response code: ${responseCode}`);
+    const { response, responseTime } = await probeWithFallback(url);
+    const responseCode = response?.status ?? 0;
+    const serverHeader = response?.headers?.server || null;
+    const data = {
+      isUp: isUpStatus(responseCode),
+      responseCode,
+      responseTime: Math.round(responseTime),
+      server: serverHeader,
+    };
+    if (!data.isUp) {
+      return err(
+        `Received non-success response code: ${responseCode}`,
+        Math.round(responseTime),
+        { statusCode: 200, data },
+      );
     }
-
-    performance.mark('B');
-    performance.measure('A to B', 'A', 'B');
-    let responseTime = performance.now() - startTime;
-    obs.disconnect();
-
-    return { isUp: true, dnsLookupTime, responseTime, responseCode };
-
+    return ok(data, responseTime);
   } catch (error) {
-    obs.disconnect();
-    throw error;
+    // Network-level errors (DNS, refused, TLS) — surface a clean envelope
+    // so the batch runner doesn't have to deal with raw axios shapes.
+    return err(
+      error?.code === 'CIRCUIT_OPEN'
+        ? 'Target temporarily skipped by circuit breaker'
+        : `Probe failed: ${error?.message || 'unknown error'}`,
+      0,
+      { statusCode: 200 },
+    );
   }
 };
 

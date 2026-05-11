@@ -230,6 +230,13 @@ export interface VisualThresholds {
   fullPage?: boolean | null;
   /** Fallback: match nearest screenshot to content change within ±N seconds (server default 120). */
   contentCorrelationWindowSeconds?: number | null;
+  /**
+   * V-1: when True, store a screenshot even when the HTTP / SSL probe failed
+   * (Cloudflare interstitial, 5xx, TLS handshake error). The capture is
+   * flagged `is_diagnostic=true` server-side and never participates in dHash
+   * similarity comparison. Defaults to `true` for new monitors.
+   */
+  captureOnFailure?: boolean | null;
 }
 
 /** Maps capability type to its threshold shape */
@@ -402,6 +409,12 @@ export interface MonitorVisualCapture {
   fullPage: boolean;
   perceptualHashHex: string | null;
   dhashAlgo: string;
+  /**
+   * V-1: True for captures stored even though the probe failed (bot wall,
+   * TLS error, 5xx). Diagnostic captures never participate in dHash
+   * similarity comparison.
+   */
+  isDiagnostic?: boolean;
 }
 
 /** Visual regression row (perceptual hash similarity). */

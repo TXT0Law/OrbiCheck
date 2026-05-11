@@ -10,8 +10,9 @@
  *   - context propagation (scanId, traceId, logger)
  */
 
-import { describe, it, expect, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, it, expect, jest } from '@jest/globals';
 
+import { resetHostLimiters } from '../_common/host-limiter.js';
 import { runModule } from '../runner.js';
 
 function silentLogger() {
@@ -24,6 +25,15 @@ function silentLogger() {
     child: () => silentLogger(),
   };
 }
+
+beforeEach(() => {
+  resetHostLimiters();
+});
+
+afterEach(() => {
+  resetHostLimiters();
+  delete process.env.SCAN_HOST_CONCURRENCY;
+});
 
 describe('runner.js — runModule()', () => {
   it('calls handler.runDirect when present and returns the resulting envelope', async () => {
@@ -230,5 +240,40 @@ describe('runner.js — runModule()', () => {
       global.setTimeout = realSetTimeout;
       global.clearTimeout = realClearTimeout;
     }
+  });
+
+  it('B-5: host-limiter queue wait does not count against module timeout', async () => {
+    // Reduce the per-host concurrency to 1 so the second runModule call has
+    // to queue behind the first. The first runModule blocks for ~80 ms; the
+    // second runs with an aggressive 50 ms timeout. If queue wait counted
+    // against the timeout, the second would 408. Under the B-5 contract it
+    // must succeed because the timer only starts after the slot is acquired.
+    process.env.SCAN_HOST_CONCURRENCY = '1';
+    resetHostLimiters();
+
+    const slowHandler = jest.fn(() => new Promise((resolve) => {
+      setTimeout(() => resolve({ success: true, data: { who: 'slow' } }), 80);
+    }));
+    const fastHandler = jest.fn(() => Promise.resolve({ success: true, data: { who: 'fast' } }));
+
+    const slowPromise = runModule({
+      name: 'slow',
+      handler: slowHandler,
+      url: 'https://shared-host.example.com/a',
+      timeoutMs: 5000,
+      logger: silentLogger(),
+    });
+    const fastPromise = runModule({
+      name: 'fast',
+      handler: fastHandler,
+      url: 'https://shared-host.example.com/b',
+      timeoutMs: 50,
+      logger: silentLogger(),
+    });
+
+    const [slow, fast] = await Promise.all([slowPromise, fastPromise]);
+    expect(slow.success).toBe(true);
+    expect(fast.success).toBe(true);
+    expect(fast.timedOut).not.toBe(true);
   });
 });
