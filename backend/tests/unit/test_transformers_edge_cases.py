@@ -42,6 +42,29 @@ TransformFn = Callable[[dict[str, Any]], Any]
 
 
 @pytest.mark.unit
+def test_transform_threats_skips_skipped_and_note_keys() -> None:
+    """B-10: when S-9 emits a skipped envelope, transform_threats must not
+    render `skipped` / `note` as fake provider entries — they describe the
+    overall state, not a per-provider verdict.
+    """
+    raw = {
+        "skipped": "No threat-intel API keys configured",
+        "note": "Set GOOGLE_CLOUD_API_KEY and/or CLOUDMERSIVE_API_KEY",
+        "urlHaus": {"error": "URLHaus offline"},
+        "phishTank": {"error": "PhishTank offline"},
+        "cloudmersive": {"error": "API key required"},
+        "safeBrowsing": {"error": "API key required"},
+    }
+    result = transform_threats(raw)
+    sources = [entry["source"] for entry in result["entries"]]
+    # The four real providers must remain; skipped / note must NOT appear.
+    assert set(sources) == {"urlHaus", "phishTank", "cloudmersive", "safeBrowsing"}
+    assert "skipped" not in sources
+    assert "note" not in sources
+    assert result["listedCount"] == 0
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("transformer", "expected_keys"),
     [

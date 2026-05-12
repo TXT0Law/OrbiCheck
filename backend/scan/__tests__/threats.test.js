@@ -255,6 +255,112 @@ describe('threats module', () => {
     expect(elapsed).toBeLessThan(PROVIDER_DELAY_MS * 3);
   });
 
+  it('returns a skipped envelope when all four providers fail and at least one is missing a key (S-9 / R-2)', async () => {
+    delete process.env.GOOGLE_CLOUD_API_KEY;
+    delete process.env.CLOUDMERSIVE_API_KEY;
+    const httpMock = {
+      get: jest.fn(),
+      post: jest.fn((url) => {
+        // URLHaus and PhishTank do not need API keys but might be unreachable
+        // (Docker DNS hiccups, provider rate limit). The R-2 contract says:
+        // if any provider is "missing key", treat the whole module as
+        // skipped because the operator hasn't opted in to threat-intel
+        // scanning — they shouldn't see a hard ❌ for transient network
+        // failure on the optional reachable providers.
+        if (url.includes('urlhaus-api')) {
+          return Promise.reject(new Error('URLHaus offline'));
+        }
+        if (url.includes('phishtank')) {
+          return Promise.reject(new Error('PhishTank offline'));
+        }
+        return Promise.reject(new Error('unexpected'));
+      }),
+    };
+
+    const handler = await loadHandlerWithMocks({
+      httpMock,
+      xmlFactory: { default: { parseStringPromise: jest.fn() } },
+    });
+
+    const response = await invokeHandler(handler);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.skipped).toContain('No threat-intel API keys');
+    expect(response.body.data.urlHaus.error).toContain('URLHaus offline');
+  });
+
+  it('still hard-fails when every provider has a real error and none are missing keys', async () => {
+    process.env.GOOGLE_CLOUD_API_KEY = 'google-key';
+    process.env.CLOUDMERSIVE_API_KEY = 'cloud-key';
+    const httpMock = {
+      get: jest.fn(),
+      post: jest.fn(() => Promise.reject(new Error('genuine outage'))),
+    };
+
+    const handler = await loadHandlerWithMocks({
+      httpMock,
+      xmlFactory: {
+        default: {
+          parseStringPromise: jest
+            .fn()
+            .mockRejectedValue(new Error('xml parse failed')),
+        },
+      },
+    });
+
+    const response = await invokeHandler(handler);
+
+    // No missing-key marker on any provider → keep the hard failure so
+    // operators can clearly see the upstream is broken.
+    expect(response.statusCode).toBe(500);
+    expect(response.body.success).toBe(false);
+  });
+
+  it('marks the module skipped when only key-required providers fail (S-9)', async () => {
+    delete process.env.GOOGLE_CLOUD_API_KEY;
+    delete process.env.CLOUDMERSIVE_API_KEY;
+    const httpMock = {
+      get: jest.fn(),
+      post: jest.fn((url) => {
+        // Make URLHaus and PhishTank also return a "no key" shaped error so
+        // the all-missing-key branch triggers.
+        if (url.includes('urlhaus-api')) {
+          return Promise.resolve({ status: 200, data: { error: 'API key required' } });
+        }
+        if (url.includes('phishtank')) {
+          return Promise.resolve({ status: 200, data: '<response></response>' });
+        }
+        return Promise.reject(new Error('unexpected'));
+      }),
+    };
+
+    const handler = await loadHandlerWithMocks({
+      httpMock,
+      xmlFactory: {
+        default: {
+          // PhishTank parser succeeds but the surrounding test forces the
+          // upstream "key required" semantics on the cloudmersive / safe-
+          // browsing providers (which are config-gated).
+          parseStringPromise: jest
+            .fn()
+            .mockRejectedValue(new Error('API_KEY missing')),
+        },
+      },
+    });
+
+    const response = await invokeHandler(handler);
+
+    // The two key-gated providers immediately short-circuit with
+    // missingApiKey:true; URLHaus + PhishTank also produce error-shaped
+    // payloads tagged with our marker → all-skipped path returns a
+    // success envelope where `data.skipped` is set so the transformer's
+    // `_is_skipped(raw_result)` flips the module status to "skipped".
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.skipped).toContain('No threat-intel API keys');
+  });
+
   it('passes a 5s timeout to every provider call (regression: prevent hanging requests)', async () => {
     process.env.GOOGLE_CLOUD_API_KEY = 'google-key';
     process.env.CLOUDMERSIVE_API_KEY = 'cloud-key';

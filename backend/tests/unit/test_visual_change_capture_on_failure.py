@@ -35,9 +35,24 @@ SINGLE_PIXEL_PNG_B64 = (
 )
 
 
-def _decoded_screenshot_payload() -> dict[str, str]:
+def _decoded_screenshot_payload() -> dict[str, object]:
+    """VC-1: mirror the REAL scan-service envelope shape — wave-1 stubs
+    used the flat ``{success, image}`` shape that never appears in
+    production. Producing the realistic shape here keeps these tests
+    honest against ``decode_screenshot_payload``.
+    """
     raw = base64.b64decode(SINGLE_PIXEL_PNG_B64)
-    return {"success": True, "image": base64.b64encode(raw).decode()}
+    return {
+        "success": True,
+        "statusCode": 200,
+        "durationMs": 0,
+        "data": {
+            "image": base64.b64encode(raw).decode(),
+            "viewport": "1280x720",
+            "fullPage": False,
+            "capturedAt": "2026-05-12T00:00:00.000Z",
+        },
+    }
 
 
 def _build_monitor(*, capture_on_failure: bool = True) -> Monitor:
@@ -101,7 +116,14 @@ async def test_diagnostic_capture_persists_with_is_diagnostic_true(monkeypatch) 
         "call_screenshot_service",
         AsyncMock(return_value=_decoded_screenshot_payload()),
     )
-    monkeypatch.setattr(monitor_service, "compute_dhash_hex", lambda _png: "0123456789abcdef")
+    # V-10: compute_perceptual_hash_hex superseded compute_dhash_hex; the
+    # monitor service imports it as `compute_perceptual_hash_hex` and passes
+    # the per-monitor algorithm + ignore-region tuple along.
+    monkeypatch.setattr(
+        monitor_service,
+        "compute_perceptual_hash_hex",
+        lambda _png, **_kw: "0123456789abcdef",
+    )
     alert_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(monitor_service.alert_service, "evaluate_and_dispatch_alert", alert_mock)
 
@@ -152,7 +174,11 @@ async def test_diagnostic_capture_ignores_prior_baseline_for_alerts(monkeypatch)
         "call_screenshot_service",
         AsyncMock(return_value=_decoded_screenshot_payload()),
     )
-    monkeypatch.setattr(monitor_service, "compute_dhash_hex", lambda _png: "ffffffffffffffff")
+    monkeypatch.setattr(
+        monitor_service,
+        "compute_perceptual_hash_hex",
+        lambda _png, **_kw: "ffffffffffffffff",
+    )
     alert_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(monitor_service.alert_service, "evaluate_and_dispatch_alert", alert_mock)
 
@@ -219,7 +245,11 @@ async def test_capture_now_returns_capture_for_failing_target(monkeypatch) -> No
         "call_screenshot_service",
         AsyncMock(return_value=_decoded_screenshot_payload()),
     )
-    monkeypatch.setattr(monitor_service, "compute_dhash_hex", lambda _png: "abcdef0123456789")
+    monkeypatch.setattr(
+        monitor_service,
+        "compute_perceptual_hash_hex",
+        lambda _png, **_kw: "abcdef0123456789",
+    )
 
     response = await monitor_service.trigger_visual_capture_now(
         monitor.id, 1, db, redis,
@@ -230,3 +260,128 @@ async def test_capture_now_returns_capture_for_failing_target(monkeypatch) -> No
     captures = [obj for obj in added if isinstance(obj, MonitorVisualCapture)]
     assert len(captures) == 1
     assert captures[0].is_diagnostic is False
+
+
+# ── R-3: capture-now surfaces a specific failure reason ──────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_capture_now_reports_screenshot_timeout_reason(monkeypatch) -> None:
+    """R-3: when call_screenshot_service raises httpx.TimeoutException,
+    trigger_visual_capture_now must return a 502 whose reason code is
+    ``screenshot_timeout`` and message mentions slow page load.
+    """
+    import httpx
+
+    from app.core.exceptions import AppException
+
+    monitor = _build_monitor()
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=monitor)
+    db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+    )
+
+    redis = AsyncMock()
+    redis.incr = AsyncMock(return_value=1)
+    redis.expire = AsyncMock()
+    redis.ttl = AsyncMock(return_value=60)
+
+    monkeypatch.setattr(
+        monitor_service,
+        "call_screenshot_service",
+        AsyncMock(side_effect=httpx.TimeoutException("read timeout")),
+    )
+
+    with pytest.raises(AppException) as excinfo:
+        await monitor_service.trigger_visual_capture_now(monitor.id, 1, db, redis)
+
+    err = excinfo.value
+    assert err.status_code == 502
+    assert err.code == "VISUAL_CAPTURE_FAILED:screenshot_timeout"
+    assert "loading slowly" in str(err.message).lower() or "did not respond" in str(err.message).lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_capture_now_reports_dns_error_reason(monkeypatch) -> None:
+    """R-3: hostname resolution failure inside the screenshot service must
+    surface the ``screenshot_dns_error`` reason code so the operator
+    immediately knows where to look (DNS, not Playwright).
+    """
+    import httpx
+
+    from app.core.exceptions import AppException
+
+    monitor = _build_monitor()
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=monitor)
+    db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+    )
+
+    redis = AsyncMock()
+    redis.incr = AsyncMock(return_value=1)
+    redis.expire = AsyncMock()
+    redis.ttl = AsyncMock(return_value=60)
+
+    monkeypatch.setattr(
+        monitor_service,
+        "call_screenshot_service",
+        AsyncMock(
+            side_effect=httpx.ConnectError(
+                "[Errno -5] No address associated with hostname"
+            )
+        ),
+    )
+
+    with pytest.raises(AppException) as excinfo:
+        await monitor_service.trigger_visual_capture_now(monitor.id, 1, db, redis)
+
+    err = excinfo.value
+    assert err.status_code == 502
+    assert err.code == "VISUAL_CAPTURE_FAILED:screenshot_dns_error"
+    assert "dns" in str(err.message).lower() or "resolve" in str(err.message).lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_capture_now_reports_target_timeout_reason(monkeypatch) -> None:
+    """R-3: when scan-service returns ``success=false`` with a timeout-shaped
+    error string (the github.com 18s NAV_TIMEOUT case from the user
+    report), surface ``screenshot_target_timeout`` with a message that
+    points at the navigation timeout.
+    """
+    from app.core.exceptions import AppException
+
+    monitor = _build_monitor()
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=monitor)
+    db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+    )
+
+    redis = AsyncMock()
+    redis.incr = AsyncMock(return_value=1)
+    redis.expire = AsyncMock()
+    redis.ttl = AsyncMock(return_value=60)
+
+    monkeypatch.setattr(
+        monitor_service,
+        "call_screenshot_service",
+        AsyncMock(
+            return_value={
+                "success": False,
+                "error": "Navigation timeout of 18000ms exceeded",
+            }
+        ),
+    )
+
+    with pytest.raises(AppException) as excinfo:
+        await monitor_service.trigger_visual_capture_now(monitor.id, 1, db, redis)
+
+    err = excinfo.value
+    assert err.status_code == 502
+    assert err.code == "VISUAL_CAPTURE_FAILED:screenshot_target_timeout"
+    assert "18s" in str(err.message) or "navigation timeout" in str(err.message).lower()

@@ -11,6 +11,7 @@ import {
 } from './_common/config.js';
 import { logger } from './_common/logger.js';
 import { metricsRegistry, recordBatchRun } from './_common/metrics.js';
+import { handler as pageSourceRenderedHandler } from './page-source-rendered.js';
 import { loadModules } from './registry.js';
 import { runModule } from './runner.js';
 
@@ -104,6 +105,14 @@ export function createApp() {
   // diagnosing prod incidents like "is the env override active here?".
   app.get('/api/scan/config', (_req, res) => {
     res.json(describeConfig());
+  });
+
+  // C-5: explicit route for the rendered-DOM page source — bypasses the
+  // /api/scan/:module dispatcher because page-source-rendered is intentionally
+  // NOT in the scan-module registry (consumed by the monitor content_change
+  // pipeline only, never as part of a scan batch).
+  app.get('/api/scan/page-source-rendered', async (req, res) => {
+    return pageSourceRenderedHandler(req, res);
   });
 
   app.get('/api/scan/:module', async (req, res) => {

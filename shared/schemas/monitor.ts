@@ -1,6 +1,17 @@
 import { z } from "zod";
 
-import { MONITOR_INTERVALS, MONITOR_CAPABILITIES } from "../types/monitor";
+import {
+  CONTENT_FETCH_MODES,
+  MONITOR_INTERVALS,
+  MONITOR_CAPABILITIES,
+  VISUAL_HASH_ALGORITHMS,
+  VISUAL_MAX_IGNORE_REGIONS,
+} from "../types/monitor";
+
+// C-3 / V-11 limits — keep in sync with backend (`schemas/monitor.py`).
+const MAX_TRIGGER_WORDS_PER_LIST = 32;
+const MAX_TRIGGER_WORD_LENGTH = 200;
+const MAX_TRIGGER_REGEX_LENGTH = 500;
 
 const monitorCapabilityEnum = z.enum([
   MONITOR_CAPABILITIES[0],
@@ -53,6 +64,32 @@ const selectorExtractionSchema = z.object({
   maxExtractedChars: z.number().int().min(1024).max(500_000).optional(),
 });
 
+// C-3: keep word lists short and bounded — clearer 422 errors for the
+// editor than a vague "payload too large".
+const triggerWordSchema = z
+  .string()
+  .min(1, "trigger / ignore word cannot be empty")
+  .max(MAX_TRIGGER_WORD_LENGTH);
+const triggerWordListSchema = z
+  .array(triggerWordSchema)
+  .max(MAX_TRIGGER_WORDS_PER_LIST)
+  .nullable()
+  .optional();
+
+const contentFetchModeEnum = z.enum([
+  CONTENT_FETCH_MODES[0],
+  CONTENT_FETCH_MODES[1],
+]);
+
+// C-5: bounds mirror backend ContentFetchOptionsSchema in
+// backend/app/api/v1/schemas/monitor.py — keep in sync.
+const contentFetchOptionsSchema = z.object({
+  waitForSelector: z.string().max(500).nullable().optional(),
+  waitMs: z.number().int().min(0).max(10_000).nullable().optional(),
+  viewportWidth: z.number().int().min(320).max(3840).nullable().optional(),
+  viewportHeight: z.number().int().min(240).max(2160).nullable().optional(),
+});
+
 const contentThresholdsSchema = z.object({
   alertOnChange: z.boolean().default(true),
   minChangeSizeBytes: z.number().int().min(0).nullable().default(null),
@@ -70,11 +107,38 @@ const contentThresholdsSchema = z.object({
   normalizeVolatileTokens: z.boolean().nullable().optional(),
   suppressDegradedPageChanges: z.boolean().nullable().optional(),
   normalizationRules: z.array(contentNormalizationRuleSchema).max(10).nullable().optional(),
+  // C-3: notification trigger fields. Server compiles ``triggerRegex`` and
+  // returns 422 on bad regex, but we pre-cap length here so the editor can
+  // surface "too long" inline.
+  triggerWords: triggerWordListSchema,
+  ignoreWords: triggerWordListSchema,
+  triggerRegex: z.string().max(MAX_TRIGGER_REGEX_LENGTH).nullable().optional(),
+  // C-5: select between cheap HTTP fetch and Playwright-rendered DOM.
+  fetchMode: contentFetchModeEnum.nullable().optional(),
+  // C-5: per-monitor browser-fetch knobs, only honoured when fetchMode == "browser".
+  fetchOptions: contentFetchOptionsSchema.nullable().optional(),
 });
 
 const sslThresholdsSchema = z.object({
   warnDaysRemaining: z.number().int().min(1).max(365).default(30),
   criticalDaysRemaining: z.number().int().min(1).max(90).default(7),
+});
+
+// V-10: keep this aligned with backend SUPPORTED_HASH_ALGORITHMS.
+const visualHashAlgorithmEnum = z.enum([
+  VISUAL_HASH_ALGORITHMS[0],
+  VISUAL_HASH_ALGORITHMS[1],
+  VISUAL_HASH_ALGORITHMS[2],
+  VISUAL_HASH_ALGORITHMS[3],
+]);
+
+// V-11: percentage rectangle (0-100). The server clamps to [0,100] regardless
+// but rejecting at the API boundary gives a clearer error to the editor UI.
+const visualIgnoreRegionSchema = z.object({
+  x: z.number().min(0).max(100),
+  y: z.number().min(0).max(100),
+  width: z.number().min(0).max(100),
+  height: z.number().min(0).max(100),
 });
 
 const visualThresholdsSchema = z.object({
@@ -87,6 +151,16 @@ const visualThresholdsSchema = z.object({
   // still pass validation (backend `monitor_defaults` already supplies the
   // default).
   captureOnFailure: z.boolean().nullable().optional(),
+  // V-10: perceptual hash algorithm. Optional so existing JSONB blobs
+  // pass through untouched.
+  hashAlgorithm: visualHashAlgorithmEnum.nullable().optional(),
+  // V-11: ignore regions list, capped to keep the JSONB compact and
+  // bound the per-probe masking cost.
+  ignoreRegions: z
+    .array(visualIgnoreRegionSchema)
+    .max(VISUAL_MAX_IGNORE_REGIONS)
+    .nullable()
+    .optional(),
 });
 
 const dnsThresholdsSchema = z.object({

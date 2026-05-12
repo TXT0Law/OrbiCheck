@@ -157,8 +157,14 @@ class Settings(BaseSettings):
     MONITOR_DIFF_FINGERPRINT_MAX_UNIFIED_CHARS: int = 200_000
     # P3: max regex replace rules per monitor (capabilities JSON).
     MONITOR_NORMALIZATION_CUSTOM_RULES_MAX: int = 10
-    # P3: future rendered-DOM / headless pipeline. Must stay off unless explicitly enabled.
-    MONITOR_RENDERED_DOM_PIPELINE_ENABLED: bool = False
+    # C-5: rendered-DOM / Playwright fetch pipeline for content_change. Once
+    # enabled, monitors that opt in via `capabilities.content_change.thresholds.fetchMode = "browser"`
+    # route their HTTP probe through the scan-service's
+    # /api/scan/page-source-rendered endpoint (shared Chromium pool). The
+    # default is now True so the per-monitor toggle works out of the box;
+    # operators worried about the extra Playwright cost can flip this off
+    # globally and the helper will silently fall back to the cheap HTTP path.
+    MONITOR_RENDERED_DOM_PIPELINE_ENABLED: bool = True
     # CSS selector extraction for content_change (BeautifulSoup; server-side HTML only).
     # C-1: defaulted to True so the UI's per-monitor "selectors" field can take
     # effect without requiring an opt-in env flag. Operators that explicitly

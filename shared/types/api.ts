@@ -63,6 +63,19 @@ export interface ScanProgressEvent {
   detail: string;
   completedModules: number;
   totalModules: number;
+  /**
+   * S-11: module names currently in flight in the active batch (or
+   * being retried per S-10). Empty between batches and on terminal
+   * events. Optional so legacy SSE payloads keep parsing.
+   */
+  currentModules?: string[];
+  /**
+   * S-11: true when the orchestrator has observed enough HTTP failures
+   * against the target during this scan that further requests are
+   * likely to be rate-limited / 5xx. Lets the UI hint "target may be
+   * slow" instead of letting the user assume OrbiCheck is broken.
+   */
+  degradedTarget?: boolean;
   done?: boolean;
   error?: boolean;
   cancelled?: boolean;

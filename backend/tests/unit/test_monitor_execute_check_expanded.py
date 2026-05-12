@@ -834,8 +834,8 @@ async def test_visual_change_dispatches_alert_service(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         monitor_service,
-        "compute_dhash_hex",
-        lambda _png: "ffffffffffffffff",
+        "compute_perceptual_hash_hex",
+        lambda _png, **_kw: "ffffffffffffffff",
     )
 
     await monitor_service._run_visual_change_capture(mon, check, db, AsyncMock())

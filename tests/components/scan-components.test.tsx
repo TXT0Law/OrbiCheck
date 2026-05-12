@@ -38,6 +38,43 @@ describe("scan components", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it("renders the current module chips and degraded-target banner (S-11)", () => {
+    render(
+      <ScanProgress
+        domain="example.com"
+        progress={42}
+        phase="quick"
+        detail="Running quick modules"
+        currentModules={["status", "headers", "dns"]}
+        degradedTarget={true}
+        onCancel={() => {}}
+      />
+    );
+
+    const chips = screen.getByTestId("scan-progress-current-modules");
+    expect(chips).toHaveTextContent("status");
+    expect(chips).toHaveTextContent("headers");
+    expect(chips).toHaveTextContent("dns");
+    expect(screen.getByTestId("scan-progress-degraded-target")).toBeInTheDocument();
+  });
+
+  it("collapses overflow modules into a +N badge (S-11)", () => {
+    render(
+      <ScanProgress
+        domain="example.com"
+        progress={70}
+        phase="medium"
+        detail="Running medium modules"
+        currentModules={["a", "b", "c", "d", "e", "f", "g", "h"]}
+        onCancel={() => {}}
+      />
+    );
+
+    const chips = screen.getByTestId("scan-progress-current-modules");
+    expect(chips).toHaveTextContent("+2");
+    expect(screen.queryByTestId("scan-progress-degraded-target")).toBeNull();
+  });
+
   it("uses fallback report link when href is unsafe", () => {
     const { rerender } = render(
       <ScanResultCard

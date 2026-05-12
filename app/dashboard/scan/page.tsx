@@ -381,6 +381,8 @@ export default function ScanPage() {
             progress={progress?.progress ?? 0}
             phase={progress?.phase ?? "quick"}
             detail={progress?.detail ?? "Queuing scan..."}
+            currentModules={progress?.currentModules}
+            degradedTarget={progress?.degradedTarget}
             onCancel={handleCancelProgress}
           />
           {progressError && (

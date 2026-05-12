@@ -1,6 +1,6 @@
 "use client";
 
-import { Globe } from "lucide-react";
+import { AlertTriangle, Globe } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,10 +11,30 @@ interface ScanProgressProps {
   progress: number;
   phase: string;
   detail: string;
+  /** S-11: optional list of module names currently executing in this batch. */
+  currentModules?: string[];
+  /** S-11: true when the target appears unhealthy (>=3 module failures so far). */
+  degradedTarget?: boolean;
   onCancel: () => void;
 }
 
-export function ScanProgress({ domain, progress, phase, detail, onCancel }: ScanProgressProps) {
+// S-11: cap rendered chips to keep the progress card from ballooning when
+// the heavy batch dispatches all 7+ modules at once.
+const MAX_VISIBLE_MODULE_CHIPS = 6;
+
+export function ScanProgress({
+  domain,
+  progress,
+  phase,
+  detail,
+  currentModules,
+  degradedTarget,
+  onCancel,
+}: ScanProgressProps) {
+  const modules = (currentModules ?? []).filter((m) => typeof m === "string" && m.length > 0);
+  const visibleModules = modules.slice(0, MAX_VISIBLE_MODULE_CHIPS);
+  const overflowCount = Math.max(0, modules.length - visibleModules.length);
+
   return (
     <Card>
       <CardContent className="space-y-4 p-6">
@@ -35,6 +55,45 @@ export function ScanProgress({ domain, progress, phase, detail, onCancel }: Scan
           </div>
           <p className="text-right text-sm text-muted-foreground">{progress}%</p>
         </div>
+
+        {visibleModules.length > 0 && (
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            data-testid="scan-progress-current-modules"
+          >
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">
+              Running:
+            </span>
+            {visibleModules.map((name) => (
+              <Badge
+                key={name}
+                className="border border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200"
+              >
+                {name}
+              </Badge>
+            ))}
+            {overflowCount > 0 && (
+              <Badge className="border border-zinc-200 bg-white text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                +{overflowCount}
+              </Badge>
+            )}
+          </div>
+        )}
+
+        {degradedTarget && (
+          <div
+            className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+            data-testid="scan-progress-degraded-target"
+            role="status"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Target site appears slow or rate-limited; OrbiCheck has reduced retries to
+              avoid further pressure. Some modules may show as failed even when the
+              target normally responds.
+            </span>
+          </div>
+        )}
 
         <div className="flex items-end justify-between gap-3">
           <p className="text-sm text-muted-foreground">Phase: {phase} · {detail}</p>

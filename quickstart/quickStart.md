@@ -58,6 +58,8 @@ If you see "Cannot reach API" with port 65500, run `unset NEXT_PUBLIC_API_URL` a
 
 **Optional Monitor-related environment variables** (see `backend/app/core/config.py` for details): Setting `MONITOR_CHANGES_EXPORT_PDF_ENABLED=true` in the backend enables the content changes PDF export API. The frontend also needs `NEXT_PUBLIC_MONITOR_CHANGES_EXPORT_PDF=1` in the project root `.env.local` to show the PDF download button. The live list and detail pages use `GET /api/v1/monitors/live` (SSE). Settings → Notifications lets you configure **Webhooks** (stored in Redis, events are delivered synchronously via monitor Pub/Sub).
 
+**C-5 (rendered DOM / browser fetch mode)**: When a monitor sets `content_change.thresholds.fetchMode = "browser"`, content probes are routed through the Scan Service's Playwright pool (`/api/scan/page-source-rendered`). This requires **Chromium** to be installed under the Scan Service (the same install that screenshot/cookies modules use; `quickstart/start.sh` runs `npx playwright install chromium` automatically on first start). Browser-mode monitors are also forced to a minimum check interval of 300 seconds to keep the Chromium pool from saturating — the API rejects shorter intervals with HTTP 422. Toggle the global feature flag with `MONITOR_RENDERED_DOM_PIPELINE_ENABLED=false` to disable browser mode entirely (per-monitor `fetchMode = "browser"` then silently falls back to the cheap HTTP path).
+
 ---
 
 ### Troubleshooting: `Failed to start scan... Request failed with status code 500`

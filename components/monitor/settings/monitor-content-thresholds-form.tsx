@@ -5,7 +5,13 @@ import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { getMonitorContentMessages } from "@/lib/i18n/monitor-content";
-import type { ContentThresholds } from "@/shared/types/monitor";
+import {
+  CONTENT_FETCH_MODES,
+  MONITOR_BROWSER_FETCH_MIN_INTERVAL_SECONDS,
+  type ContentFetchMode,
+  type ContentFetchOptions,
+  type ContentThresholds,
+} from "@/shared/types/monitor";
 
 interface MonitorContentThresholdsFormProps {
   value: ContentThresholds;
@@ -15,6 +21,59 @@ interface MonitorContentThresholdsFormProps {
 function selectorsToText(sel: ContentThresholds["selectorExtraction"]): string {
   if (!sel?.selectors?.length) return "";
   return sel.selectors.join("\n");
+}
+
+// C-3: word lists round-trip through a single textarea — one entry per line
+// with empty / whitespace-only lines filtered out so paste-in lists stay
+// painless to edit.
+function wordsToText(words: ContentThresholds["triggerWords"] | ContentThresholds["ignoreWords"]): string {
+  if (!Array.isArray(words) || words.length === 0) return "";
+  return words.join("\n");
+}
+
+function textToWords(raw: string): string[] {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+// C-5: parse the four fetchOptions inputs back into a ContentFetchOptions
+// object. Empty inputs become `null` so the JSONB stays compact.
+function emptyOrNumber(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+}
+
+function emptyOrString(raw: string): string | null {
+  const trimmed = raw.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function fetchOptionsHasAnyValue(options: ContentFetchOptions | null | undefined): boolean {
+  if (!options) return false;
+  return (
+    options.waitForSelector != null ||
+    options.waitMs != null ||
+    options.viewportWidth != null ||
+    options.viewportHeight != null
+  );
+}
+
+function setFetchOption<K extends keyof ContentFetchOptions>(
+  options: ContentFetchOptions | null | undefined,
+  key: K,
+  next: ContentFetchOptions[K] | null,
+): ContentFetchOptions | null {
+  const merged: ContentFetchOptions = { ...(options ?? {}) };
+  if (next == null) {
+    delete (merged as Record<string, unknown>)[key as string];
+  } else {
+    (merged as Record<string, unknown>)[key as string] = next as unknown;
+  }
+  return fetchOptionsHasAnyValue(merged) ? merged : null;
 }
 
 export function MonitorContentThresholdsForm({ value, onChange }: MonitorContentThresholdsFormProps) {
@@ -29,6 +88,23 @@ export function MonitorContentThresholdsForm({ value, onChange }: MonitorContent
   const normalizeOn = value.normalizeVolatileTokens !== false;
   const suppressDegradedOn = value.suppressDegradedPageChanges !== false;
   const selectorCount = value.selectorExtraction?.selectors?.length ?? 0;
+  // C-3: textarea state mirrors the existing selector pattern (see the
+  // selectorText useEffect above). Tracking the raw string locally keeps
+  // the editor cursor stable while the user types — replacing the array
+  // on every keystroke would re-render the textarea.
+  const [triggerWordsText, setTriggerWordsText] = useState(() => wordsToText(value.triggerWords));
+  const [ignoreWordsText, setIgnoreWordsText] = useState(() => wordsToText(value.ignoreWords));
+  useEffect(() => {
+    setTriggerWordsText(wordsToText(value.triggerWords));
+  }, [JSON.stringify(value.triggerWords ?? [])]);
+  useEffect(() => {
+    setIgnoreWordsText(wordsToText(value.ignoreWords));
+  }, [JSON.stringify(value.ignoreWords ?? [])]);
+
+  // C-5: keep "browser" only when explicitly set; default selector falls back
+  // to "http" so legacy monitors render the existing UI on first open.
+  const fetchMode: ContentFetchMode = value.fetchMode === "browser" ? "browser" : "http";
+  const fetchOptions = value.fetchOptions ?? null;
 
   return (
     <div className="space-y-4">
@@ -207,6 +283,220 @@ export function MonitorContentThresholdsForm({ value, onChange }: MonitorContent
         />
         <span>{t.settingsSuppressDegradedLabel}</span>
       </label>
+
+      {/*
+        C-3: trigger / ignore words and triggerRegex sit in their own
+        advanced block so simple monitors stay one screen tall. The backend
+        treats missing keys as "no constraint" — sending null when the
+        textarea is empty keeps the JSONB compact.
+      */}
+      <details
+        className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800"
+        data-testid="content-trigger-words-section"
+      >
+        <summary className="cursor-pointer font-medium text-zinc-900 dark:text-white">
+          {t.settingsTriggerWordsLabel}
+        </summary>
+        <div className="mt-3 space-y-3 text-sm">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">{t.settingsTriggerWordsHint}</span>
+            <textarea
+              data-testid="content-trigger-words-input"
+              className="min-h-[68px] w-full rounded-md border-2 border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+              placeholder={t.settingsTriggerWordsPlaceholder}
+              value={triggerWordsText}
+              onChange={(e) => {
+                const next = e.target.value;
+                setTriggerWordsText(next);
+                const words = textToWords(next);
+                onChange({ ...value, triggerWords: words.length === 0 ? null : words });
+              }}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-medium text-zinc-900 dark:text-white">
+              {t.settingsIgnoreWordsLabel}
+            </span>
+            <span className="text-xs text-muted-foreground">{t.settingsIgnoreWordsHint}</span>
+            <textarea
+              data-testid="content-ignore-words-input"
+              className="min-h-[68px] w-full rounded-md border-2 border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+              placeholder={t.settingsIgnoreWordsPlaceholder}
+              value={ignoreWordsText}
+              onChange={(e) => {
+                const next = e.target.value;
+                setIgnoreWordsText(next);
+                const words = textToWords(next);
+                onChange({ ...value, ignoreWords: words.length === 0 ? null : words });
+              }}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-medium text-zinc-900 dark:text-white">
+              {t.settingsTriggerRegexLabel}
+            </span>
+            <span className="text-xs text-muted-foreground">{t.settingsTriggerRegexHint}</span>
+            <Input
+              data-testid="content-trigger-regex-input"
+              placeholder={t.settingsTriggerRegexPlaceholder}
+              value={value.triggerRegex ?? ""}
+              onChange={(e) => {
+                const raw = e.target.value;
+                onChange({ ...value, triggerRegex: raw.trim() === "" ? null : raw });
+              }}
+            />
+          </label>
+        </div>
+      </details>
+
+      {/*
+        C-5: fetch mode (HTTP vs browser) lives at the top of an advanced
+        section so it's visible without unfolding when the operator clicks
+        "Browser fetch options". The select is intentionally a native
+        <select> to match the visual hash algorithm picker on the visual
+        thresholds form.
+      */}
+      <section
+        className="rounded-md border border-sky-200 bg-sky-50/40 p-3 dark:border-sky-900/40 dark:bg-sky-950/20"
+        data-testid="content-fetch-mode-section"
+      >
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-900 dark:text-white">
+            {t.settingsFetchModeLabel}
+          </span>
+          <span className="text-xs text-muted-foreground">{t.settingsFetchModeHint}</span>
+          <select
+            data-testid="content-fetch-mode-select"
+            className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+            value={fetchMode}
+            onChange={(e) => {
+              const next = e.target.value as ContentFetchMode;
+              onChange({
+                ...value,
+                fetchMode: next,
+                // Drop fetchOptions when switching back to HTTP so the
+                // payload doesn't ship orphaned config the server would
+                // ignore anyway.
+                fetchOptions: next === "browser" ? value.fetchOptions ?? null : null,
+              });
+            }}
+          >
+            {CONTENT_FETCH_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {mode === "http" ? t.settingsFetchModeHttp : t.settingsFetchModeBrowser}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {fetchMode === "browser" && (
+          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300" data-testid="content-fetch-browser-min-interval-note">
+            {t.settingsFetchModeBrowserMinIntervalNote.replace(
+              "300",
+              String(MONITOR_BROWSER_FETCH_MIN_INTERVAL_SECONDS),
+            )}
+          </p>
+        )}
+
+        {fetchMode === "browser" && (
+          <details
+            className="mt-3 rounded-md border border-zinc-200 p-3 dark:border-zinc-800"
+            data-testid="content-fetch-options-details"
+          >
+            <summary className="cursor-pointer font-medium text-zinc-900 dark:text-white">
+              {t.settingsFetchOptionsTitle}
+            </summary>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t.settingsFetchOptionsHint}
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+                <span className="font-medium text-zinc-900 dark:text-white">
+                  {t.settingsFetchWaitForSelectorLabel}
+                </span>
+                <Input
+                  data-testid="content-fetch-wait-for-selector"
+                  placeholder="main h1"
+                  value={fetchOptions?.waitForSelector ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      fetchOptions: setFetchOption(
+                        fetchOptions,
+                        "waitForSelector",
+                        emptyOrString(e.target.value),
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-zinc-900 dark:text-white">
+                  {t.settingsFetchWaitMsLabel}
+                </span>
+                <Input
+                  inputMode="numeric"
+                  data-testid="content-fetch-wait-ms"
+                  placeholder="0 – 10000"
+                  value={fetchOptions?.waitMs ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      fetchOptions: setFetchOption(
+                        fetchOptions,
+                        "waitMs",
+                        emptyOrNumber(e.target.value),
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-zinc-900 dark:text-white">
+                  {t.settingsFetchViewportWidthLabel}
+                </span>
+                <Input
+                  inputMode="numeric"
+                  data-testid="content-fetch-viewport-width"
+                  placeholder="1280"
+                  value={fetchOptions?.viewportWidth ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      fetchOptions: setFetchOption(
+                        fetchOptions,
+                        "viewportWidth",
+                        emptyOrNumber(e.target.value),
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-zinc-900 dark:text-white">
+                  {t.settingsFetchViewportHeightLabel}
+                </span>
+                <Input
+                  inputMode="numeric"
+                  data-testid="content-fetch-viewport-height"
+                  placeholder="720"
+                  value={fetchOptions?.viewportHeight ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      fetchOptions: setFetchOption(
+                        fetchOptions,
+                        "viewportHeight",
+                        emptyOrNumber(e.target.value),
+                      ),
+                    })
+                  }
+                />
+              </label>
+            </div>
+          </details>
+        )}
+      </section>
     </div>
   );
 }

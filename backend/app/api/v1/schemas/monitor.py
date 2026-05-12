@@ -230,6 +230,23 @@ class UptimeThresholdsUpdateSchema(BaseModel):
     slo_target_percent: float | None = Field(default=None, ge=0, le=100)
 
 
+class ContentFetchOptionsSchema(BaseModel):
+    """C-5: per-monitor knobs forwarded to ``page-source-rendered`` (browser fetch).
+
+    All fields are optional — ``content_rendered_fetch.get_rendered_fetch_options``
+    treats absent values as "use the scan-service defaults". Numbers are bounded
+    here so a malicious / mistaken config can never request a 5-minute
+    ``waitMs`` or a 10000×10000 viewport.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+
+    wait_for_selector: str | None = Field(default=None, max_length=500)
+    wait_ms: int | None = Field(default=None, ge=0, le=10_000)
+    viewport_width: int | None = Field(default=None, ge=320, le=3840)
+    viewport_height: int | None = Field(default=None, ge=240, le=2160)
+
+
 class ContentThresholdsSchema(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
@@ -249,6 +266,26 @@ class ContentThresholdsSchema(BaseModel):
     repeat_alert_fingerprint_window_minutes: int | None = Field(
         default=None, ge=1, le=10080
     )
+    # C-3: notification triggers — see content_trigger_helpers.
+    trigger_words: list[str] | None = None
+    ignore_words: list[str] | None = None
+    trigger_regex: str | None = None
+    # C-5: rendered-DOM fetch toggle. The Pydantic schema uses extra="forbid"
+    # so the legacy frontend that omitted these keys must remain valid; defaulting
+    # to "http" means existing monitors keep their cheap HTTP fetch path until
+    # the operator explicitly opts in.
+    fetch_mode: Literal["http", "browser"] | None = "http"
+    fetch_options: ContentFetchOptionsSchema | None = None
+
+    @field_validator("trigger_words", "ignore_words")
+    @classmethod
+    def _trigger_words_ok(cls, v: list[str] | None) -> list[str] | None:
+        return _validate_trigger_words(v)
+
+    @field_validator("trigger_regex")
+    @classmethod
+    def _trigger_regex_ok(cls, v: str | None) -> str | None:
+        return _validate_trigger_regex(v)
 
 
 class ContentThresholdsUpdateSchema(BaseModel):
@@ -270,6 +307,21 @@ class ContentThresholdsUpdateSchema(BaseModel):
     repeat_alert_fingerprint_window_minutes: int | None = Field(
         default=None, ge=1, le=10080
     )
+    trigger_words: list[str] | None = None
+    ignore_words: list[str] | None = None
+    trigger_regex: str | None = None
+    fetch_mode: Literal["http", "browser"] | None = None
+    fetch_options: ContentFetchOptionsSchema | None = None
+
+    @field_validator("trigger_words", "ignore_words")
+    @classmethod
+    def _trigger_words_ok(cls, v: list[str] | None) -> list[str] | None:
+        return _validate_trigger_words(v)
+
+    @field_validator("trigger_regex")
+    @classmethod
+    def _trigger_regex_ok(cls, v: str | None) -> str | None:
+        return _validate_trigger_regex(v)
 
 
 class SslThresholdsSchema(BaseModel):
@@ -312,6 +364,18 @@ class VisualThresholdsSchema(BaseModel):
     content_correlation_window_seconds: int | None = Field(default=None, ge=0, le=86400)
     # V-1: keep True so failed-probe screenshots are stored as diagnostics.
     capture_on_failure: bool | None = True
+    # V-10: which perceptual hash algorithm to compute on each capture.
+    hash_algorithm: Literal["dhash", "phash", "ahash", "whash"] | None = "dhash"
+    # V-11: ignore-region rectangles (percent coords). Mask is applied
+    # before hashing so dynamic widgets don't trip the threshold.
+    ignore_regions: list[dict[str, Any]] | None = None
+
+    @field_validator("ignore_regions")
+    @classmethod
+    def _ignore_regions_ok(
+        cls, v: list[dict[str, Any]] | None
+    ) -> list[dict[str, Any]] | None:
+        return _validate_ignore_regions(v)
 
 
 class VisualThresholdsUpdateSchema(BaseModel):
@@ -323,6 +387,15 @@ class VisualThresholdsUpdateSchema(BaseModel):
     full_page: bool | None = None
     content_correlation_window_seconds: int | None = Field(default=None, ge=0, le=86400)
     capture_on_failure: bool | None = None
+    hash_algorithm: Literal["dhash", "phash", "ahash", "whash"] | None = None
+    ignore_regions: list[dict[str, Any]] | None = None
+
+    @field_validator("ignore_regions")
+    @classmethod
+    def _ignore_regions_ok(
+        cls, v: list[dict[str, Any]] | None
+    ) -> list[dict[str, Any]] | None:
+        return _validate_ignore_regions(v)
 
 
 class PerCapabilityConfigSchema(BaseModel):
@@ -408,6 +481,122 @@ def _validate_nameservers(value: list[str]) -> list[str]:
             raise ValueError(f"Invalid nameserver address: {raw}")
         if ns not in out:
             out.append(ns)
+    return out
+
+
+# C-3 / V-11: shared limits — keep aligned with backend helper modules
+# (`content_trigger_helpers.MAX_*`, `visual_change_helpers.MAX_IGNORE_REGIONS`).
+# Defined here so the API rejects bad input with HTTP 422 *before* it ever
+# reaches the live probe path.
+MAX_TRIGGER_WORDS_PER_LIST = 32
+MAX_TRIGGER_WORD_LENGTH = 200
+MAX_TRIGGER_REGEX_LENGTH = 500
+MAX_VISUAL_IGNORE_REGIONS = 8
+
+# C-5 / B-7: browser fetch mode spins up Playwright on every check, so the
+# minimum interval is enforced at the API boundary to prevent a 60s monitor
+# from saturating the Chromium pool. middleReport §6.5 fixed this number.
+MIN_BROWSER_FETCH_INTERVAL_SECONDS = 300
+
+
+def _content_change_fetch_mode(
+    capabilities_patch: Any,
+) -> str | None:
+    """Extract content_change.thresholds.fetchMode from a capabilities patch.
+
+    Accepts both the create-time ``MonitorCapabilitiesPatchSchema`` (already
+    parsed) and a raw dict (from update flows that bypass the patch model).
+    Returns the lowercase fetch mode or ``None`` when not set.
+    """
+    if capabilities_patch is None:
+        return None
+    content = getattr(capabilities_patch, "content_change", None)
+    if content is None and isinstance(capabilities_patch, dict):
+        content = capabilities_patch.get("content_change")
+    if content is None:
+        return None
+    thresholds = getattr(content, "thresholds", None)
+    if thresholds is None and isinstance(content, dict):
+        thresholds = content.get("thresholds")
+    if thresholds is None:
+        return None
+    raw_mode = getattr(thresholds, "fetch_mode", None)
+    if raw_mode is None and isinstance(thresholds, dict):
+        raw_mode = thresholds.get("fetchMode") or thresholds.get("fetch_mode")
+    if not isinstance(raw_mode, str):
+        return None
+    return raw_mode.lower()
+
+
+def _validate_trigger_words(value: list[str] | None) -> list[str] | None:
+    if value is None:
+        return value
+    if len(value) > MAX_TRIGGER_WORDS_PER_LIST:
+        raise ValueError(
+            f"At most {MAX_TRIGGER_WORDS_PER_LIST} trigger / ignore words"
+        )
+    out: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str):
+            raise TypeError("trigger / ignore word entries must be strings")
+        cleaned = raw.strip()
+        if not cleaned:
+            continue
+        if len(cleaned) > MAX_TRIGGER_WORD_LENGTH:
+            raise ValueError(
+                f"trigger / ignore word exceeds {MAX_TRIGGER_WORD_LENGTH} chars"
+            )
+        out.append(cleaned)
+    return out
+
+
+def _validate_trigger_regex(value: str | None) -> str | None:
+    if value is None:
+        return value
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > MAX_TRIGGER_REGEX_LENGTH:
+        raise ValueError(
+            f"triggerRegex exceeds {MAX_TRIGGER_REGEX_LENGTH} chars"
+        )
+    try:
+        re.compile(cleaned)
+    except re.error as exc:
+        raise ValueError(f"Invalid triggerRegex: {exc}") from exc
+    return cleaned
+
+
+def _validate_ignore_regions(
+    value: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    if value is None:
+        return value
+    if len(value) > MAX_VISUAL_IGNORE_REGIONS:
+        raise ValueError(
+            f"At most {MAX_VISUAL_IGNORE_REGIONS} ignore regions"
+        )
+    out: list[dict[str, Any]] = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise TypeError("ignoreRegions entries must be objects")
+        try:
+            x = float(raw.get("x", 0.0))
+            y = float(raw.get("y", 0.0))
+            w = float(raw.get("width", 0.0))
+            h = float(raw.get("height", 0.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"ignoreRegions geometry must be numeric: {exc}") from exc
+        for label, coord in (("x", x), ("y", y), ("width", w), ("height", h)):
+            if coord < 0 or coord > 100:
+                raise ValueError(
+                    f"ignoreRegions {label} must be within 0..100 (got {coord})"
+                )
+        if w <= 0 or h <= 0:
+            # Drop zero-area regions silently — the editor sometimes emits
+            # them mid-drag and they would otherwise just waste config space.
+            continue
+        out.append({"x": x, "y": y, "width": w, "height": h})
     return out
 
 
@@ -629,6 +818,21 @@ class MonitorCreateRequest(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def browser_fetch_mode_requires_long_interval(self) -> "MonitorCreateRequest":
+        # B-7: implements middleReport §6.5 — browser-mode probes launch
+        # Playwright per check; reject sub-300s intervals at the API boundary
+        # so the monitor service never even sees them.
+        if (
+            _content_change_fetch_mode(self.capabilities) == "browser"
+            and self.interval_seconds < MIN_BROWSER_FETCH_INTERVAL_SECONDS
+        ):
+            raise ValueError(
+                "fetchMode='browser' requires intervalSeconds >= "
+                f"{MIN_BROWSER_FETCH_INTERVAL_SECONDS} (per-check Playwright launch is expensive)"
+            )
+        return self
+
     @field_validator("tags")
     @classmethod
     def tags_ok(cls, v: list[str]) -> list[str]:
@@ -711,6 +915,24 @@ class MonitorUpdateRequest(BaseModel):
             if len(t) > 50:
                 raise ValueError("Tag too long")
         return v
+
+    @model_validator(mode="after")
+    def browser_fetch_mode_requires_long_interval(self) -> "MonitorUpdateRequest":
+        # B-7: catch the obvious "PATCH lowering interval below 300s while
+        # also enabling browser fetch in the same call". When only one of
+        # the two fields is being updated we cannot enforce the constraint
+        # here without loading the existing monitor, so monitor_service has
+        # a defensive runtime guard for the partial-update case.
+        if (
+            _content_change_fetch_mode(self.capabilities) == "browser"
+            and self.interval_seconds is not None
+            and self.interval_seconds < MIN_BROWSER_FETCH_INTERVAL_SECONDS
+        ):
+            raise ValueError(
+                "fetchMode='browser' requires intervalSeconds >= "
+                f"{MIN_BROWSER_FETCH_INTERVAL_SECONDS} (per-check Playwright launch is expensive)"
+            )
+        return self
 
 
 class CapabilityStatusSummary(BaseModel):

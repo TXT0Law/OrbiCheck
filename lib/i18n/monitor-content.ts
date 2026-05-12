@@ -52,6 +52,28 @@ export type MonitorContentMessages = {
   settingsSelectorAdvancedHint: string;
   settingsSelectorListLabel: string;
   settingsSelectorListPlaceholder: string;
+  // C-3: trigger / ignore words / triggerRegex
+  settingsTriggerWordsLabel: string;
+  settingsTriggerWordsHint: string;
+  settingsTriggerWordsPlaceholder: string;
+  settingsIgnoreWordsLabel: string;
+  settingsIgnoreWordsHint: string;
+  settingsIgnoreWordsPlaceholder: string;
+  settingsTriggerRegexLabel: string;
+  settingsTriggerRegexHint: string;
+  settingsTriggerRegexPlaceholder: string;
+  // C-5: rendered DOM fetch
+  settingsFetchModeLabel: string;
+  settingsFetchModeHint: string;
+  settingsFetchModeHttp: string;
+  settingsFetchModeBrowser: string;
+  settingsFetchOptionsTitle: string;
+  settingsFetchOptionsHint: string;
+  settingsFetchWaitForSelectorLabel: string;
+  settingsFetchWaitMsLabel: string;
+  settingsFetchViewportWidthLabel: string;
+  settingsFetchViewportHeightLabel: string;
+  settingsFetchModeBrowserMinIntervalNote: string;
   loadingChanges: string;
   noChangesYet: string;
   deepLinkNoChanges: string;
@@ -152,6 +174,32 @@ const en: MonitorContentMessages = {
     "Restrict content diffing to specific elements (e.g. `main article`, `#content`). Inner text from matched nodes is concatenated in selector order (mergeStrategy concat_ordered). Server-rendered HTML only — CSR pages may need the rendered DOM pipeline to populate target markup.",
   settingsSelectorListLabel: "CSS selectors (one per line)",
   settingsSelectorListPlaceholder: "main article\n#content",
+  settingsTriggerWordsLabel: "Trigger words (one per line)",
+  settingsTriggerWordsHint:
+    "Optional. At least one word (case-insensitive substring match) must appear in the new body for the alert to fire. Empty = no constraint. Up to 32 entries.",
+  settingsTriggerWordsPlaceholder: "price drop\nin stock",
+  settingsIgnoreWordsLabel: "Ignore words (one per line)",
+  settingsIgnoreWordsHint:
+    "Optional. If any of these words appears in the new body, the alert is suppressed (the change row is still stored). Useful for currency widgets, cookie banners, etc.",
+  settingsIgnoreWordsPlaceholder: "preview\ncached at",
+  settingsTriggerRegexLabel: "Trigger regex (optional)",
+  settingsTriggerRegexHint:
+    "Optional. The regex must match somewhere in the new body for the alert to fire. Compiled with case-insensitive + dotall. Invalid regex returns 422 on save.",
+  settingsTriggerRegexPlaceholder: "version\\s+\\d+\\.\\d+\\.\\d+",
+  settingsFetchModeLabel: "Fetch mode",
+  settingsFetchModeHint:
+    "HTTP is cheap and works for static / SSR pages. Browser routes the probe through Playwright so JS-rendered SPAs see real DOM. Switching modes re-establishes the baseline on the next check.",
+  settingsFetchModeHttp: "HTTP (cheap, default)",
+  settingsFetchModeBrowser: "Browser (Playwright; SPA-aware)",
+  settingsFetchOptionsTitle: "Browser fetch options (advanced)",
+  settingsFetchOptionsHint:
+    "Optional knobs forwarded to /api/scan/page-source-rendered. waitForSelector pauses until the CSS selector attaches; waitMs adds a sleep. Both are capped at 10s server-side.",
+  settingsFetchWaitForSelectorLabel: "Wait for selector",
+  settingsFetchWaitMsLabel: "Wait (ms)",
+  settingsFetchViewportWidthLabel: "Viewport width (px)",
+  settingsFetchViewportHeightLabel: "Viewport height (px)",
+  settingsFetchModeBrowserMinIntervalNote:
+    "Browser mode requires a check interval ≥ 300 seconds because each probe spins up a Playwright context.",
   loadingChanges: "Loading changes…",
   noChangesYet: "No content changes detected yet.",
   deepLinkNoChanges:
@@ -243,6 +291,32 @@ const zh: MonitorContentMessages = {
     "把內容比對限縮在指定節點（例如 `main article`、`#content`）。依選擇器順序擷取節點內文並合併（concat_ordered）。僅針對伺服器端 HTML；純前端渲染（CSR）的頁面可能要等到啟用 rendered DOM 管線後才會有對應 markup。",
   settingsSelectorListLabel: "CSS 選擇器（每行一個）",
   settingsSelectorListPlaceholder: "main article\n#content",
+  settingsTriggerWordsLabel: "觸發關鍵字（每行一個）",
+  settingsTriggerWordsHint:
+    "選填。新內容需至少包含其中一個關鍵字（大小寫不敏感、子字串比對）才會發送通知；留空 = 無限制。最多 32 條。",
+  settingsTriggerWordsPlaceholder: "降價\n有貨",
+  settingsIgnoreWordsLabel: "忽略關鍵字（每行一個）",
+  settingsIgnoreWordsHint:
+    "選填。新內容若出現任一關鍵字，通知被抑制（變更紀錄仍寫入）。適合排除匯率小工具、Cookie banner 等動態文字。",
+  settingsIgnoreWordsPlaceholder: "preview\n快取於",
+  settingsTriggerRegexLabel: "觸發 regex（選填）",
+  settingsTriggerRegexHint:
+    "選填。Regex 需在新內容中匹配才會發送通知（IGNORECASE + DOTALL 編譯）。儲存時若 regex 無效會回傳 422。",
+  settingsTriggerRegexPlaceholder: "version\\s+\\d+\\.\\d+\\.\\d+",
+  settingsFetchModeLabel: "抓取模式",
+  settingsFetchModeHint:
+    "HTTP 模式便宜，適合靜態 / SSR 頁面；Browser 模式透過 Playwright 走真實 DOM，SPA 必選。切換模式會在下次檢查重新建立基準。",
+  settingsFetchModeHttp: "HTTP（便宜，預設）",
+  settingsFetchModeBrowser: "Browser（Playwright；支援 SPA）",
+  settingsFetchOptionsTitle: "Browser 抓取選項（進階）",
+  settingsFetchOptionsHint:
+    "選填，會轉發給 /api/scan/page-source-rendered。waitForSelector 等到指定 CSS selector 出現；waitMs 額外 sleep；兩者皆上限 10 秒。",
+  settingsFetchWaitForSelectorLabel: "等待 selector",
+  settingsFetchWaitMsLabel: "等待時間（毫秒）",
+  settingsFetchViewportWidthLabel: "Viewport 寬度（px）",
+  settingsFetchViewportHeightLabel: "Viewport 高度（px）",
+  settingsFetchModeBrowserMinIntervalNote:
+    "Browser 模式檢查間隔需 ≥ 300 秒，避免每次探測都啟動 Playwright context。",
   loadingChanges: "載入變更紀錄…",
   noChangesYet: "尚未偵測到內容變更。",
   deepLinkNoChanges: "連結中指定了變更 ID，但目前沒有任何變更紀錄；連結可能已失效。",

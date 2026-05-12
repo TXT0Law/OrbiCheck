@@ -66,6 +66,18 @@ DEFAULT_CAPABILITIES: dict[str, Any] = {
             "minChangeSizeBytes": None,
             "normalizeVolatileTokens": True,
             "suppressDegradedPageChanges": True,
+            # C-3: notification trigger fields. None = no constraint; the helpers
+            # treat missing keys as "no trigger configured" so existing monitors
+            # see no behaviour change.
+            "triggerWords": None,
+            "ignoreWords": None,
+            "triggerRegex": None,
+            # C-5: rendered-DOM fetch toggle. ``"http"`` keeps the cheap path; the
+            # ``"browser"`` value routes the probe through Playwright via the
+            # scan-service. Validation enforces interval >= MIN_BROWSER_FETCH_INTERVAL_SECONDS
+            # (300s) when this is "browser" — see backend/app/api/v1/schemas/monitor.py.
+            "fetchMode": "http",
+            "fetchOptions": None,
         },
         "intervalOverrideSeconds": None,
     },
@@ -89,6 +101,15 @@ DEFAULT_CAPABILITIES: dict[str, Any] = {
             # is flagged is_diagnostic=True so it never poisons the dHash
             # baseline. Operators can opt out by setting this to False.
             "captureOnFailure": True,
+            # V-10: perceptual hash algorithm. dHash is fast and stable;
+            # pHash is more robust to compression artefacts; aHash is the
+            # cheapest; wHash uses wavelets and is the most robust but
+            # slowest. Switching algorithms re-baselines the monitor.
+            "hashAlgorithm": "dhash",
+            # V-11: list of percentage-based rectangles to mask before
+            # hashing. Empty by default; the UI editor lets operators
+            # ignore time / ad / chat widgets.
+            "ignoreRegions": [],
         },
         "intervalOverrideSeconds": None,
     },
