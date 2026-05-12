@@ -16,9 +16,21 @@ from app.services.security_analyzer import (
     compute_security_score_v2,
     resolve_security_score_for_detail,
 )
-from app.services.scan_client import call_scan_batch_sync
+from app.services.scan_client import call_scan_batch_sync, call_scan_module_sync
 from app.services.transformers import ALL_MODULES, MODULE_BATCHES
 from app.utils.url_safety import validate_url_safety
+
+# S-10: when a single batch HTTP call to the scan-service fails wholesale
+# (connection error, 5xx, MODULE_TIMEOUT_MS), every module that did not yet
+# return a result was previously marked FAILED in one go. We now flag those
+# modules as RETRYING and re-run them one-by-one. The per-module sync call
+# uses the same SCAN_TIMEOUT_MS budget the batch call did, so the worst-case
+# extra wall-clock time is bounded.
+SCAN_PER_MODULE_RETRY_TIMEOUT_S = float(settings.SCAN_TIMEOUT_MS) / 1000.0
+# S-11: a target is treated as "degraded" when at least this many modules
+# in the current batch have failed; the SSE payload exposes this so the
+# frontend can show "target may be slow / unhealthy" UX hints.
+SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD = 3
 
 logger = logging.getLogger(__name__)
 sync_engine = None
@@ -133,6 +145,9 @@ def execute_scan(
                 else sum(len(b) for b in MODULE_BATCHES.values())
             )
             completed = 0
+            # S-11: aggregated failure count across batches feeds the
+            # degradedTarget flag in the SSE progress payload.
+            target_failure_count = 0
 
             batch_names = ["quick", "medium", "heavy"]
             progress_ranges = [(0, 30), (30, 70), (70, 100)]
@@ -164,6 +179,11 @@ def execute_scan(
                                 "detail": f"Running {batch_name} modules ({len(modules)} modules)",
                                 "completedModules": completed,
                                 "totalModules": total_modules,
+                                # S-11: per-batch in-flight module list so the UI can
+                                # render "currently scanning: status, headers, …".
+                                "currentModules": list(modules),
+                                "degradedTarget": target_failure_count
+                                >= SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD,
                             }
                         ),
                     )
@@ -175,6 +195,7 @@ def execute_scan(
                     )
                     return {"scan_id": scan_id, "status": ScanStatus.CANCELLED.value}
 
+                batch_failed_wholesale = False
                 try:
                     batch_result = call_scan_batch_sync(url, modules, effective_scan_options)
                     results = batch_result.get("results", {})
@@ -185,6 +206,8 @@ def execute_scan(
                         duration_ms = module_result.get("durationMs", 0)
 
                         all_raw_results[module_name] = raw_data if success else None
+                        if not success:
+                            target_failure_count += 1
 
                         db.execute(
                             update(ScanModuleResult)
@@ -217,8 +240,79 @@ def execute_scan(
                         completed,
                         total_modules,
                     )
-                    for module_name in modules:
-                        if module_name not in all_raw_results:
+                    batch_failed_wholesale = True
+
+                if batch_failed_wholesale:
+                    # S-10: don't slam every still-pending module to FAILED. Mark
+                    # them RETRYING so the UI shows the transient state, then
+                    # re-run each one individually below. This recovers from the
+                    # common "scan-service was momentarily 5xx during the batch
+                    # round-trip" failure mode without losing modules whose
+                    # individual call would have succeeded.
+                    pending_modules = [
+                        m for m in modules if m not in all_raw_results
+                    ]
+                    if pending_modules:
+                        db.execute(
+                            update(ScanModuleResult)
+                            .where(
+                                ScanModuleResult.scan_id == uuid.UUID(scan_id),
+                                ScanModuleResult.module_name.in_(pending_modules),
+                            )
+                            .values(
+                                status=ModuleStatus.RETRYING,
+                                error_message="Batch HTTP failed; retrying per module",
+                            )
+                        )
+                        db.commit()
+                        redis.set(
+                            progress_key,
+                            json.dumps(
+                                {
+                                    "progress": progress_start,
+                                    "phase": batch_name,
+                                    "detail": (
+                                        f"Retrying {len(pending_modules)} {batch_name}"
+                                        f" modules individually"
+                                    ),
+                                    "completedModules": completed,
+                                    "totalModules": total_modules,
+                                    "currentModules": pending_modules,
+                                    "degradedTarget": True,
+                                }
+                            ),
+                        )
+                        for module_name in pending_modules:
+                            if _is_scan_aborted(db, scan_id, redis):
+                                return {
+                                    "scan_id": scan_id,
+                                    "status": ScanStatus.CANCELLED.value,
+                                }
+                            envelope = call_scan_module_sync(
+                                module_name,
+                                url,
+                                effective_scan_options,
+                                scan_id=scan_id,
+                                trace_id=scan_id,
+                                timeout_s=SCAN_PER_MODULE_RETRY_TIMEOUT_S,
+                            )
+                            raw_data = envelope.get("data") or {}
+                            success = bool(envelope.get("success"))
+                            duration_ms = int(envelope.get("durationMs") or 0)
+                            all_raw_results[module_name] = raw_data if success else None
+                            if not success:
+                                target_failure_count += 1
+                            error_message = None
+                            if not success:
+                                error_message = (
+                                    envelope.get("error")
+                                    or (
+                                        raw_data.get("error")
+                                        if isinstance(raw_data, dict)
+                                        else None
+                                    )
+                                    or "Module retry failed"
+                                )
                             db.execute(
                                 update(ScanModuleResult)
                                 .where(
@@ -226,12 +320,17 @@ def execute_scan(
                                     ScanModuleResult.module_name == module_name,
                                 )
                                 .values(
-                                    status=ModuleStatus.FAILED,
-                                    error_message="Module batch failed",
+                                    status=ModuleStatus.SUCCESS
+                                    if success
+                                    else ModuleStatus.FAILED,
+                                    raw_result=raw_data,
+                                    duration_ms=duration_ms,
+                                    error_message=error_message,
                                     completed_at=datetime.now(timezone.utc),
                                 )
                             )
                             completed += 1
+                            db.commit()
                     db.execute(
                         update(Scan)
                         .where(Scan.id == uuid.UUID(scan_id))
@@ -255,6 +354,9 @@ def execute_scan(
                             "detail": f"Completed {batch_name} batch",
                             "completedModules": completed,
                             "totalModules": total_modules,
+                            "currentModules": [],
+                            "degradedTarget": target_failure_count
+                            >= SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD,
                         }
                     ),
                 )
@@ -310,6 +412,9 @@ def execute_scan(
                         "detail": f"Scan complete. {success_count}/{total_modules} modules succeeded.",
                         "completedModules": completed,
                         "totalModules": total_modules,
+                        "currentModules": [],
+                        "degradedTarget": target_failure_count
+                        >= SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD,
                     }
                 ),
             )
@@ -331,9 +436,11 @@ def execute_scan(
                 {
                     "progress": 0,
                     "phase": "error",
-                        "detail": "Scan task failed due to an internal error",
+                    "detail": "Scan task failed due to an internal error",
                     "completedModules": 0,
                     "totalModules": 0,
+                    "currentModules": [],
+                    "degradedTarget": False,
                     "error": True,
                 }
             ),

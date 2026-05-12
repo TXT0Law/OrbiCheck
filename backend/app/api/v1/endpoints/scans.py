@@ -526,6 +526,10 @@ async def scan_progress_sse(
                 "detail": "Scan queued",
                 "completedModules": 0,
                 "totalModules": 0,
+                # S-11: include new fields up-front so the SSE client never
+                # has to special-case "old payload without currentModules".
+                "currentModules": [],
+                "degradedTarget": False,
             }
             yield f"data: {json.dumps(initial_state)}\n\n"
 
@@ -548,6 +552,8 @@ async def scan_progress_sse(
                 "detail": "Progress stream interrupted",
                 "completedModules": 0,
                 "totalModules": 0,
+                "currentModules": [],
+                "degradedTarget": False,
                 "error": True,
             }
             yield f"data: {json.dumps(error_event)}\n\n"

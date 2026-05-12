@@ -1,12 +1,26 @@
 "use client";
 
+import { MonitorVisualMaskEditor } from "@/components/monitor/monitor-visual-mask-editor";
 import { Input } from "@/components/ui/input";
-import type { VisualThresholds } from "@/shared/types/monitor";
+import {
+  VISUAL_HASH_ALGORITHMS,
+  VISUAL_MAX_IGNORE_REGIONS,
+  type VisualHashAlgorithm,
+  type VisualIgnoreRegion,
+  type VisualThresholds,
+} from "@/shared/types/monitor";
 
 interface MonitorVisualThresholdsFormProps {
   value: VisualThresholds;
   onChange: (v: VisualThresholds) => void;
 }
+
+const HASH_ALGORITHM_DESCRIPTIONS: Record<VisualHashAlgorithm, string> = {
+  dhash: "dHash — fast, robust to small geometry shifts (default).",
+  phash: "pHash — DCT-based; tolerates JPEG / WebP artefacts.",
+  ahash: "aHash — cheapest; sensitive to lighting / contrast.",
+  whash: "wHash — wavelet-based; most resilient but slowest.",
+};
 
 export function MonitorVisualThresholdsForm({ value, onChange }: MonitorVisualThresholdsFormProps) {
   return (
@@ -114,6 +128,60 @@ export function MonitorVisualThresholdsForm({ value, onChange }: MonitorVisualTh
           </span>
         </label>
       </div>
+      {/* V-10: hash algorithm selector. Switching algorithms re-baselines
+          the monitor; the helper text explains so operators don't think
+          previous captures are lost. */}
+      <label className="flex flex-col gap-1">
+        <span className="font-medium text-zinc-900 dark:text-white">
+          Perceptual hash algorithm
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {value.hashAlgorithm
+            ? HASH_ALGORITHM_DESCRIPTIONS[value.hashAlgorithm as VisualHashAlgorithm]
+            : HASH_ALGORITHM_DESCRIPTIONS.dhash}
+          {" Switching algorithms re-baselines the monitor on the next capture."}
+        </span>
+        <select
+          className="h-9 rounded-md border border-zinc-200 bg-white px-2 text-sm text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+          value={value.hashAlgorithm ?? "dhash"}
+          onChange={(e) =>
+            onChange({
+              ...value,
+              hashAlgorithm: e.target.value as VisualHashAlgorithm,
+            })
+          }
+        >
+          {VISUAL_HASH_ALGORITHMS.map((algo) => (
+            <option key={algo} value={algo}>
+              {algo}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {/* V-11: ignore-region editor. Hidden inside <details> so first-time
+          operators are not overwhelmed; they can opt in once they see ad /
+          chat widgets producing false-positive change events. */}
+      <details className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+        <summary className="cursor-pointer font-medium text-zinc-900 dark:text-white">
+          Ignore regions ({(value.ignoreRegions ?? []).length}/{VISUAL_MAX_IGNORE_REGIONS})
+        </summary>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Mask up to {VISUAL_MAX_IGNORE_REGIONS} rectangles before hashing — useful for
+          dynamic widgets (timers, ads, chat notifications) that constantly cross the
+          similarity threshold. Coordinates are percentages of the captured image.
+        </p>
+        <div className="mt-3">
+          <MonitorVisualMaskEditor
+            regions={value.ignoreRegions ?? []}
+            onChange={(regions: VisualIgnoreRegion[]) =>
+              onChange({ ...value, ignoreRegions: regions })
+            }
+            maxRegions={VISUAL_MAX_IGNORE_REGIONS}
+          />
+        </div>
+      </details>
+
       <label className="flex flex-col gap-1">
         <span className="font-medium text-zinc-900 dark:text-white">
           Content ↔ screenshot time window (seconds)

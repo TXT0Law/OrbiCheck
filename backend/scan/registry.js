@@ -24,6 +24,11 @@ const EXCLUDED_FILES = new Set([
   // trace-route is disabled (P1-9): the .js file is kept for the future
   // execFile-based reimplementation but must not be auto-registered.
   'trace-route.js',
+  // C-5: page-source-rendered is invoked by the monitor service only
+  // (content_change browser fetch mode). It does not appear in the scan
+  // batch flow and is exposed via an explicit route in server.js so
+  // shared/constants/modules.ts does not need to include it.
+  'page-source-rendered.js',
 ]);
 
 export async function loadModules() {

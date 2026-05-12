@@ -123,11 +123,13 @@ def _is_skipped(module_result) -> bool:
 def _determine_job_status(module_result) -> str | None:
     """
     Map ScanModuleResult to display status.
-    Returns None for PENDING/RUNNING (excluded from moduleJobs).
+    Returns None for PENDING/RUNNING/RETRYING (excluded from moduleJobs;
+    these are not yet terminal so the timeline view should not render
+    them as a final outcome).
     """
     status_value = getattr(getattr(module_result, "status", None), "value", None)
     status = str(status_value or "")
-    if status == "pending" or status == "running":
+    if status in ("pending", "running", "retrying"):
         return None
     if status == "failed":
         return "failed"
@@ -1571,11 +1573,21 @@ def transform_firewall(raw: dict) -> dict:
     }
 
 
+# B-10: keys that the S-9 "all providers missing key" envelope adds to the
+# threats payload. They describe the skipped state at the top level (the
+# transformer's `_is_skipped` already detects them via raw_result.skipped) but
+# the per-provider iterator below would otherwise render them as bogus
+# "skipped" / "note" rows in the UI entry list.
+_THREATS_NON_PROVIDER_KEYS: frozenset[str] = frozenset({"skipped", "note"})
+
+
 def transform_threats(raw: dict, block_lists_raw: dict | None = None) -> dict:
     """Raw threats -> ThreatsResult."""
     entries = []
     if isinstance(raw, dict):
         for key, val in raw.items():
+            if key in _THREATS_NON_PROVIDER_KEYS:
+                continue
             entries.append(
                 {
                     "source": key,
@@ -1585,6 +1597,8 @@ def transform_threats(raw: dict, block_lists_raw: dict | None = None) -> dict:
             )
     if isinstance(block_lists_raw, dict):
         for key, val in block_lists_raw.items():
+            if key in _THREATS_NON_PROVIDER_KEYS:
+                continue
             entries.append(
                 {
                     "source": f"blocklist:{key}",

@@ -171,7 +171,47 @@ export interface ContentThresholds {
   suppressDegradedPageChanges?: boolean | null;
   /** Advanced: ordered regex replacements (bounded; server-enforced limits). */
   normalizationRules?: ContentNormalizationRule[] | null;
+  /**
+   * C-3: at least one keyword (case-insensitive substring match) must appear
+   * in the new body for an alert to fire. Empty list = no constraint.
+   */
+  triggerWords?: string[] | null;
+  /**
+   * C-3: any keyword present in the new body suppresses the alert (the
+   * change row is still stored for audit). Useful for "currency converter"
+   * widgets, cookie banners, etc.
+   */
+  ignoreWords?: string[] | null;
+  /** C-3: optional alternative to triggerWords — full regex. */
+  triggerRegex?: string | null;
+  /** C-5: select between cheap HTTP fetch and Playwright-rendered DOM. */
+  fetchMode?: ContentFetchMode | null;
+  /**
+   * C-5: per-monitor knobs for the rendered-DOM fetch path. Ignored when
+   * fetchMode is omitted or "http". Bounded server-side; the editor
+   * surfaces the same caps in the advanced section.
+   */
+  fetchOptions?: ContentFetchOptions | null;
 }
+
+/** C-5: how the monitor obtains the body for content_change comparison. */
+export const CONTENT_FETCH_MODES = ["http", "browser"] as const;
+export type ContentFetchMode = (typeof CONTENT_FETCH_MODES)[number];
+
+/**
+ * C-5: per-monitor browser-fetch knobs. The scan-service caps each value
+ * (waitMs ≤ 10s, viewport within 320–3840 / 240–2160) so a malformed
+ * config can never tie up the Playwright pool.
+ */
+export interface ContentFetchOptions {
+  waitForSelector?: string | null;
+  waitMs?: number | null;
+  viewportWidth?: number | null;
+  viewportHeight?: number | null;
+}
+
+/** C-5/B-7: minimum check interval when fetchMode === "browser". */
+export const MONITOR_BROWSER_FETCH_MIN_INTERVAL_SECONDS = 300;
 
 export interface SslThresholds {
   /** Warning when days remaining <= this */
@@ -219,10 +259,33 @@ export interface CtLogThresholds {
   alertOnNewEntry: boolean;
 }
 
+/** V-10: supported perceptual hash algorithms. dHash is the default. */
+export const VISUAL_HASH_ALGORITHMS = [
+  "dhash",
+  "phash",
+  "ahash",
+  "whash",
+] as const;
+export type VisualHashAlgorithm = (typeof VISUAL_HASH_ALGORITHMS)[number];
+
+/**
+ * V-11: percentage-based rectangle (all coords 0-100) to ignore during
+ * perceptual hash comparison. Stored alongside the visual_change thresholds;
+ * the server fills the rectangle with black before hashing.
+ */
+export interface VisualIgnoreRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export const VISUAL_MAX_IGNORE_REGIONS = 8;
+
 export interface VisualThresholds {
   /**
    * Minimum similarity (0–100) vs previous capture; below triggers a visual change event.
-   * Server uses dHash Hamming distance (64-bit).
+   * Server uses the configured perceptual hash algorithm (Hamming distance, 64-bit).
    */
   similarityThresholdPercent: number | null;
   viewportWidth?: number | null;
@@ -237,6 +300,18 @@ export interface VisualThresholds {
    * similarity comparison. Defaults to `true` for new monitors.
    */
   captureOnFailure?: boolean | null;
+  /**
+   * V-10: perceptual hash algorithm to use. Switching the algorithm
+   * implicitly re-baselines the monitor — captures with mismatched
+   * algorithms are never compared against each other.
+   */
+  hashAlgorithm?: VisualHashAlgorithm | null;
+  /**
+   * V-11: rectangles to ignore (mask with black) before hashing. Up to
+   * VISUAL_MAX_IGNORE_REGIONS entries. Coordinates are percentages so
+   * the same mask survives a viewport change.
+   */
+  ignoreRegions?: VisualIgnoreRegion[] | null;
 }
 
 /** Maps capability type to its threshold shape */

@@ -113,7 +113,7 @@ from app.services.notification_channels.lifecycle import (
 )
 from app.services.visual_change_helpers import (
     DHASH_BIT_LENGTH,
-    compute_dhash_hex,
+    compute_perceptual_hash_hex,
     decode_screenshot_payload,
     get_visual_thresholds,
     hamming_between_hex,
@@ -138,6 +138,17 @@ from app.services.content_change_helpers import (
     get_content_thresholds,
     normalize_body_for_comparison,
     validate_content_response,
+)
+from app.services.content_trigger_helpers import (
+    evaluate_content_triggers,
+    get_content_trigger_config,
+)
+from app.services.content_rendered_fetch import (
+    MIN_BROWSER_FETCH_INTERVAL_SECONDS,
+    RenderedFetchError,
+    fetch_rendered_dom,
+    get_rendered_fetch_options,
+    is_rendered_dom_enabled,
 )
 from app.services.content_selector_extraction import (
     SelectorValidationError,
@@ -1623,6 +1634,31 @@ async def _run_content_change_capture(
         prev_same_fingerprint_at=prev_same_at,
         prior_dispatched_same_fp_in_window=prior_dispatched,
     )
+
+    # C-3: trigger / ignore words run AFTER the standard dedup / repeat-window
+    # logic so they only override a "would-have-fired" decision. We never
+    # un-suppress an alert (alert policy wins), but we can suppress one the
+    # policy approved.
+    matched_trigger: str | None = None
+    if dispatch:
+        try:
+            trigger_cfg = get_content_trigger_config(monitor.capabilities)
+        except Exception as exc:
+            # Bad regex stored in JSONB should not crash live probes; log and
+            # treat as if no triggers were configured.
+            logger.warning(
+                "content_trigger_config_invalid",
+                monitor_id=str(monitor.id),
+                error=str(exc)[:300],
+            )
+            trigger_cfg = None
+        if trigger_cfg is not None:
+            evaluation = evaluate_content_triggers(body_raw, trigger_cfg)
+            if not evaluation.notify:
+                dispatch = False
+                suppress_reason = evaluation.suppress_reason or "content_trigger"
+            matched_trigger = evaluation.matched_trigger
+
     ch.notification_dispatched = dispatch
     await db.flush()
 
@@ -1645,29 +1681,35 @@ async def _run_content_change_capture(
     if dispatch:
         content_category = str(diff_summary.get("changeCategory", "small"))
         content_severity = "warning" if content_category in {"medium", "large"} else "info"
+        actual_value = f"diffLines:{diff_summary.get('totalDiffLines', 0)}"
+        if matched_trigger:
+            actual_value = f"{actual_value};trigger:{matched_trigger}"
         await alert_service.evaluate_and_dispatch_alert(
             monitor,
             "content_change",
             "content_change",
             content_severity,
-            f"diffLines:{diff_summary.get('totalDiffLines', 0)}",
+            actual_value,
             f"Content changed ({content_category})",
             db,
             redis,
             threshold_config=copy.deepcopy(thresholds.__dict__),
         )
+        change_payload = {
+            "changeId": str(ch.id),
+            "detectedAt": ch_detected_at.isoformat(),
+            "diffSummary": diff_summary,
+            "previousHash": ch.previous_hash,
+            "currentHash": ch.current_hash,
+        }
+        if matched_trigger:
+            change_payload["matchedTriggerWord"] = matched_trigger
         await _publish_monitor_event(
             redis,
             monitor.id,
             monitor.user_id,
             "content_changed",
-            {
-                "changeId": str(ch.id),
-                "detectedAt": ch_detected_at.isoformat(),
-                "diffSummary": diff_summary,
-                "previousHash": ch.previous_hash,
-                "currentHash": ch.current_hash,
-            },
+            change_payload,
             dispatch_webhook=False,
         )
     else:
@@ -1703,6 +1745,7 @@ async def _run_visual_change_capture(
     redis: Redis | None,
     *,
     is_diagnostic: bool = False,
+    failure_reason_out: dict[str, str] | None = None,
 ) -> MonitorVisualCapture | None:
     """Store PNG capture and optional MonitorVisualChange when dHash similarity drops.
 
@@ -1710,7 +1753,19 @@ async def _run_visual_change_capture(
     excluded from baseline / change comparison. This is how we surface a
     screenshot even when the HTTP probe failed (bot wall, 5xx, TLS error).
     Returns the created capture (or ``None`` if no capture was stored).
+
+    R-3: pass an empty ``failure_reason_out`` dict to receive a short
+    machine-readable failure code under ``failure_reason_out["reason"]``
+    (e.g. ``"screenshot_timeout"``, ``"screenshot_dns_error"``,
+    ``"screenshot_payload_invalid"``). The V-2 capture-now endpoint uses
+    this to give operators a specific 502 instead of "did not return a
+    usable image".
     """
+
+    def _record_reason(reason: str) -> None:
+        if failure_reason_out is not None and "reason" not in failure_reason_out:
+            failure_reason_out["reason"] = reason
+
     vth = get_visual_thresholds(monitor.capabilities)
     try:
         payload = await call_screenshot_service(
@@ -1719,6 +1774,32 @@ async def _run_visual_change_capture(
             viewport_height=vth.viewport_height,
             full_page=vth.full_page,
         )
+    except httpx.TimeoutException as exc:
+        logger.warning(
+            "visual_screenshot_timeout",
+            monitor_id=str(monitor.id),
+            is_diagnostic=is_diagnostic,
+            error=str(exc)[:400],
+        )
+        _record_reason("screenshot_timeout")
+        return None
+    except httpx.ConnectError as exc:
+        msg = str(exc).lower()
+        is_dns = (
+            "name or service not known" in msg
+            or "nodename nor servname" in msg
+            or "no address associated" in msg
+            or "name resolution" in msg
+        )
+        logger.warning(
+            "visual_screenshot_connect_error",
+            monitor_id=str(monitor.id),
+            is_diagnostic=is_diagnostic,
+            dns_failure=is_dns,
+            error=str(exc)[:400],
+        )
+        _record_reason("screenshot_dns_error" if is_dns else "screenshot_connect_error")
+        return None
     except httpx.HTTPError as exc:
         logger.warning(
             "visual_screenshot_http_error",
@@ -1726,6 +1807,7 @@ async def _run_visual_change_capture(
             is_diagnostic=is_diagnostic,
             error=str(exc)[:400],
         )
+        _record_reason("screenshot_http_error")
         return None
     except Exception as exc:
         logger.warning(
@@ -1734,19 +1816,44 @@ async def _run_visual_change_capture(
             is_diagnostic=is_diagnostic,
             error=str(exc)[:400],
         )
+        _record_reason("screenshot_unexpected_error")
         return None
+
+    if not payload.get("success"):
+        upstream_err = str(payload.get("error") or "").lower()
+        if "timeout" in upstream_err or "timed-out" in upstream_err:
+            _record_reason("screenshot_target_timeout")
+        elif "navigation" in upstream_err:
+            _record_reason("screenshot_target_navigation_failed")
+        elif "ssl" in upstream_err or "certificate" in upstream_err:
+            _record_reason("screenshot_target_tls_error")
+        else:
+            _record_reason("screenshot_service_unsuccessful")
 
     decoded = decode_screenshot_payload(payload)
     if decoded is None:
+        # decode_screenshot_payload already records a structured warning; fall
+        # back to a generic reason if the upstream did not surface one.
+        if failure_reason_out is not None and "reason" not in failure_reason_out:
+            failure_reason_out["reason"] = "screenshot_payload_invalid"
         return None
     png_bytes, w_px, h_px = decoded
     try:
-        phash = await asyncio.to_thread(compute_dhash_hex, png_bytes)
+        # V-10/V-11: hash with the monitor-configured algorithm and (when
+        # set) ignore-region mask. Falls back to dHash on unknown algo —
+        # see compute_perceptual_hash_hex.
+        phash = await asyncio.to_thread(
+            compute_perceptual_hash_hex,
+            png_bytes,
+            algorithm=vth.hash_algorithm,
+            ignore_regions=vth.ignore_regions,
+        )
     except Exception as exc:
         logger.warning(
-            "visual_dhash_failed",
+            "visual_perceptual_hash_failed",
             monitor_id=str(monitor.id),
             is_diagnostic=is_diagnostic,
+            algorithm=vth.hash_algorithm,
             error=str(exc)[:300],
         )
         # Even when the hash fails we keep the bytes as a diagnostic so the
@@ -1755,13 +1862,16 @@ async def _run_visual_change_capture(
             return None
         phash = None
 
-    # Compare only against the most recent NON-diagnostic capture; diagnostic
-    # rows would otherwise pull the baseline in arbitrary directions.
+    # Compare only against the most recent NON-diagnostic capture that used
+    # the SAME hash algorithm; comparing a phash to a dhash would produce
+    # garbage similarity numbers. Switching the algorithm therefore implicitly
+    # re-baselines the monitor (next capture becomes the new baseline).
     q_prev = (
         select(MonitorVisualCapture)
         .where(
             MonitorVisualCapture.monitor_id == monitor.id,
             MonitorVisualCapture.is_diagnostic.is_(False),
+            MonitorVisualCapture.dhash_algo == vth.hash_algorithm,
         )
         .order_by(MonitorVisualCapture.captured_at.desc())
         .limit(1)
@@ -1782,7 +1892,9 @@ async def _run_visual_change_capture(
         viewport_height=vth.viewport_height,
         full_page=vth.full_page,
         perceptual_hash_hex=phash,
-        dhash_algo="dhash",
+        # ``dhash_algo`` is the legacy column name; we now store any of the
+        # supported algorithms here so prev/current lookups can match.
+        dhash_algo=vth.hash_algorithm,
         is_diagnostic=is_diagnostic,
     )
     db.add(cap)
@@ -1808,9 +1920,11 @@ async def _run_visual_change_capture(
     summary: dict[str, Any] = {
         "hammingDistance": ham,
         "similarityPercent": sim,
-        "perceptualHashAlgo": "dhash",
+        "perceptualHashAlgo": vth.hash_algorithm,
         "similarityThresholdPercent": vth.similarity_threshold_percent,
     }
+    if vth.ignore_regions:
+        summary["ignoreRegionsApplied"] = len(vth.ignore_regions)
     vch = MonitorVisualChange(
         monitor_id=monitor.id,
         previous_capture_id=prev.id,
@@ -1996,6 +2110,30 @@ async def execute_check(
         request_body = (
             monitor.http_body if method in _BODY_BEARING_METHODS else None
         )
+        # C-5: when fetchMode = "browser" we route content_change through the
+        # scan-service Playwright pool; HEAD-style HTTP probes still happen
+        # for uptime semantics (visual_change uses its own pipeline).
+        rendered_dom = (
+            "content_change" in enabled
+            and is_rendered_dom_enabled(monitor.capabilities)
+            and method in {"GET", "POST"}
+        )
+        # B-7: API-boundary validation rejects sub-300s intervals when
+        # fetchMode is set to "browser" via create / update. But existing
+        # monitors with shorter intervals can still flip to browser mode by
+        # bypassing the API (raw DB edit, capability migration). Defensively
+        # demote to HTTP fetch with a one-line warning so we never spawn a
+        # Playwright context per minute on a saturated host.
+        if rendered_dom and (
+            monitor.interval_seconds or 0
+        ) < MIN_BROWSER_FETCH_INTERVAL_SECONDS:
+            logger.warning(
+                "content_change_browser_fetch_demoted_short_interval",
+                monitor_id=str(monitor.id),
+                interval_seconds=monitor.interval_seconds,
+                min_required_seconds=MIN_BROWSER_FETCH_INTERVAL_SECONDS,
+            )
+            rendered_dom = False
         try:
             async with httpx.AsyncClient(
                 timeout=settings.MONITOR_REQUEST_TIMEOUT_S,
@@ -2004,12 +2142,36 @@ async def execute_check(
             ) as client:
                 t0 = datetime.now(timezone.utc)
                 if "content_change" in enabled:
-                    response = await client.request(
-                        method,
-                        monitor.url,
-                        headers=headers,
-                        content=request_body,
-                    )
+                    if rendered_dom:
+                        try:
+                            response = await fetch_rendered_dom(
+                                str(monitor.url),
+                                options=get_rendered_fetch_options(
+                                    monitor.capabilities
+                                ),
+                                monitor_id=str(monitor.id),
+                            )
+                        except RenderedFetchError as exc:
+                            logger.warning(
+                                "content_change_rendered_fetch_failed",
+                                monitor_id=str(monitor.id),
+                                error=str(exc)[:300],
+                            )
+                            # Fall back to the cheap HTTP path so a transient
+                            # browser-pool issue does not blank the monitor.
+                            response = await client.request(
+                                method,
+                                monitor.url,
+                                headers=headers,
+                                content=request_body,
+                            )
+                    else:
+                        response = await client.request(
+                            method,
+                            monitor.url,
+                            headers=headers,
+                            content=request_body,
+                        )
                     elapsed_ms = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
                     check.status_code = response.status_code
                     check.response_time_ms = elapsed_ms
@@ -2982,20 +3144,96 @@ async def trigger_visual_capture_now(
                 status_code=429,
             )
 
+    failure_reason: dict[str, str] = {}
     capture = await _run_visual_change_capture(
         monitor,
         None,
         db,
         redis,
         is_diagnostic=False,
+        failure_reason_out=failure_reason,
     )
     if capture is None:
+        # VC-2: V-2 capture-now used to surface a 502 toast and store NOTHING
+        # when the screenshot service failed — so the UI showed "0 successful
+        # · 0 diagnostic" no matter how many times the operator clicked the
+        # button. Now we ALWAYS try once more in diagnostic mode if the first
+        # attempt produced no row, so a bot-wall / 5xx page still lands in
+        # the timeline as a diagnostic capture (`is_diagnostic=true`,
+        # excluded from baseline). The original failure_reason is preserved
+        # on the exception when even the diagnostic fallback fails.
+        diagnostic_reason: dict[str, str] = {}
+        diagnostic_capture = await _run_visual_change_capture(
+            monitor,
+            None,
+            db,
+            redis,
+            is_diagnostic=True,
+            failure_reason_out=diagnostic_reason,
+        )
+        if diagnostic_capture is not None:
+            return _visual_capture_to_response(diagnostic_capture)
+
+        # Both regular and diagnostic attempts failed — surface the FIRST
+        # failure reason because that's the user-actionable one (the
+        # diagnostic retry shares the same upstream error in practice).
+        reason = failure_reason.get("reason") or diagnostic_reason.get(
+            "reason", "screenshot_unknown_error"
+        )
+        message = _VISUAL_CAPTURE_FAILURE_MESSAGES.get(
+            reason, "Screenshot service did not return a usable image"
+        )
         raise AppException(
-            code="VISUAL_CAPTURE_FAILED",
-            message="Screenshot service did not return a usable image",
+            code=f"VISUAL_CAPTURE_FAILED:{reason}",
+            message=message,
             status_code=502,
         )
     return _visual_capture_to_response(capture)
+
+
+# R-3: human-readable explanations for each ``screenshot_*`` reason code
+# emitted by ``_run_visual_change_capture``. Keep the strings concise so the
+# UI toast doesn't wrap awkwardly. The reason code itself is also returned
+# in the AppException ``code`` field for programmatic handling.
+_VISUAL_CAPTURE_FAILURE_MESSAGES: dict[str, str] = {
+    "screenshot_timeout": (
+        "Screenshot service did not respond in time. The target page may be "
+        "loading slowly or behind a bot wall."
+    ),
+    "screenshot_dns_error": (
+        "Screenshot service could not resolve the target hostname. "
+        "Check DNS configuration and that the URL is reachable."
+    ),
+    "screenshot_connect_error": (
+        "Screenshot service could not connect to the target. "
+        "The target may be offline or blocking outbound traffic."
+    ),
+    "screenshot_http_error": (
+        "Screenshot service returned an HTTP error. Check the scan-service "
+        "logs for the upstream response."
+    ),
+    "screenshot_target_timeout": (
+        "Target page did not load within the configured navigation timeout (18s). "
+        "Try a smaller viewport, or split the monitor into a content-only check."
+    ),
+    "screenshot_target_navigation_failed": (
+        "Target page navigation failed (network error or invalid response)."
+    ),
+    "screenshot_target_tls_error": (
+        "Target TLS / certificate error during screenshot capture."
+    ),
+    "screenshot_service_unsuccessful": (
+        "Screenshot service returned an unsuccessful envelope. "
+        "Check the scan-service logs for details."
+    ),
+    "screenshot_payload_invalid": (
+        "Screenshot service returned an unreadable payload "
+        "(corrupt PNG, oversize image, or empty body)."
+    ),
+    "screenshot_unexpected_error": (
+        "Unexpected screenshot service error. See backend logs for the trace."
+    ),
+}
 
 
 async def get_visual_captures(

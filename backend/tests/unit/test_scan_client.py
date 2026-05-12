@@ -128,6 +128,129 @@ async def test_call_scan_batch_falls_back_when_registry_lookup_fails(
     post.assert_awaited_once()
 
 
+class _SyncClientStub:
+    def __init__(self, get) -> None:  # type: ignore[no-untyped-def]
+        self.get = get
+
+    def __enter__(self) -> "_SyncClientStub":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+@pytest.mark.unit
+def test_call_scan_module_sync_envelope_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B-9 / S-10: success path returns the same envelope shape as the batch helper."""
+    request = httpx.Request("GET", "http://scan.local/api/scan/ssl")
+    response = httpx.Response(
+        200,
+        json={"success": True, "data": {"grade": "A"}, "durationMs": 42, "statusCode": 200},
+        request=request,
+    )
+    get = lambda *_a, **_kw: response  # noqa: E731 — short stub
+    monkeypatch.setattr(
+        scan_client.httpx, "Client", lambda **_kw: _SyncClientStub(get)
+    )
+
+    envelope = scan_client.call_scan_module_sync("ssl", "https://example.com")
+
+    assert envelope["success"] is True
+    assert envelope["statusCode"] == 200
+    assert envelope["data"] == {"grade": "A"}
+    assert envelope["durationMs"] == 42
+    assert "error" not in envelope
+
+
+@pytest.mark.unit
+def test_call_scan_module_sync_failed_envelope_carries_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B-9 / S-10: a failed module returns success=false with `error` populated."""
+    request = httpx.Request("GET", "http://scan.local/api/scan/whois")
+    response = httpx.Response(
+        200,
+        json={
+            "success": False,
+            "data": {"error": "WHOIS rate limited"},
+            "error": "WHOIS rate limited",
+            "durationMs": 12_345,
+            "statusCode": 200,
+        },
+        request=request,
+    )
+    monkeypatch.setattr(
+        scan_client.httpx,
+        "Client",
+        lambda **_kw: _SyncClientStub(lambda *_a, **_kw: response),
+    )
+
+    envelope = scan_client.call_scan_module_sync("whois", "https://example.com")
+
+    assert envelope["success"] is False
+    assert envelope["error"] == "WHOIS rate limited"
+    assert envelope["data"]["error"] == "WHOIS rate limited"
+
+
+@pytest.mark.unit
+def test_call_scan_module_sync_handles_transport_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B-9 / S-10: connection errors must surface as a failure envelope, not raise."""
+
+    def _raise(*_a: object, **_kw: object) -> None:
+        raise httpx.ConnectError("scan-service unreachable")
+
+    monkeypatch.setattr(
+        scan_client.httpx, "Client", lambda **_kw: _SyncClientStub(_raise)
+    )
+
+    envelope = scan_client.call_scan_module_sync("ssl", "https://example.com")
+
+    assert envelope["success"] is False
+    assert envelope["statusCode"] == 599
+    assert "scan-service unreachable" in envelope["error"]
+
+
+@pytest.mark.unit
+def test_call_scan_module_sync_forwards_scan_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B-9 / S-10: scalar scanOptions become query string params on the GET."""
+    captured: dict[str, Any] = {}
+    request = httpx.Request("GET", "http://scan.local/api/scan/ports")
+    response = httpx.Response(
+        200,
+        json={"success": True, "data": {}, "durationMs": 0, "statusCode": 200},
+        request=request,
+    )
+
+    def _get(*_args: object, **kwargs: object) -> httpx.Response:
+        captured["params"] = kwargs.get("params")
+        return response
+
+    monkeypatch.setattr(
+        scan_client.httpx, "Client", lambda **_kw: _SyncClientStub(_get)
+    )
+
+    scan_client.call_scan_module_sync(
+        "ports",
+        "https://example.com",
+        {"deep": True, "extra": "x", "ignored": [1, 2, 3]},
+        timeout_s=5.0,
+    )
+
+    params = captured["params"]
+    assert params["url"] == "https://example.com"
+    assert params["deep"] == "True"
+    assert params["extra"] == "x"
+    # Non-scalar values are intentionally dropped to avoid building a giant
+    # query string for nested option blobs.
+    assert "ignored" not in params
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_call_screenshot_service_returns_json_body(

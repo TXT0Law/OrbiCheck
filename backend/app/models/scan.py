@@ -59,6 +59,14 @@ class ModuleStatus(str, enum.Enum):
     SUCCESS = "success"
     FAILED = "failed"
     TIMEOUT = "timeout"
+    # S-10: a module is RETRYING when its enclosing batch HTTP call to the
+    # scan-service failed (Connection / 5xx / timeout) but the orchestrator
+    # has scheduled an isolated per-module retry. Operators see this in the
+    # UI instead of an instant red FAILED ❌, which previously masked the
+    # fact that the failure was transient (target site degraded, not the
+    # module itself). The state is terminal-only after the retry completes
+    # (then transitions to SUCCESS / FAILED / TIMEOUT).
+    RETRYING = "retrying"
 
 
 class ScanModuleResult(Base):

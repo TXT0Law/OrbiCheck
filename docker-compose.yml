@@ -43,6 +43,15 @@ services:
       SCAN_SERVICE_PORT: 4000
     expose:
       - "4000"
+    # R-4: scan-service makes high-volume outbound DNS lookups for arbitrary
+    # user-supplied URLs. The Docker embedded resolver (127.0.0.11) returns
+    # EAI_AGAIN under load, which used to mark whole scans as fatal failures
+    # (see backend/app/utils/url_safety.py for the application-level retry).
+    # Pin Cloudflare + Google as upstream to bypass the embedded resolver
+    # altogether — both are anycast and free.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     healthcheck:
       test:
         [
@@ -89,6 +98,13 @@ services:
       MONITOR_INLINE_DISPATCH: "false"
     ports:
       - "8000:8000"
+    # R-4: SSRF guard (`backend/app/utils/url_safety.py`) calls
+    # `socket.getaddrinfo` for every scanned hostname. The embedded resolver
+    # was the source of the "Cannot resolve hostname" fatal failures users
+    # saw in scan logs.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,6 +131,11 @@ services:
       NMAP_SCANNER_URL: ${DOCKER_NMAP_SCANNER_URL:-http://scanner:5000}
       MONITOR_INLINE_DISPATCH: "false"
       CELERY_MODE: worker
+    # R-4: Celery worker calls `validate_url_safety` (DNS lookup) before
+    # dispatching scan modules — same fix as the backend service.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       postgres:
         condition: service_healthy

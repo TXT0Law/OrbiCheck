@@ -142,6 +142,66 @@ async def call_scan_batch(
         }
 
 
+def call_scan_module_sync(
+    module_name: str,
+    url: str,
+    scan_options: dict | None = None,
+    *,
+    scan_id: str | None = None,
+    trace_id: str | None = None,
+    timeout_s: float | None = None,
+) -> dict:
+    """Synchronous single-module scan call (S-10 per-module retry path).
+
+    Returns the same envelope shape ``{success, statusCode, data, durationMs}``
+    that ``call_scan_batch_sync`` produces for each module. Network/HTTP errors
+    are caught and surfaced as a failure envelope so callers (Celery task) can
+    update DB rows without try/except boilerplate.
+    """
+    headers = _build_trace_headers(scan_id, trace_id)
+    if timeout_s is not None:
+        client_timeout = httpx.Timeout(timeout_s, connect=10.0)
+    else:
+        client_timeout = TIMEOUT
+    try:
+        with httpx.Client(timeout=client_timeout, headers=headers) as client:
+            params: dict[str, str] = {"url": url}
+            if scan_options:
+                # Forward the same scanOptions surface the batch endpoint
+                # accepts. Each option becomes a query string param so the
+                # scan-service middleware sees them under `req.query`.
+                for key, value in scan_options.items():
+                    if isinstance(value, (str, int, float, bool)):
+                        params[str(key)] = str(value)
+            response = client.get(
+                f"{SCAN_SERVICE_BASE}/api/scan/{module_name}",
+                params=params,
+            )
+            payload: dict
+            try:
+                payload = response.json() if response.content else {}
+            except ValueError:
+                payload = {}
+            envelope = {
+                "success": bool(payload.get("success", False)),
+                "statusCode": int(payload.get("statusCode", response.status_code)),
+                "data": payload.get("data"),
+                "durationMs": int(payload.get("durationMs", 0) or 0),
+            }
+            err = payload.get("error")
+            if err:
+                envelope["error"] = str(err)
+            return envelope
+    except httpx.HTTPError as exc:
+        return {
+            "success": False,
+            "statusCode": 599,
+            "data": {"error": str(exc)[:300]},
+            "durationMs": 0,
+            "error": str(exc)[:300],
+        }
+
+
 def call_scan_batch_sync(
     url: str,
     modules: list[str],
