@@ -247,6 +247,26 @@ class ContentFetchOptionsSchema(BaseModel):
     viewport_height: int | None = Field(default=None, ge=240, le=2160)
 
 
+class ContentExtractorSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+
+    type: Literal["css", "xpath", "jsonpath"]
+    expression: str = Field(min_length=1, max_length=500)
+
+
+class ContentRestockSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+
+    enabled: bool = False
+    out_of_stock_keywords: list[str] = Field(default_factory=list, max_length=32)
+    in_stock_keywords: list[str] = Field(default_factory=list, max_length=32)
+
+    @field_validator("out_of_stock_keywords", "in_stock_keywords")
+    @classmethod
+    def _restock_words_ok(cls, v: list[str]) -> list[str]:
+        return _validate_trigger_words(v) or []
+
+
 class ContentThresholdsSchema(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
@@ -259,6 +279,8 @@ class ContentThresholdsSchema(BaseModel):
     normalize_volatile_tokens: bool | None = True
     suppress_degraded_page_changes: bool | None = True
     selector_extraction: dict[str, Any] | None = None
+    extractors: list[ContentExtractorSchema] | None = None
+    restock: ContentRestockSchema | None = None
     normalization_rules: list[dict[str, str]] | None = None
     repeat_alert_max_notifications_per_fingerprint: int | None = Field(
         default=None, ge=1, le=1000
@@ -300,6 +322,8 @@ class ContentThresholdsUpdateSchema(BaseModel):
     normalize_volatile_tokens: bool | None = None
     suppress_degraded_page_changes: bool | None = None
     selector_extraction: dict[str, Any] | None = None
+    extractors: list[ContentExtractorSchema] | None = None
+    restock: ContentRestockSchema | None = None
     normalization_rules: list[dict[str, str]] | None = None
     repeat_alert_max_notifications_per_fingerprint: int | None = Field(
         default=None, ge=1, le=1000
@@ -354,6 +378,43 @@ class SslThresholdsUpdateSchema(BaseModel):
         return self
 
 
+class VisualWaitForSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+
+    selector: str | None = Field(default=None, max_length=500)
+    timeout_ms: int | None = Field(default=None, ge=0, le=10_000)
+
+
+class VisualBrowserStepSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
+
+    action: Literal["goto", "wait", "scroll", "click", "type"]
+    url: HttpUrl | None = None
+    ms: int | None = Field(default=None, ge=0, le=10_000)
+    selector: str | None = Field(default=None, max_length=500)
+    value: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def required_fields_for_action(self) -> "VisualBrowserStepSchema":
+        if self.action == "goto" and self.url is None:
+            raise ValueError("goto step requires url")
+        if self.action == "wait" and self.ms is None:
+            raise ValueError("wait step requires ms")
+        if self.action in {"click", "type"} and not self.selector:
+            raise ValueError(f"{self.action} step requires selector")
+        if self.action == "type" and self.value is None:
+            raise ValueError("type step requires value")
+        if self.action != "goto" and self.url is not None:
+            raise ValueError("url is only valid for goto steps")
+        if self.action != "wait" and self.ms is not None:
+            raise ValueError("ms is only valid for wait steps")
+        if self.action not in {"click", "type"} and self.selector is not None:
+            raise ValueError("selector is only valid for click/type steps")
+        if self.action != "type" and self.value is not None:
+            raise ValueError("value is only valid for type steps")
+        return self
+
+
 class VisualThresholdsSchema(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
@@ -369,6 +430,8 @@ class VisualThresholdsSchema(BaseModel):
     # V-11: ignore-region rectangles (percent coords). Mask is applied
     # before hashing so dynamic widgets don't trip the threshold.
     ignore_regions: list[dict[str, Any]] | None = None
+    wait_for: VisualWaitForSchema | None = None
+    steps: list[VisualBrowserStepSchema] | None = Field(default=None, max_length=8)
 
     @field_validator("ignore_regions")
     @classmethod
@@ -389,6 +452,8 @@ class VisualThresholdsUpdateSchema(BaseModel):
     capture_on_failure: bool | None = None
     hash_algorithm: Literal["dhash", "phash", "ahash", "whash"] | None = None
     ignore_regions: list[dict[str, Any]] | None = None
+    wait_for: VisualWaitForSchema | None = None
+    steps: list[VisualBrowserStepSchema] | None = Field(default=None, max_length=8)
 
     @field_validator("ignore_regions")
     @classmethod
@@ -1020,7 +1085,7 @@ class MonitorChangeResponse(BaseModel):
             "snapshotAfterId",
         ),
     )
-    diff_summary: dict[str, int | str]
+    diff_summary: dict[str, Any]
     change_size_bytes: int = 0
     previous_hash: str | None = None
     current_hash: str | None = None
@@ -1042,7 +1107,8 @@ class MonitorDiffResponse(BaseModel):
     max_display_length: int = 0
     previous_captured_at: datetime | None = None
     current_captured_at: datetime | None = None
-    diff_summary: dict[str, int | str] = Field(default_factory=dict)
+    diff_summary: dict[str, Any] = Field(default_factory=dict)
+    word_diff: dict[str, Any] | None = None
     original_previous_length: int = 0
     original_current_length: int = 0
     linked_visual_capture_id: str | None = None

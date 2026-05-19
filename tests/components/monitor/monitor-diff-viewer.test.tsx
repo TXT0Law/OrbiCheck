@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MonitorDiffViewer } from "@/components/monitor/monitor-diff-viewer";
@@ -86,5 +86,35 @@ describe("MonitorDiffViewer", () => {
     await waitFor(() => {
       expect(onInvalidChange).not.toHaveBeenCalled();
     });
+  });
+
+  it("renders word diff operations with inserted and removed tokens", () => {
+    useMonitorDiff.mockReturnValue({
+      data: {
+        changeId: "c1",
+        previousContent: "old product",
+        currentContent: "new product",
+        diffHtml: "",
+        wordDiff: {
+          tokensAdded: 1,
+          tokensRemoved: 1,
+          totalTokenChanges: 2,
+          truncated: false,
+          operations: [{ type: "replace", removed: ["old"], added: ["new"] }],
+        },
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+    });
+
+    render(<MonitorDiffViewer monitorId="m1" changeId="c1" />);
+    fireEvent.change(screen.getByDisplayValue("Line diff"), {
+      target: { value: "word" },
+    });
+
+    expect(screen.getByTestId("word-diff-panel")).toBeInTheDocument();
+    expect(screen.getByText("old").tagName.toLowerCase()).toBe("del");
+    expect(screen.getByText("new").tagName.toLowerCase()).toBe("ins");
   });
 });

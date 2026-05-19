@@ -64,6 +64,11 @@ const selectorExtractionSchema = z.object({
   maxExtractedChars: z.number().int().min(1024).max(500_000).optional(),
 });
 
+const contentExtractorSchema = z.object({
+  type: z.enum(["css", "xpath", "jsonpath"]),
+  expression: z.string().min(1).max(500),
+});
+
 // C-3: keep word lists short and bounded — clearer 422 errors for the
 // editor than a vague "payload too large".
 const triggerWordSchema = z
@@ -75,6 +80,12 @@ const triggerWordListSchema = z
   .max(MAX_TRIGGER_WORDS_PER_LIST)
   .nullable()
   .optional();
+
+const contentRestockSchema = z.object({
+  enabled: z.boolean().default(false),
+  outOfStockKeywords: z.array(triggerWordSchema).max(MAX_TRIGGER_WORDS_PER_LIST).default([]),
+  inStockKeywords: z.array(triggerWordSchema).max(MAX_TRIGGER_WORDS_PER_LIST).default([]),
+});
 
 const contentFetchModeEnum = z.enum([
   CONTENT_FETCH_MODES[0],
@@ -104,6 +115,8 @@ const contentThresholdsSchema = z.object({
   repeatAlertMaxNotificationsPerFingerprint: z.number().int().min(1).max(1000).nullable().optional(),
   repeatAlertFingerprintWindowMinutes: z.number().int().min(1).max(10080).nullable().optional(),
   selectorExtraction: selectorExtractionSchema.nullable().optional(),
+  extractors: z.array(contentExtractorSchema).max(8).nullable().optional(),
+  restock: contentRestockSchema.nullable().optional(),
   normalizeVolatileTokens: z.boolean().nullable().optional(),
   suppressDegradedPageChanges: z.boolean().nullable().optional(),
   normalizationRules: z.array(contentNormalizationRuleSchema).max(10).nullable().optional(),
@@ -141,6 +154,29 @@ const visualIgnoreRegionSchema = z.object({
   height: z.number().min(0).max(100),
 });
 
+const visualBrowserStepSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("goto"),
+    url: z.string().url().max(2048),
+  }),
+  z.object({
+    action: z.literal("wait"),
+    ms: z.number().int().min(0).max(10_000),
+  }),
+  z.object({
+    action: z.literal("scroll"),
+  }),
+  z.object({
+    action: z.literal("click"),
+    selector: z.string().min(1).max(500),
+  }),
+  z.object({
+    action: z.literal("type"),
+    selector: z.string().min(1).max(500),
+    value: z.string().max(500),
+  }),
+]);
+
 const visualThresholdsSchema = z.object({
   similarityThresholdPercent: z.number().min(50).max(100).nullable().optional(),
   viewportWidth: z.number().int().min(320).max(3840).optional(),
@@ -161,6 +197,14 @@ const visualThresholdsSchema = z.object({
     .max(VISUAL_MAX_IGNORE_REGIONS)
     .nullable()
     .optional(),
+  waitFor: z
+    .object({
+      selector: z.string().max(500).nullable().optional(),
+      timeoutMs: z.number().int().min(0).max(10_000).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  steps: z.array(visualBrowserStepSchema).max(8).nullable().optional(),
 });
 
 const dnsThresholdsSchema = z.object({
@@ -749,6 +793,8 @@ const monitorChangeDiffSummarySchema = z
     changeCategory: z.enum(["small", "medium", "large"]).optional(),
     diffFingerprint: z.string().optional(),
     previewLine: z.string().optional(),
+    eventType: z.enum(["content_change", "content_restock"]).optional(),
+    matchedRestockWord: z.string().optional(),
   })
   .passthrough();
 
@@ -776,6 +822,22 @@ export const monitorDiffSchema = z
     originalCurrentLength: z.number().int().min(0).optional(),
     linkedVisualCaptureId: z.string().nullable().optional(),
     linkedVisualCorrelation: z.enum(["check_id", "time_window"]).nullable().optional(),
+    wordDiff: z
+      .object({
+        tokensAdded: z.number().int().min(0),
+        tokensRemoved: z.number().int().min(0),
+        totalTokenChanges: z.number().int().min(0),
+        operations: z.array(
+          z.object({
+            type: z.string(),
+            removed: z.array(z.string()),
+            added: z.array(z.string()),
+          })
+        ),
+        truncated: z.boolean(),
+      })
+      .nullable()
+      .optional(),
   })
   .passthrough();
 
@@ -803,6 +865,7 @@ const monitorVisualChangeDiffSummarySchema = z
     similarityPercent: z.number().optional(),
     perceptualHashAlgo: z.string().optional(),
     similarityThresholdPercent: z.number().optional(),
+    changedBlocks: z.array(z.number().int().min(0).max(63)).optional(),
   })
   .passthrough();
 

@@ -33,6 +33,11 @@ async function loadHandlerWithMocks({ screenshotBuffer = Buffer.from('png-data')
       if (gotoError) throw gotoError;
     }),
     setDefaultTimeout: jest.fn(),
+    waitForSelector: jest.fn().mockResolvedValue(undefined),
+    waitForTimeout: jest.fn().mockResolvedValue(undefined),
+    evaluate: jest.fn().mockResolvedValue(undefined),
+    click: jest.fn().mockResolvedValue(undefined),
+    fill: jest.fn().mockResolvedValue(undefined),
     screenshot: jest.fn().mockResolvedValue(screenshotBuffer),
     isClosed: () => false,
     close: jest.fn().mockResolvedValue(undefined),
@@ -56,7 +61,7 @@ async function loadHandlerWithMocks({ screenshotBuffer = Buffer.from('png-data')
   }));
 
   const { handler } = await import('../screenshot.js');
-  return handler;
+  return { handler, fakePage };
 }
 
 async function invokeHandler(handler, url = 'https://example.com', query = {}) {
@@ -134,12 +139,13 @@ describe('screenshot module — route level', () => {
     expect(capturedQuery.viewportHeight).toBe('400');
     expect(capturedQuery.fullPage).toBe('true');
   });
+
 });
 
 describe('screenshot module — handler unit tests (mocked launchChromium)', () => {
   it('returns base64 image on successful capture', async () => {
     const fakeBuffer = Buffer.from('test-image-data');
-    const handler = await loadHandlerWithMocks({ screenshotBuffer: fakeBuffer });
+    const { handler } = await loadHandlerWithMocks({ screenshotBuffer: fakeBuffer });
     const response = await invokeHandler(handler);
 
     expect(response.statusCode).toBe(200);
@@ -150,7 +156,7 @@ describe('screenshot module — handler unit tests (mocked launchChromium)', () 
   });
 
   it('returns 400 via middleware when URL is missing', async () => {
-    const handler = await loadHandlerWithMocks();
+    const { handler } = await loadHandlerWithMocks();
     const req = { query: {} };
     const res = createResponseCapture();
     await handler(req, res);
@@ -161,7 +167,7 @@ describe('screenshot module — handler unit tests (mocked launchChromium)', () 
   });
 
   it('returns error for invalid URL', async () => {
-    const handler = await loadHandlerWithMocks();
+    const { handler } = await loadHandlerWithMocks();
     const response = await invokeHandler(handler, '://bad');
 
     expect(response.statusCode).toBe(200);
@@ -170,7 +176,7 @@ describe('screenshot module — handler unit tests (mocked launchChromium)', () 
   });
 
   it('prepends http:// when protocol is missing', async () => {
-    const handler = await loadHandlerWithMocks();
+    const { handler } = await loadHandlerWithMocks();
     const response = await invokeHandler(handler, 'example.com');
 
     expect(response.statusCode).toBe(200);
@@ -179,7 +185,7 @@ describe('screenshot module — handler unit tests (mocked launchChromium)', () 
   });
 
   it('returns error when browser launch fails', async () => {
-    const handler = await loadHandlerWithMocks({
+    const { handler } = await loadHandlerWithMocks({
       launchError: new Error('Chromium not found'),
     });
     const response = await invokeHandler(handler);
@@ -190,7 +196,7 @@ describe('screenshot module — handler unit tests (mocked launchChromium)', () 
   });
 
   it('clamps viewport to allowed range', async () => {
-    const handler = await loadHandlerWithMocks();
+    const { handler } = await loadHandlerWithMocks();
     const response = await invokeHandler(handler, 'https://example.com', {
       viewportWidth: '100',
       viewportHeight: '99999',
@@ -198,5 +204,53 @@ describe('screenshot module — handler unit tests (mocked launchChromium)', () 
 
     expect(response.statusCode).toBe(200);
     expect(response.body.success).toBe(true);
+  });
+
+  it('waits for selector and bounded milliseconds before capture', async () => {
+    const { handler, fakePage } = await loadHandlerWithMocks();
+    const response = await invokeHandler(handler, 'https://example.com', {
+      waitForSelector: '.ready',
+      waitForMs: '250',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(fakePage.waitForSelector).toHaveBeenCalledWith('.ready', {
+      state: 'attached',
+      timeout: 10000,
+    });
+    expect(fakePage.waitForTimeout).toHaveBeenCalledWith(250);
+    expect(response.body.data.waitForSelector).toBe('.ready');
+  });
+
+  it('applies safe browser steps before capture', async () => {
+    const { handler, fakePage } = await loadHandlerWithMocks();
+    const response = await invokeHandler(handler, 'https://example.com', {
+      steps: JSON.stringify([
+        { action: 'wait', ms: 100 },
+        { action: 'scroll' },
+      ]),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(fakePage.waitForTimeout).toHaveBeenCalledWith(100);
+    expect(fakePage.evaluate).toHaveBeenCalled();
+    expect(response.body.data.stepsApplied).toBe(2);
+  });
+
+  it('reads screenshot options from request body as well as query params', async () => {
+    const { handler, fakePage } = await loadHandlerWithMocks();
+    const req = {
+      query: { url: 'https://example.com' },
+      body: { steps: [{ action: 'wait', ms: 100 }] },
+    };
+    const res = createResponseCapture();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(fakePage.waitForTimeout).toHaveBeenCalledWith(100);
   });
 });

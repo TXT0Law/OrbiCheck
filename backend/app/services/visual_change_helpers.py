@@ -23,7 +23,7 @@ from typing import Any
 
 import imagehash
 import structlog
-from PIL import Image, ImageDraw, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageDraw, ImageStat, UnidentifiedImageError
 
 from app.core.config import settings
 
@@ -48,6 +48,11 @@ _HASH_FUNCTIONS = {
 # the iteration cost (PIL draw rect is cheap but 100s of overlapping regions
 # would be a denial-of-config vector).
 MAX_IGNORE_REGIONS = 8
+DIFF_GRID_SIZE = 8
+DIFF_BLOCK_THRESHOLD = 12.0
+MAX_WAIT_FOR_SELECTOR_LENGTH = 500
+MAX_WAIT_MS = 10_000
+MAX_BROWSER_STEPS = 8
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,9 @@ class VisualThresholds:
     hash_algorithm: str = DEFAULT_HASH_ALGORITHM
     # V-11: ordered list of ignore regions. Empty list = no masking.
     ignore_regions: tuple[IgnoreRegion, ...] = field(default_factory=tuple)
+    wait_for_selector: str | None = None
+    wait_ms: int = 0
+    browser_steps: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
 
 def get_visual_thresholds(capabilities: dict[str, Any] | None) -> VisualThresholds:
@@ -160,6 +168,26 @@ def get_visual_thresholds(capabilities: dict[str, Any] | None) -> VisualThreshol
                 )
             )
 
+    wait_for = th.get("waitFor") if isinstance(th.get("waitFor"), dict) else {}
+    selector_raw = wait_for.get("selector")
+    wait_for_selector = (
+        selector_raw.strip()[:MAX_WAIT_FOR_SELECTOR_LENGTH]
+        if isinstance(selector_raw, str) and selector_raw.strip()
+        else None
+    )
+    try:
+        wait_ms = int(wait_for.get("timeoutMs", 0) or 0)
+    except (TypeError, ValueError):
+        wait_ms = 0
+    wait_ms = max(0, min(wait_ms, MAX_WAIT_MS))
+
+    raw_steps = th.get("steps") or []
+    browser_steps: list[dict[str, Any]] = []
+    if isinstance(raw_steps, list):
+        for item in raw_steps[:MAX_BROWSER_STEPS]:
+            if isinstance(item, dict):
+                browser_steps.append(dict(item))
+
     return VisualThresholds(
         similarity_threshold_percent=similarity,
         viewport_width=viewport_width,
@@ -168,6 +196,9 @@ def get_visual_thresholds(capabilities: dict[str, Any] | None) -> VisualThreshol
         capture_on_failure=capture_on_failure,
         hash_algorithm=hash_algorithm,
         ignore_regions=tuple(regions),
+        wait_for_selector=wait_for_selector,
+        wait_ms=wait_ms,
+        browser_steps=tuple(browser_steps),
     )
 
 
@@ -310,3 +341,39 @@ def is_visual_change_detected(
 ) -> bool:
     """True when similarity is strictly below the configured minimum (more different)."""
     return similarity_percent < threshold
+
+
+def compute_changed_blocks(
+    previous_png_bytes: bytes,
+    current_png_bytes: bytes,
+    *,
+    grid_size: int = DIFF_GRID_SIZE,
+    threshold: float = DIFF_BLOCK_THRESHOLD,
+) -> list[int]:
+    """Return 8x8 cell indexes whose mean pixel delta exceeds ``threshold``.
+
+    The output is intentionally compact for JSONB/UI use: indexes are row-major
+    positions from 0 to 63. The UI can draw a proportional overlay without
+    needing a heavy image diff artifact.
+    """
+    previous = Image.open(io.BytesIO(previous_png_bytes)).convert("RGB")
+    current = Image.open(io.BytesIO(current_png_bytes)).convert("RGB")
+    if previous.size != current.size:
+        current = current.resize(previous.size)
+    diff = ImageChops.difference(previous, current).convert("L")
+    width, height = diff.size
+    if width <= 0 or height <= 0:
+        return []
+    changed: list[int] = []
+    for row in range(grid_size):
+        for col in range(grid_size):
+            left = round(col * width / grid_size)
+            upper = round(row * height / grid_size)
+            right = round((col + 1) * width / grid_size)
+            lower = round((row + 1) * height / grid_size)
+            if right <= left or lower <= upper:
+                continue
+            stat = ImageStat.Stat(diff.crop((left, upper, right, lower)))
+            if stat.mean and float(stat.mean[0]) >= threshold:
+                changed.append(row * grid_size + col)
+    return changed

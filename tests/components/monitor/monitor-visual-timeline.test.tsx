@@ -208,4 +208,30 @@ describe("MonitorVisualTimeline (V-3)", () => {
     expect(screen.getByText("81% similar")).toBeInTheDocument();
     expect(screen.getByText(/Δ 12 bits/i)).toBeInTheDocument();
   });
+
+  it("renders changed block overlay for visual diff summaries", () => {
+    const change = fakeChange({
+      diffSummary: {
+        hammingDistance: 12,
+        similarityPercent: 81,
+        similarityThresholdPercent: 92,
+        perceptualHashAlgo: "dhash",
+        changedBlocks: [0, 63],
+      },
+    });
+    useMonitorMock.mockReturnValue({ data: fakeMonitor() });
+    useMonitorVisualChangesMock.mockReturnValue({
+      data: { data: [change] },
+      isLoading: false,
+    });
+    useMonitorVisualCapturesMock.mockReturnValue({ data: { data: [] }, isLoading: false });
+    useTriggerVisualCaptureNowMock.mockReturnValue({
+      mutateAsync: triggerCaptureNowMutateAsync,
+      isPending: false,
+    });
+
+    render(<MonitorVisualTimeline monitorId="mon-1" />);
+
+    expect(screen.getAllByTestId("visual-diff-changed-block")).toHaveLength(2);
+  });
 });

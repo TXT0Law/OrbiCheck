@@ -11,6 +11,7 @@ from app.services.notification_channels._helpers import (
     failure_result,
     log_send_error,
     post_json,
+    render_alert_title,
     render_monitor_link,
     severity_colour_int,
     skipped_result,
@@ -66,7 +67,7 @@ def _build_embed(payload: AlertPayload) -> dict:
             }
         )
     embed: dict = {
-        "title": f"OrbiCheck — {payload.monitor_name}",
+        "title": render_alert_title(payload),
         "description": description,
         "color": severity_colour_int(payload.severity),
         "fields": fields,

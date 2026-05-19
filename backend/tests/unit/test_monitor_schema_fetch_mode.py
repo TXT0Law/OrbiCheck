@@ -20,6 +20,7 @@ from app.api.v1.schemas.monitor import (
     ContentThresholdsUpdateSchema,
     MonitorCreateRequest,
     MonitorUpdateRequest,
+    VisualThresholdsSchema,
 )
 
 
@@ -135,6 +136,51 @@ def test_create_request_allows_short_interval_in_http_mode() -> None:
     }
     parsed = MonitorCreateRequest.model_validate(payload)
     assert parsed.interval_seconds == 60
+
+
+@pytest.mark.unit
+def test_visual_thresholds_reject_unknown_browser_step_action() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        VisualThresholdsSchema.model_validate(
+            {"steps": [{"action": "evilop", "payload": "x"}]}
+        )
+    assert "evilop" in str(excinfo.value)
+
+
+@pytest.mark.unit
+def test_visual_thresholds_validates_step_fields_by_action() -> None:
+    parsed = VisualThresholdsSchema.model_validate(
+        {
+            "waitFor": {"selector": "main.ready", "timeoutMs": 500},
+            "steps": [
+                {"action": "goto", "url": "https://example.com/login"},
+                {"action": "wait", "ms": 250},
+                {"action": "scroll"},
+                {"action": "click", "selector": "button"},
+            ],
+        }
+    )
+    assert parsed.wait_for is not None
+    assert parsed.wait_for.timeout_ms == 500
+    assert parsed.steps is not None
+    assert len(parsed.steps) == 4
+
+
+@pytest.mark.unit
+def test_visual_thresholds_reject_type_step_value_too_long() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        VisualThresholdsSchema.model_validate(
+            {
+                "steps": [
+                    {
+                        "action": "type",
+                        "selector": "#password",
+                        "value": "x" * 501,
+                    }
+                ]
+            }
+        )
+    assert "500" in str(excinfo.value)
 
 
 @pytest.mark.unit

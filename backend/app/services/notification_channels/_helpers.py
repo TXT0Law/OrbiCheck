@@ -76,6 +76,12 @@ def render_monitor_link(payload: AlertPayload) -> str:
     return f"{origin}/dashboard/monitor/{payload.monitor_id}"
 
 
+def render_alert_title(payload: AlertPayload) -> str:
+    if payload.event_type == "content_restock":
+        return f"Item back in stock — {payload.monitor_name}"
+    return f"OrbiCheck — {payload.monitor_name}"
+
+
 def validate_https_url(value: str) -> str:
     """Strict HTTPS-only URL check used by Slack/Discord/Teams config forms.
 

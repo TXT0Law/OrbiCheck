@@ -12,6 +12,7 @@ import {
 import { logger } from './_common/logger.js';
 import { metricsRegistry, recordBatchRun } from './_common/metrics.js';
 import { handler as pageSourceRenderedHandler } from './page-source-rendered.js';
+import { handler as screenshotHandler } from './screenshot.js';
 import { loadModules } from './registry.js';
 import { runModule } from './runner.js';
 
@@ -113,6 +114,14 @@ export function createApp() {
   // pipeline only, never as part of a scan batch).
   app.get('/api/scan/page-source-rendered', async (req, res) => {
     return pageSourceRenderedHandler(req, res);
+  });
+
+  // V-14/B-12: allow screenshot options (especially browser step `type`
+  // values) to travel in the request body instead of query strings. GET is
+  // still supported through the generic registry route for backward compat.
+  app.post('/api/scan/screenshot', async (req, res) => {
+    const envelope = await screenshotHandler.runDirect(req.body?.url, req);
+    return res.status(envelope.statusCode || (envelope.success ? 200 : 500)).json(envelope);
   });
 
   app.get('/api/scan/:module', async (req, res) => {

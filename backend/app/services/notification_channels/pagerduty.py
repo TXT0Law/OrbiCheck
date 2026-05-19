@@ -27,6 +27,7 @@ from app.services.notification_channels._helpers import (
     NOTIFICATION_USER_AGENT,
     failure_result,
     log_send_error,
+    render_alert_title,
     skipped_result,
     success_result,
 )
@@ -92,8 +93,10 @@ def build_event_payload(
         if payload.threshold_config:
             custom_details["threshold_config"] = payload.threshold_config
         body["payload"] = {
-            "summary": payload.message[:PAGERDUTY_SUMMARY_MAX]
-            or f"OrbiCheck alert for {payload.monitor_name}",
+            "summary": (
+                payload.message[:PAGERDUTY_SUMMARY_MAX]
+                or render_alert_title(payload)[:PAGERDUTY_SUMMARY_MAX]
+            ),
             "source": PAGERDUTY_SOURCE,
             "severity": severity_for_pagerduty(payload.severity),
             "component": payload.capability,

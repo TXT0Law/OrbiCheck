@@ -22,6 +22,7 @@ interface MonitorVisualTimelineProps {
 }
 
 const CAPTURE_NOW_COOLDOWN_SECONDS = 12; // Matches MONITOR_MANUAL_CHECK_COOLDOWN by default; server enforces real limit.
+const VISUAL_DIFF_GRID_SIZE = 8;
 
 function formatTs(iso: string): string {
   try {
@@ -102,6 +103,7 @@ export function MonitorVisualTimeline({ monitorId }: MonitorVisualTimelineProps)
   const afterUrl = selected
     ? monitorVisualCapturePngUrl(monitorId, selected.currentCaptureId)
     : null;
+  const changedBlocks = selected?.diffSummary.changedBlocks ?? [];
 
   const loading = changesQ.isLoading || capturesQ.isLoading;
 
@@ -241,6 +243,27 @@ export function MonitorVisualTimeline({ monitorId }: MonitorVisualTimelineProps)
                     className="absolute inset-0 h-full w-full object-contain"
                   />
                 </div>
+                {changedBlocks.length > 0 ? (
+                  <div className="pointer-events-none absolute inset-0">
+                    {changedBlocks.map((block) => {
+                      const row = Math.floor(block / VISUAL_DIFF_GRID_SIZE);
+                      const col = block % VISUAL_DIFF_GRID_SIZE;
+                      return (
+                        <span
+                          key={block}
+                          data-testid="visual-diff-changed-block"
+                          className="absolute border border-red-400 bg-red-500/20 shadow-[0_0_0_1px_rgba(239,68,68,0.35)]"
+                          style={{
+                            left: `${(col / VISUAL_DIFF_GRID_SIZE) * 100}%`,
+                            top: `${(row / VISUAL_DIFF_GRID_SIZE) * 100}%`,
+                            width: `${100 / VISUAL_DIFF_GRID_SIZE}%`,
+                            height: `${100 / VISUAL_DIFF_GRID_SIZE}%`,
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
               <label className="flex items-center gap-3 text-xs text-muted-foreground">
                 <span className="shrink-0">Before</span>

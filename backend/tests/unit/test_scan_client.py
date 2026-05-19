@@ -256,10 +256,10 @@ def test_call_scan_module_sync_forwards_scan_options(
 async def test_call_screenshot_service_returns_json_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    get = AsyncMock(
+    post = AsyncMock(
         return_value=_response(200, json_data={"image": "base64-image"}, url="http://scan")
     )
-    monkeypatch.setattr(scan_client.httpx, "AsyncClient", lambda **_: _AsyncClientStub(get))
+    monkeypatch.setattr(scan_client.httpx, "AsyncClient", lambda **_: _AsyncClientStub(AsyncMock(), post))
 
     result = await scan_client.call_screenshot_service(
         "https://example.com",
@@ -269,4 +269,5 @@ async def test_call_screenshot_service_returns_json_body(
     )
 
     assert result["image"] == "base64-image"
-    assert get.await_args.kwargs["params"]["fullPage"] == "true"
+    assert post.await_args.kwargs["json"]["fullPage"] is True
+    assert post.await_args.kwargs["json"]["viewportWidth"] == 1280

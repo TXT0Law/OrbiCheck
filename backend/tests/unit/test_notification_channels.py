@@ -20,6 +20,7 @@ from app.services.notification_channels import (
     ChannelConfig,
     PagerDutyEventAction,
 )
+from app.services.notification_channels._helpers import render_alert_title
 from app.services.notification_channels.discord import DiscordChannel, validate_target_url as validate_discord
 from app.services.notification_channels.pagerduty import (
     PagerDutyChannel,
@@ -299,6 +300,17 @@ def test_pagerduty_is_enabled_always_true_for_resolve() -> None:
     )
     assert channel.is_enabled(config, payload_resolve) is True
     assert channel.is_enabled(config, payload_trigger_info) is False
+
+
+@pytest.mark.unit
+def test_content_restock_alert_title_is_specific() -> None:
+    payload = _payload(
+        capability="content_change",
+        event_type="content_restock",
+        message="Item appears back in stock",
+        severity="warning",
+    )
+    assert render_alert_title(payload) == "Item back in stock — Production API"
 
 
 # ── Webhook channel ───────────────────────────────────────────────────

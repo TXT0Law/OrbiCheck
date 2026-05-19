@@ -9,6 +9,8 @@ matches until the shell contains the target markup.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -18,6 +20,17 @@ from bs4.element import Tag
 from app.core.config import settings
 
 MergeStrategy = Literal["concat_ordered"]
+ExtractorType = Literal["css", "xpath", "jsonpath"]
+_SIMPLE_XPATH_RE = re.compile(
+    r"^//(?P<tag>[A-Za-z][\w:-]*|\*)(?:\[@(?P<attr>[\w:-]+)=['\"](?P<value>[^'\"]+)['\"]\])?(?P<text>/text\(\))?$"
+)
+_JSONPATH_TOKEN_RE = re.compile(r"\.([A-Za-z_][\w-]*)|(\[\*\])|\[['\"]([^'\"]+)['\"]\]")
+
+
+@dataclass(frozen=True)
+class ContentExtractor:
+    type: ExtractorType
+    expression: str
 
 
 @dataclass(frozen=True)
@@ -25,6 +38,7 @@ class SelectorExtractionConfig:
     """Parsed content_change.thresholds.selectorExtraction block."""
 
     selectors: tuple[str, ...]
+    extractors: tuple[ContentExtractor, ...]
     merge_strategy: MergeStrategy
     max_extracted_chars: int
 
@@ -52,16 +66,26 @@ def get_selector_extraction_config(
         return None
     block = th.get("selectorExtraction")
     if not isinstance(block, dict):
-        return None
+        block = {}
     raw_sel = block.get("selectors")
-    if not isinstance(raw_sel, list) or not raw_sel:
-        return None
     selectors: list[str] = []
-    cap_n = min(len(raw_sel), settings.CONTENT_SELECTOR_MAX_COUNT)
-    for s in raw_sel[:cap_n]:
-        if isinstance(s, str) and s.strip():
-            selectors.append(s.strip())
-    if not selectors:
+    if isinstance(raw_sel, list):
+        cap_n = min(len(raw_sel), settings.CONTENT_SELECTOR_MAX_COUNT)
+        for s in raw_sel[:cap_n]:
+            if isinstance(s, str) and s.strip():
+                selectors.append(s.strip())
+    raw_extractors = th.get("extractors")
+    extractors: list[ContentExtractor] = []
+    if isinstance(raw_extractors, list):
+        cap_n = min(len(raw_extractors), settings.CONTENT_SELECTOR_MAX_COUNT)
+        for item in raw_extractors[:cap_n]:
+            if not isinstance(item, dict):
+                continue
+            typ = item.get("type")
+            expression = item.get("expression")
+            if typ in {"css", "xpath", "jsonpath"} and isinstance(expression, str) and expression.strip():
+                extractors.append(ContentExtractor(type=typ, expression=expression.strip()))
+    if not selectors and not extractors:
         return None
     merge = block.get("mergeStrategy", "concat_ordered")
     if merge != "concat_ordered":
@@ -70,6 +94,7 @@ def get_selector_extraction_config(
     max_chars = max(1024, min(max_chars, settings.CONTENT_SELECTOR_MAX_EXTRACTED_CHARS))
     return SelectorExtractionConfig(
         selectors=tuple(selectors),
+        extractors=tuple(extractors),
         merge_strategy="concat_ordered",
         max_extracted_chars=max_chars,
     )
@@ -124,6 +149,126 @@ def extract_inner_text_concat_ordered(html: str, selectors: tuple[str, ...], *, 
     return merged
 
 
+def extract_with_xpath(html: str, expression: str, *, max_chars: int) -> str:
+    """Extract text using a safe subset of XPath, with lxml when available."""
+    try:
+        from lxml import html as lxml_html  # type: ignore[import-not-found]
+    except ImportError:
+        lxml_html = None
+    if lxml_html is not None:
+        try:
+            root = lxml_html.fromstring(html)
+            values = root.xpath(expression)
+        except Exception as exc:
+            raise SelectorValidationError("INVALID_XPATH", f"Invalid XPath extractor: {exc}") from exc
+        parts: list[str] = []
+        for value in values[: settings.CONTENT_SELECTOR_MAX_NODES_PER_SELECTOR]:
+            if isinstance(value, str):
+                parts.append(value)
+            elif hasattr(value, "text_content"):
+                parts.append(value.text_content())
+        return _strip_and_join(parts, max_chars)
+
+    match = _SIMPLE_XPATH_RE.match(expression.strip())
+    if not match:
+        raise SelectorValidationError(
+            "XPATH_UNSUPPORTED",
+            "XPath extractor requires lxml for this expression",
+        )
+    tag = match.group("tag")
+    attr = match.group("attr")
+    value = match.group("value")
+    soup = BeautifulSoup(html, "html.parser")
+    for node in soup(["script", "style"]):
+        node.decompose()
+    found = soup.find_all(True if tag == "*" else tag, limit=settings.CONTENT_SELECTOR_MAX_NODES_PER_SELECTOR + 1)
+    parts: list[str] = []
+    for node in found:
+        if attr and node.get(attr) != value:
+            continue
+        parts.append(node.get_text(separator="\n", strip=True))
+    return _strip_and_join(parts, max_chars)
+
+
+def _jsonpath_values(data: Any, expression: str) -> list[Any]:
+    if not expression.startswith("$"):
+        raise SelectorValidationError("INVALID_JSONPATH", "JSONPath must start with '$'")
+    current: list[Any] = [data]
+    pos = 1
+    while pos < len(expression):
+        match = _JSONPATH_TOKEN_RE.match(expression, pos)
+        if match is None:
+            raise SelectorValidationError("INVALID_JSONPATH", "Unsupported JSONPath expression")
+        key = match.group(1) or match.group(3)
+        is_wildcard = match.group(2) is not None
+        next_values: list[Any] = []
+        if is_wildcard:
+            for item in current:
+                if isinstance(item, list):
+                    next_values.extend(item)
+            current = next_values
+        else:
+            for item in current:
+                if isinstance(item, dict) and key in item:
+                    next_values.append(item[key])
+            current = next_values
+        pos = match.end()
+    return current
+
+
+def extract_with_jsonpath(body: str, expression: str, *, max_chars: int) -> str:
+    """Extract primitive values from JSON using a bounded JSONPath subset."""
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise SelectorValidationError("INVALID_JSON", f"Body is not valid JSON: {exc.msg}") from exc
+    try:
+        from jsonpath_ng import parse as parse_jsonpath
+    except ImportError:
+        parse_jsonpath = None
+    if parse_jsonpath is not None:
+        try:
+            matches = parse_jsonpath(expression).find(data)
+        except Exception as exc:
+            raise SelectorValidationError("INVALID_JSONPATH", f"Invalid JSONPath extractor: {exc}") from exc
+        values = [match.value for match in matches[: settings.CONTENT_SELECTOR_MAX_NODES_PER_SELECTOR]]
+    else:
+        values = _jsonpath_values(data, expression)[: settings.CONTENT_SELECTOR_MAX_NODES_PER_SELECTOR]
+    parts: list[str] = []
+    for value in values:
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            parts.append("" if value is None else str(value))
+        else:
+            parts.append(json.dumps(value, ensure_ascii=False, sort_keys=True))
+    return _strip_and_join(parts, max_chars)
+
+
+def extract_with_config(body: str, config: SelectorExtractionConfig) -> str:
+    parts: list[str] = []
+    if config.selectors:
+        css_text = extract_inner_text_concat_ordered(
+            body,
+            config.selectors,
+            max_chars=config.max_extracted_chars,
+        )
+        if css_text:
+            parts.append(css_text)
+    for extractor in config.extractors:
+        if extractor.type == "css":
+            text = extract_inner_text_concat_ordered(
+                body,
+                (extractor.expression,),
+                max_chars=config.max_extracted_chars,
+            )
+        elif extractor.type == "xpath":
+            text = extract_with_xpath(body, extractor.expression, max_chars=config.max_extracted_chars)
+        else:
+            text = extract_with_jsonpath(body, extractor.expression, max_chars=config.max_extracted_chars)
+        if text:
+            parts.append(text)
+    return _strip_and_join(parts, config.max_extracted_chars)
+
+
 def validate_selectors_against_html(
     html: str,
     selectors: tuple[str, ...],
@@ -148,7 +293,5 @@ def extract_for_content_pipeline(
     """Return scoped text or original HTML when config is None."""
     if config is None:
         return html
-    text = extract_inner_text_concat_ordered(
-        html, config.selectors, max_chars=config.max_extracted_chars
-    )
+    text = extract_with_config(html, config)
     return text if text else ""

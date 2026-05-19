@@ -17,6 +17,7 @@ from app.services.notification_channels._helpers import (
     failure_result,
     log_send_error,
     post_json,
+    render_alert_title,
     render_monitor_link,
     severity_colour_hex,
     skipped_result,
@@ -88,7 +89,7 @@ def _build_block_kit(payload: AlertPayload) -> dict:
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"OrbiCheck — {payload.monitor_name}",
+                "text": render_alert_title(payload),
                 "emoji": True,
             },
         },

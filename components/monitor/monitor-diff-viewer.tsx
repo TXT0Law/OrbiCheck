@@ -93,6 +93,19 @@ function allowClientSplitDiff(data: MonitorDiff): boolean {
   );
 }
 
+function renderWordTokens(tokens: string[], kind: "added" | "removed") {
+  const Tag = kind === "added" ? "ins" : "del";
+  const className =
+    kind === "added"
+      ? "rounded bg-green-100 px-1 text-green-900 no-underline dark:bg-green-950/60 dark:text-green-100"
+      : "rounded bg-red-100 px-1 text-red-900 dark:bg-red-950/60 dark:text-red-100";
+  return tokens.map((token, index) => (
+    <Tag key={`${kind}-${index}-${token}`} className={className}>
+      {token}
+    </Tag>
+  ));
+}
+
 export function MonitorDiffViewer({
   monitorId,
   changeId,
@@ -101,7 +114,8 @@ export function MonitorDiffViewer({
 }: MonitorDiffViewerProps) {
   const lang = useAppearanceLanguage();
   const t = getMonitorContentMessages(lang);
-  const { data, isLoading, error, isError } = useMonitorDiff(monitorId, changeId);
+  const [diffMode, setDiffMode] = useState<"line" | "word">("line");
+  const { data, isLoading, error, isError } = useMonitorDiff(monitorId, changeId, diffMode);
   const [viewMode, setViewMode] = useState<DiffView>("server");
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -220,6 +234,14 @@ export function MonitorDiffViewer({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
+            value={diffMode}
+            onChange={(e) => setDiffMode(e.target.value as "line" | "word")}
+            className="h-9 max-w-[180px] rounded-md border-2 border-zinc-300 bg-white px-2 text-xs text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          >
+            <option value="line">Line diff</option>
+            <option value="word">Word diff</option>
+          </select>
+          <select
             value={viewMode}
             onChange={(e) => setViewMode(e.target.value as DiffView)}
             className="h-9 max-w-[220px] rounded-md border-2 border-zinc-300 bg-white px-2 text-xs text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
@@ -273,11 +295,43 @@ export function MonitorDiffViewer({
           </div>
         ) : null}
 
+        {data.wordDiff ? (
+          <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100">
+            Word diff: +{data.wordDiff.tokensAdded} / -{data.wordDiff.tokensRemoved} tokens
+            {data.wordDiff.truncated ? " (truncated)" : ""}
+          </p>
+        ) : null}
+
         <div
           className="overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800"
           aria-live="polite"
         >
-          {viewMode === "server" && iframeSrc ? (
+          {diffMode === "word" && data.wordDiff ? (
+            <div
+              className="max-h-[min(70vh,720px)] space-y-3 overflow-auto bg-zinc-50 p-4 text-sm leading-7 dark:bg-zinc-950"
+              data-testid="word-diff-panel"
+            >
+              {data.wordDiff.operations.length === 0 ? (
+                <p className="text-muted-foreground">No word-level token changes.</p>
+              ) : (
+                data.wordDiff.operations.map((op, index) => (
+                  <div
+                    key={`${op.type}-${index}`}
+                    className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
+                  >
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {op.type}
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {renderWordTokens(op.removed, "removed")}
+                      {renderWordTokens(op.added, "added")}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
+          {diffMode !== "word" && viewMode === "server" && iframeSrc ? (
             <iframe
               title="HTML diff preview"
               src={iframeSrc}
@@ -286,10 +340,10 @@ export function MonitorDiffViewer({
               referrerPolicy="no-referrer"
             />
           ) : null}
-          {viewMode === "server" && !iframeSrc ? (
+          {diffMode !== "word" && viewMode === "server" && !iframeSrc ? (
             <div className="p-4 text-sm text-muted-foreground">{t.diffNoHtml}</div>
           ) : null}
-          {viewMode !== "server" && canUseClientDiff ? (
+          {diffMode !== "word" && viewMode !== "server" && canUseClientDiff ? (
             <div className="max-h-[min(70vh,720px)] overflow-auto p-1">
               <ReactDiffViewer
                 oldValue={clientPrev}

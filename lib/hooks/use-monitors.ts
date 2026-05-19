@@ -33,8 +33,8 @@ export const monitorKeys = {
     [...monitorKeys.detail(id), "changes", "infinite", pageSize] as const,
   contentBaseline: (id: string) =>
     [...monitorKeys.detail(id), "contentBaseline"] as const,
-  diff: (monitorId: string, changeId: string) =>
-    [...monitorKeys.detail(monitorId), "diff", changeId] as const,
+  diff: (monitorId: string, changeId: string, mode: "line" | "word" = "line") =>
+    [...monitorKeys.detail(monitorId), "diff", changeId, mode] as const,
   ssl: (id: string) => [...monitorKeys.detail(id), "ssl"] as const,
   incidents: (id: string, params?: Record<string, unknown>) =>
     [...monitorKeys.detail(id), "incidents", params ?? {}] as const,
@@ -151,10 +151,14 @@ export function useMonitorContentBaseline(id: string) {
   });
 }
 
-export function useMonitorDiff(monitorId: string, changeId: string) {
+export function useMonitorDiff(
+  monitorId: string,
+  changeId: string,
+  mode: "line" | "word" = "line",
+) {
   return useQuery({
-    queryKey: monitorKeys.diff(monitorId, changeId),
-    queryFn: () => monitorsApi.getMonitorDiff(monitorId, changeId),
+    queryKey: monitorKeys.diff(monitorId, changeId, mode),
+    queryFn: () => monitorsApi.getMonitorDiff(monitorId, changeId, { diff: mode }),
     enabled: Boolean(monitorId) && Boolean(changeId),
     staleTime: 0,
     gcTime: 60_000,
