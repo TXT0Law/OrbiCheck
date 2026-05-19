@@ -608,7 +608,8 @@ export async function getMonitorVisualChanges(
 
 export async function getMonitorDiff(
   monitorId: string,
-  changeId: string
+  changeId: string,
+  options?: { diff?: "line" | "word" },
 ): Promise<MonitorDiff> {
   if (isMonitorMockMode()) {
     const known = mockChanges(monitorId).some((c) => c.id === changeId);
@@ -621,7 +622,7 @@ export async function getMonitorDiff(
     return mockDiff(changeId);
   }
   const { data } = await apiClient.get<unknown>(
-    `${BASE}/${monitorId}/changes/${changeId}/diff`,
+    `${BASE}/${monitorId}/changes/${changeId}/diff${options?.diff === "word" ? "?diff=word" : ""}`,
     { timeout: 180_000 }
   );
   return parseSingle<MonitorDiff>(monitorDiffSchema, data, "monitor diff");

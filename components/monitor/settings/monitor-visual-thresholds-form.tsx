@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+
 import { MonitorVisualMaskEditor } from "@/components/monitor/monitor-visual-mask-editor";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,6 +25,18 @@ const HASH_ALGORITHM_DESCRIPTIONS: Record<VisualHashAlgorithm, string> = {
 };
 
 export function MonitorVisualThresholdsForm({ value, onChange }: MonitorVisualThresholdsFormProps) {
+  const stepsTextValue = useMemo(
+    () => (value.steps ? JSON.stringify(value.steps, null, 2) : ""),
+    [value.steps],
+  );
+  const [stepsText, setStepsText] = useState(stepsTextValue);
+  const [stepsParseError, setStepsParseError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setStepsText(stepsTextValue);
+    setStepsParseError(null);
+  }, [stepsTextValue]);
+
   return (
     <div className="space-y-4 text-sm">
       <label className="flex flex-col gap-1">
@@ -180,6 +194,82 @@ export function MonitorVisualThresholdsForm({ value, onChange }: MonitorVisualTh
             maxRegions={VISUAL_MAX_IGNORE_REGIONS}
           />
         </div>
+      </details>
+
+      <details className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+        <summary className="cursor-pointer font-medium text-zinc-900 dark:text-white">
+          Browser wait and steps
+        </summary>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Wait for SPA content before taking the screenshot. Steps accept a JSON array with
+          safe actions like {"[{\"action\":\"wait\",\"ms\":500},{\"action\":\"scroll\"}]"}.
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="flex flex-col gap-1">
+            <span className="font-medium text-zinc-900 dark:text-white">Wait for selector</span>
+            <Input
+              placeholder="main .loaded"
+              value={value.waitFor?.selector ?? ""}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  waitFor: {
+                    ...(value.waitFor ?? {}),
+                    selector: e.target.value.trim() || null,
+                  },
+                })
+              }
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-medium text-zinc-900 dark:text-white">Extra wait (ms)</span>
+            <Input
+              inputMode="numeric"
+              placeholder="0"
+              value={value.waitFor?.timeoutMs ?? ""}
+              onChange={(e) => {
+                const raw = e.target.value.trim();
+                onChange({
+                  ...value,
+                  waitFor: {
+                    ...(value.waitFor ?? {}),
+                    timeoutMs: raw === "" ? null : Math.max(0, Math.min(10_000, Number(raw) || 0)),
+                  },
+                });
+              }}
+            />
+          </label>
+        </div>
+        <label className="mt-3 flex flex-col gap-1">
+          <span className="font-medium text-zinc-900 dark:text-white">Browser steps JSON</span>
+          <textarea
+            data-testid="visual-browser-steps-json"
+            className="min-h-24 rounded-md border border-zinc-200 bg-white px-3 py-2 font-mono text-xs text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+            value={stepsText}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setStepsText(raw);
+              try {
+                const trimmed = raw.trim();
+                const parsed = trimmed ? JSON.parse(trimmed) : null;
+                if (parsed !== null && !Array.isArray(parsed)) {
+                  setStepsParseError("Steps must be a JSON array.");
+                  return;
+                }
+                setStepsParseError(null);
+                onChange({ ...value, steps: parsed as VisualThresholds["steps"] });
+              } catch (error) {
+                const message = error instanceof Error ? error.message : "Invalid JSON";
+                setStepsParseError(message);
+              }
+            }}
+          />
+          {stepsParseError ? (
+            <p className="text-xs text-red-600 dark:text-red-300" role="alert">
+              Invalid steps JSON: {stepsParseError}
+            </p>
+          ) : null}
+        </label>
       </details>
 
       <label className="flex flex-col gap-1">

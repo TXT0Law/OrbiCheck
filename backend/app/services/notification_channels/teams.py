@@ -16,6 +16,7 @@ from app.services.notification_channels._helpers import (
     failure_result,
     log_send_error,
     post_json,
+    render_alert_title,
     render_monitor_link,
     severity_colour_hex,
     skipped_result,
@@ -55,7 +56,7 @@ def _build_message_card(payload: AlertPayload) -> dict:
 
     sections = [
         {
-            "activityTitle": f"OrbiCheck — {payload.monitor_name}",
+            "activityTitle": render_alert_title(payload),
             "activitySubtitle": payload.message,
             "facts": facts,
             "markdown": True,
@@ -77,7 +78,7 @@ def _build_message_card(payload: AlertPayload) -> dict:
         "@context": "https://schema.org/extensions",
         "summary": f"OrbiCheck alert: {payload.monitor_name}",
         "themeColor": severity_colour_hex(payload.severity).lstrip("#"),
-        "title": f"[{severity_label}] {payload.monitor_name}",
+        "title": f"[{severity_label}] {render_alert_title(payload)}",
         "text": payload.message,
         "sections": sections,
     }

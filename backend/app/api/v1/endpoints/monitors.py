@@ -491,11 +491,12 @@ async def get_snapshot_raw(
 async def get_change_diff(
     monitor_id: uuid.UUID,
     change_id: uuid.UUID,
+    diff: str = Query("line", pattern="^(line|word)$"),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     data = await monitor_service.get_change_diff(
-        monitor_id, change_id, current_user.id, db
+        monitor_id, change_id, current_user.id, db, diff_mode=diff
     )
     return SuccessResponse(data=data)
 

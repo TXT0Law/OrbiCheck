@@ -72,6 +72,12 @@ DEFAULT_CAPABILITIES: dict[str, Any] = {
             "triggerWords": None,
             "ignoreWords": None,
             "triggerRegex": None,
+            "extractors": None,
+            "restock": {
+                "enabled": False,
+                "outOfStockKeywords": [],
+                "inStockKeywords": [],
+            },
             # C-5: rendered-DOM fetch toggle. ``"http"`` keeps the cheap path; the
             # ``"browser"`` value routes the probe through Playwright via the
             # scan-service. Validation enforces interval >= MIN_BROWSER_FETCH_INTERVAL_SECONDS
@@ -110,6 +116,8 @@ DEFAULT_CAPABILITIES: dict[str, Any] = {
             # hashing. Empty by default; the UI editor lets operators
             # ignore time / ad / chat widgets.
             "ignoreRegions": [],
+            "waitFor": {"selector": None, "timeoutMs": 0},
+            "steps": [],
         },
         "intervalOverrideSeconds": None,
     },

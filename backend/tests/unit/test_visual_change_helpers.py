@@ -11,6 +11,7 @@ from app.services.visual_change_helpers import (
     DEFAULT_HASH_ALGORITHM,
     SUPPORTED_HASH_ALGORITHMS,
     apply_ignore_regions,
+    compute_changed_blocks,
     compute_perceptual_hash_hex,
     decode_screenshot_payload,
     get_visual_thresholds,
@@ -229,3 +230,17 @@ def test_apply_ignore_regions_no_op_for_empty_tuple() -> None:
     img = Image.new("RGB", (8, 8), (255, 255, 255))
     out = apply_ignore_regions(img, ())
     assert out is img
+
+
+def test_compute_changed_blocks_returns_row_major_cells() -> None:
+    before = _png_with_color((0, 0, 0), size=64)
+    img = Image.new("RGB", (64, 64), (0, 0, 0))
+    for x in range(56, 64):
+        for y in range(56, 64):
+            img.putpixel((x, y), (255, 255, 255))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+
+    changed = compute_changed_blocks(before, buf.getvalue())
+
+    assert 63 in changed

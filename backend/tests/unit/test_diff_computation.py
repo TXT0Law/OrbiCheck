@@ -5,8 +5,13 @@ from __future__ import annotations
 
 from app.services.content_change_helpers import (
     compute_diff_summary,
+    compute_word_diff,
     generate_html_diff,
     generate_unified_diff,
+)
+from app.services.content_restock_helpers import (
+    detect_restock_transition,
+    get_content_restock_config,
 )
 
 
@@ -47,3 +52,34 @@ def test_html_diff_truncates_many_lines(monkeypatch) -> None:
     new = "\n".join(f"M{i}" for i in range(20))
     html = generate_html_diff(old, new)
     assert "table" in html.lower()
+
+
+def test_compute_word_diff_reports_token_changes() -> None:
+    diff = compute_word_diff("red shoes out of stock", "red shoes in stock")
+    assert diff["tokensAdded"] >= 1
+    assert diff["tokensRemoved"] >= 1
+    assert diff["totalTokenChanges"] >= 2
+    assert diff["operations"]
+
+
+def test_restock_transition_requires_previous_oos_and_current_stock() -> None:
+    cfg = get_content_restock_config(
+        {
+            "content_change": {
+                "thresholds": {
+                    "restock": {
+                        "enabled": True,
+                        "outOfStockKeywords": ["out of stock"],
+                        "inStockKeywords": ["in stock"],
+                    }
+                }
+            }
+        }
+    )
+    matched, word = detect_restock_transition(
+        "This product is out of stock",
+        "This product is now in stock",
+        cfg,
+    )
+    assert matched is True
+    assert word == "in stock"

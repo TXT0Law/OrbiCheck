@@ -34,6 +34,7 @@ _TS_S_10 = re.compile(r"\b[12]\d{9}\b")
 
 # Second pass on unified-diff *text* before fingerprint hashing (optional).
 _DIFF_FP_EXTRA_DIGITS = re.compile(r"\b\d{4,}\b")
+_WORD_TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
 
 # Case-insensitive HTML snippets that often indicate anti-bot / risk pages (not stable content).
 _DEGRADED_BODY_MARKERS: tuple[str, ...] = (
@@ -319,6 +320,43 @@ def generate_unified_diff(
         tofile="after",
     )
     return "".join(diff)
+
+
+def compute_word_diff(
+    old_content: str,
+    new_content: str,
+    *,
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
+    """Return a compact word-level diff for article-style pages."""
+    cap = max_tokens if max_tokens is not None else settings.DIFF_MAX_LINES * 40
+    old_tokens = _WORD_TOKEN_PATTERN.findall(old_content)[:cap]
+    new_tokens = _WORD_TOKEN_PATTERN.findall(new_content)[:cap]
+    matcher = difflib.SequenceMatcher(a=old_tokens, b=new_tokens, autojunk=False)
+    ops: list[dict[str, Any]] = []
+    added = 0
+    removed = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        before = old_tokens[i1:i2]
+        after = new_tokens[j1:j2]
+        removed += len(before)
+        added += len(after)
+        ops.append(
+            {
+                "type": tag,
+                "removed": before,
+                "added": after,
+            }
+        )
+    return {
+        "tokensAdded": added,
+        "tokensRemoved": removed,
+        "totalTokenChanges": added + removed,
+        "operations": ops[:200],
+        "truncated": len(old_tokens) >= cap or len(new_tokens) >= cap,
+    }
 
 
 def generate_html_diff(

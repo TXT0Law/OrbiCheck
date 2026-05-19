@@ -113,6 +113,7 @@ from app.services.notification_channels.lifecycle import (
 )
 from app.services.visual_change_helpers import (
     DHASH_BIT_LENGTH,
+    compute_changed_blocks,
     compute_perceptual_hash_hex,
     decode_screenshot_payload,
     get_visual_thresholds,
@@ -129,6 +130,7 @@ from app.services.content_change_helpers import (
     compile_custom_normalization_rules,
     compute_content_fingerprint,
     compute_diff_summary,
+    compute_word_diff,
     compute_unified_diff_fingerprint,
     detect_degraded_page,
     evaluate_content_threshold,
@@ -138,6 +140,10 @@ from app.services.content_change_helpers import (
     get_content_thresholds,
     normalize_body_for_comparison,
     validate_content_response,
+)
+from app.services.content_restock_helpers import (
+    detect_restock_transition,
+    get_content_restock_config,
 )
 from app.services.content_trigger_helpers import (
     evaluate_content_triggers,
@@ -1270,7 +1276,7 @@ async def bulk_act_on_monitors(
     return succeeded, failures
 
 
-def _normalize_diff_summary_for_api(raw: dict | None) -> dict[str, int | str]:
+def _normalize_diff_summary_for_api(raw: dict | None) -> dict[str, Any]:
     """Ensure diff_summary includes keys expected by clients (legacy rows)."""
     s = raw or {}
     lines_added = int(s.get("linesAdded", 0))
@@ -1278,7 +1284,7 @@ def _normalize_diff_summary_for_api(raw: dict | None) -> dict[str, int | str]:
     lines_changed = int(s.get("linesChanged", 0))
     total = int(s.get("totalDiffLines", lines_added + lines_removed))
     cat = str(s.get("changeCategory", "small"))
-    out: dict[str, int | str] = {
+    out: dict[str, Any] = {
         "linesAdded": lines_added,
         "linesRemoved": lines_removed,
         "linesChanged": lines_changed,
@@ -1288,6 +1294,10 @@ def _normalize_diff_summary_for_api(raw: dict | None) -> dict[str, int | str]:
     dfp = s.get("diffFingerprint")
     if isinstance(dfp, str) and dfp:
         out["diffFingerprint"] = dfp
+    for key in ("previewLine", "eventType", "matchedRestockWord"):
+        value = s.get(key)
+        if isinstance(value, str) and value:
+            out[key] = value
     return out
 
 
@@ -1530,6 +1540,15 @@ async def _run_content_change_capture(
         return
 
     diff_summary = compute_diff_summary(prev_text, new_text)
+    restocked, matched_restock_word = detect_restock_transition(
+        prev_text,
+        new_text,
+        get_content_restock_config(monitor.capabilities),
+    )
+    if restocked:
+        diff_summary["eventType"] = "content_restock"
+        if matched_restock_word:
+            diff_summary["matchedRestockWord"] = matched_restock_word
     change_size = abs(len(raw) - prev_snap.content_size_bytes)
     met = evaluate_content_threshold(diff_summary, change_size, thresholds)
 
@@ -1684,13 +1703,19 @@ async def _run_content_change_capture(
         actual_value = f"diffLines:{diff_summary.get('totalDiffLines', 0)}"
         if matched_trigger:
             actual_value = f"{actual_value};trigger:{matched_trigger}"
+        event_type = "content_restock" if restocked else "content_change"
+        message = (
+            "Item appears back in stock"
+            if restocked
+            else f"Content changed ({content_category})"
+        )
         await alert_service.evaluate_and_dispatch_alert(
             monitor,
             "content_change",
-            "content_change",
+            event_type,
             content_severity,
             actual_value,
-            f"Content changed ({content_category})",
+            message,
             db,
             redis,
             threshold_config=copy.deepcopy(thresholds.__dict__),
@@ -1704,11 +1729,15 @@ async def _run_content_change_capture(
         }
         if matched_trigger:
             change_payload["matchedTriggerWord"] = matched_trigger
+        if restocked:
+            change_payload["eventType"] = "content_restock"
+            if matched_restock_word:
+                change_payload["matchedRestockWord"] = matched_restock_word
         await _publish_monitor_event(
             redis,
             monitor.id,
             monitor.user_id,
-            "content_changed",
+            "content_restocked" if restocked else "content_changed",
             change_payload,
             dispatch_webhook=False,
         )
@@ -1773,6 +1802,9 @@ async def _run_visual_change_capture(
             viewport_width=vth.viewport_width,
             viewport_height=vth.viewport_height,
             full_page=vth.full_page,
+            wait_for_selector=vth.wait_for_selector,
+            wait_ms=vth.wait_ms,
+            steps=list(vth.browser_steps),
         )
     except httpx.TimeoutException as exc:
         logger.warning(
@@ -1923,6 +1955,20 @@ async def _run_visual_change_capture(
         "perceptualHashAlgo": vth.hash_algorithm,
         "similarityThresholdPercent": vth.similarity_threshold_percent,
     }
+    try:
+        summary["changedBlocks"] = await asyncio.to_thread(
+            compute_changed_blocks,
+            prev.image_png,
+            png_bytes,
+        )
+    except Exception as exc:
+        logger.warning(
+            "visual_changed_blocks_failed",
+            monitor_id=str(monitor.id),
+            previous_capture_id=str(prev.id),
+            current_capture_id=str(cap.id),
+            error=str(exc)[:300],
+        )
     if vth.ignore_regions:
         summary["ignoreRegionsApplied"] = len(vth.ignore_regions)
     vch = MonitorVisualChange(
@@ -3345,6 +3391,8 @@ async def get_change_diff(
     change_id: uuid.UUID,
     user_id: int,
     db: AsyncSession,
+    *,
+    diff_mode: str = "line",
 ) -> MonitorDiffResponse:
     m = await db.get(Monitor, monitor_id)
     if not m or m.user_id != user_id:
@@ -3409,6 +3457,9 @@ async def get_change_diff(
     ds = _normalize_diff_summary_for_api(
         ch.diff_summary if isinstance(ch.diff_summary, dict) else {}
     )
+    word_diff: dict[str, Any] | None = None
+    if diff_mode == "word":
+        word_diff = compute_word_diff(prev_txt, cur_txt)
     v_cap_id: str | None = None
     v_corr: CorrelationMethod | None = None
     if "visual_change" in set(m.enabled_capabilities or []):
@@ -3430,6 +3481,7 @@ async def get_change_diff(
         previous_captured_at=prev_s.captured_at,
         current_captured_at=cur_s.captured_at,
         diff_summary=ds,
+        word_diff=word_diff,
         original_previous_length=orig_prev_len,
         original_current_length=orig_cur_len,
         linked_visual_capture_id=v_cap_id,

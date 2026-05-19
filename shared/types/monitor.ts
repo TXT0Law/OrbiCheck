@@ -132,6 +132,19 @@ export interface ContentNormalizationRule {
   replacement: string;
 }
 
+export type ContentExtractorType = "css" | "xpath" | "jsonpath";
+
+export interface ContentExtractor {
+  type: ContentExtractorType;
+  expression: string;
+}
+
+export interface ContentRestockThresholds {
+  enabled: boolean;
+  outOfStockKeywords: string[];
+  inStockKeywords: string[];
+}
+
 export interface ContentThresholds {
   /** Alert on any hash change */
   alertOnChange: boolean;
@@ -160,6 +173,10 @@ export interface ContentThresholds {
     mergeStrategy?: "concat_ordered";
     maxExtractedChars?: number;
   } | null;
+  /** C-2: ordered extractors appended after selectorExtraction. */
+  extractors?: ContentExtractor[] | null;
+  /** C-4: emit a restock-flavoured content alert when OOS text becomes in-stock. */
+  restock?: ContentRestockThresholds | null;
   /**
    * When true (default), UUIDs and long hex runs are normalized before hashing.
    * Set false to compare raw response bytes like legacy behavior.
@@ -282,6 +299,13 @@ export interface VisualIgnoreRegion {
 
 export const VISUAL_MAX_IGNORE_REGIONS = 8;
 
+export type VisualBrowserStep =
+  | { action: "goto"; url: string }
+  | { action: "wait"; ms: number }
+  | { action: "scroll" }
+  | { action: "click"; selector: string }
+  | { action: "type"; selector: string; value: string };
+
 export interface VisualThresholds {
   /**
    * Minimum similarity (0–100) vs previous capture; below triggers a visual change event.
@@ -312,6 +336,16 @@ export interface VisualThresholds {
    * the same mask survives a viewport change.
    */
   ignoreRegions?: VisualIgnoreRegion[] | null;
+  /** V-13: wait before screenshot capture for SPA/lazy-loaded content. */
+  waitFor?: {
+    selector?: string | null;
+    timeoutMs?: number | null;
+  } | null;
+  /**
+   * V-14: bounded browser steps. Interactive click/type are feature-flagged
+   * server-side; goto/wait/scroll are safe defaults.
+   */
+  steps?: VisualBrowserStep[] | null;
 }
 
 /** Maps capability type to its threshold shape */
@@ -443,6 +477,8 @@ export interface MonitorChange {
     diffFingerprint?: string;
     /** First hunk line preview from server (timeline) */
     previewLine?: string;
+    eventType?: "content_change" | "content_restock";
+    matchedRestockWord?: string;
   };
 }
 
@@ -469,6 +505,17 @@ export interface MonitorDiff {
   originalCurrentLength?: number;
   linkedVisualCaptureId?: string | null;
   linkedVisualCorrelation?: "check_id" | "time_window" | null;
+  wordDiff?: {
+    tokensAdded: number;
+    tokensRemoved: number;
+    totalTokenChanges: number;
+    operations: Array<{
+      type: string;
+      removed: string[];
+      added: string[];
+    }>;
+    truncated: boolean;
+  } | null;
 }
 
 /** Periodic screenshot capture for visual_change. */
@@ -504,6 +551,7 @@ export interface MonitorVisualChange {
     similarityPercent?: number;
     perceptualHashAlgo?: string;
     similarityThresholdPercent?: number;
+    changedBlocks?: number[];
   };
 }
 

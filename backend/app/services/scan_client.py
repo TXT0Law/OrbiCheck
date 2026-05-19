@@ -43,23 +43,32 @@ async def call_screenshot_service(
     viewport_width: int,
     viewport_height: int,
     full_page: bool,
+    wait_for_selector: str | None = None,
+    wait_ms: int | None = None,
+    steps: list[dict] | None = None,
     scan_id: str | None = None,
     trace_id: str | None = None,
 ) -> dict:
     """Call Scan Service screenshot module (Playwright). Returns JSON body."""
     t = max(float(settings.MONITOR_SCREENSHOT_TIMEOUT_S), 5.0)
     timeout = httpx.Timeout(t, connect=10.0)
-    params = {
+    body: dict[str, object] = {
         "url": url,
-        "viewportWidth": str(int(viewport_width)),
-        "viewportHeight": str(int(viewport_height)),
-        "fullPage": "true" if full_page else "false",
+        "viewportWidth": int(viewport_width),
+        "viewportHeight": int(viewport_height),
+        "fullPage": bool(full_page),
     }
+    if wait_for_selector:
+        body["waitForSelector"] = wait_for_selector
+    if wait_ms is not None and wait_ms > 0:
+        body["waitForMs"] = int(wait_ms)
+    if steps:
+        body["steps"] = steps
     headers = _build_trace_headers(scan_id, trace_id)
     async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
-        response = await client.get(
+        response = await client.post(
             f"{SCAN_SERVICE_BASE}/api/scan/screenshot",
-            params=params,
+            json=body,
         )
         response.raise_for_status()
         return response.json()
