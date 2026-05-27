@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-import { navigateTo } from "./helpers";
+import { navigateTo, uniqueTestName } from "./helpers";
 
 test.describe("Connected URL groups workflow", () => {
   test("creates a group, adds a url, and triggers scan", async ({ page }) => {
-    const groupName = `Connected Group ${Date.now()}`;
+    const groupName = uniqueTestName("Connected Group");
 
     await navigateTo(page, "/dashboard/scan/groups");
     await expect(

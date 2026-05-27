@@ -1,8 +1,19 @@
-import { ApiError } from "@/lib/api/client";
+type ApiLikeError = Error & {
+  readonly status?: number;
+  readonly code?: string;
+  readonly cause?: unknown;
+};
+
+function isApiLikeError(err: unknown): err is ApiLikeError {
+  return (
+    err instanceof Error &&
+    (err.name === "ApiError" || "status" in err || "code" in err)
+  );
+}
 
 /** True when the selected change id should be removed from the URL (invalid / wrong monitor). */
 export function shouldClearChangeQueryFromDiffError(err: unknown): boolean {
-  if (!ApiError.isApiError(err)) {
+  if (!isApiLikeError(err)) {
     return false;
   }
   if (err.status === 403) {
@@ -22,7 +33,7 @@ export function shouldClearChangeQueryFromDiffError(err: unknown): boolean {
 
 /** Snapshot bodies purged for diff preview; change row may still exist. */
 export function isSnapshotPurgedDiffError(err: unknown): boolean {
-  if (ApiError.isApiError(err) && err.code === "SNAPSHOT_NOT_FOUND") {
+  if (isApiLikeError(err) && err.code === "SNAPSHOT_NOT_FOUND") {
     return true;
   }
   if (err instanceof Error) {
@@ -33,7 +44,7 @@ export function isSnapshotPurgedDiffError(err: unknown): boolean {
 }
 
 export function isDiffRequestTimeoutError(err: unknown): boolean {
-  if (ApiError.isApiError(err)) {
+  if (isApiLikeError(err)) {
     const m = err.message.toLowerCase();
     if (m.includes("timeout")) return true;
     const cause = err.cause;

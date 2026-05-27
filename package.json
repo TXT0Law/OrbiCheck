@@ -31,6 +31,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
+    "test:connected": "playwright test --config=playwright.config.ts",
+    "test:connected:ci": "CI=true playwright test --config=playwright.config.ts",
     "test:linked": "playwright test --config=playwright.config.ts && playwright test --config=playwright.backend-down.config.ts",
     "test:linked:headed": "playwright test --config=playwright.config.ts --headed && playwright test --config=playwright.backend-down.config.ts --headed",
     "test:linked:ci": "playwright test --config=playwright.config.ts --reporter=list,html && playwright test --config=playwright.backend-down.config.ts --reporter=list,html"
