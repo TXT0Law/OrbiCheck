@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { openScanPage, startScan } from "./helpers";
 
 const LINKED_BACKEND_URL = "http://127.0.0.1:8010";
-const CANCEL_SMOKE_TARGET = "https://iana.org";
+const CANCEL_SMOKE_TARGET = "https://iana.org/orbicheck-cancel-hold";
 
 test.describe("Connected scan cancel flow", () => {
   test("reaches the real linked backend cancel endpoint", async ({ request }) => {
