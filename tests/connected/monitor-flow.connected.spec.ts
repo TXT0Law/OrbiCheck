@@ -1,15 +1,17 @@
 import { expect, test } from "@playwright/test";
 
-import { navigateTo } from "./helpers";
+import { navigateTo, uniqueTestName } from "./helpers";
 
 test.describe("Connected monitor lifecycle", () => {
   test("creates a monitor and opens enabled sub-pages", async ({ page }) => {
+    const monitorName = uniqueTestName("Connected Monitor");
+
     await navigateTo(page, "/dashboard/monitor/new");
     await expect(
       page.getByRole("heading", { name: "Add monitor", exact: true })
     ).toBeVisible();
 
-    await page.getByLabel("Display name").fill("Connected Monitor");
+    await page.getByLabel("Display name").fill(monitorName);
     await page.getByLabel("URL").fill("https://example.com");
     await page.getByRole("button", { name: "Content" }).click();
     await page.getByRole("button", { name: "SSL" }).click();

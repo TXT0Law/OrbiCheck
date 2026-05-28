@@ -420,9 +420,16 @@ make test-watch
 make test-cov
 
 # Connected frontend-backend tests (Playwright)
-# Requires all services running
-pnpm test:linked
+# Starts scan-service :4000, linked backend :8010, and Next.js :3101
+pnpm test:connected
+
+# Harness checks enforced by CI
+make check-harness
 ```
+
+CI requires lint, unit tests, harness checks, and connected E2E to pass before
+the final quality gate succeeds. Connected E2E uploads `playwright-report` and
+`test-results` artifacts on failure.
 
 ---
 

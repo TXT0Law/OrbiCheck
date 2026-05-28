@@ -1,5 +1,3 @@
-import { getBrowserApiAbsoluteUrl } from "@/lib/api/client";
-
 /**
  * GET binary/text from API with cookies and trigger download (same-origin session).
  */
@@ -17,4 +15,25 @@ export async function downloadFromApiGet(path: string, filename: string): Promis
   anchor.rel = "noopener";
   anchor.click();
   URL.revokeObjectURL(objectUrl);
+}
+
+function getBrowserApiAbsoluteUrl(apiPath: string): string {
+  const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "").trim();
+  const normalizedApiPath = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
+  const isDefaultBackend =
+    !rawApiUrl ||
+    rawApiUrl === "http://localhost:8000" ||
+    rawApiUrl.startsWith("http://localhost:8000/") ||
+    rawApiUrl === "http://127.0.0.1:8000" ||
+    rawApiUrl.startsWith("http://127.0.0.1:8000/");
+  const basePath =
+    !isDefaultBackend && rawApiUrl.startsWith("http")
+      ? rawApiUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, "") + "/api/v1"
+      : "/api/v1";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const baseUrl = basePath.startsWith("http")
+    ? basePath
+    : `${origin}${basePath.replace(/\/$/, "")}`;
+
+  return `${baseUrl.replace(/\/$/, "")}${normalizedApiPath}`;
 }

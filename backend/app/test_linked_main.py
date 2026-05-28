@@ -27,6 +27,13 @@ from app.db.session import async_session_factory
 from app.main import create_app
 from app.models.scan import ModuleStatus, Scan, ScanStatus
 
+LINKED_CANCEL_HOLD_URL = "https://iana.org/orbicheck-cancel-hold"
+LINKED_CANCEL_HOLD_SECONDS = 30
+
+
+def _should_hold_for_cancel(scan_url: str) -> bool:
+    return scan_url == LINKED_CANCEL_HOLD_URL
+
 
 class InMemoryPubSub:
     def __init__(self) -> None:
@@ -109,6 +116,7 @@ def _progress_payload(
 async def _run_deterministic_scan(scan_id: str) -> None:
     scan_uuid = uuid.UUID(scan_id)
     progress_key = f"scan:{scan_id}:progress"
+    should_hold_for_cancel = False
 
     async with async_session_factory() as db:
         scan = (
@@ -137,6 +145,7 @@ async def _run_deterministic_scan(scan_id: str) -> None:
         scan.started_at = now
         scan.progress = 35
         scan.completed_modules = 0
+        should_hold_for_cancel = _should_hold_for_cancel(scan.url)
 
         for module in scan.module_results:
             module.status = ModuleStatus.SUCCESS
@@ -148,6 +157,14 @@ async def _run_deterministic_scan(scan_id: str) -> None:
                 "ok": True,
                 "source": "linked-test-double",
             }
+
+        if should_hold_for_cancel:
+            await db.commit()
+            await asyncio.sleep(LINKED_CANCEL_HOLD_SECONDS)
+            await db.refresh(scan)
+            if scan.status == ScanStatus.CANCELLED:
+                await db.commit()
+                return
 
         scan.status = ScanStatus.COMPLETED
         scan.progress = 100
@@ -170,6 +187,9 @@ async def _run_deterministic_scan(scan_id: str) -> None:
 
 
 class DeterministicScanDispatcher:
+    def run(self, scan_id: str, *_args, **_kwargs) -> None:
+        asyncio.create_task(_run_deterministic_scan(scan_id))
+
     def delay(self, scan_id: str, *_args, **_kwargs) -> None:
         asyncio.create_task(_run_deterministic_scan(scan_id))
 
