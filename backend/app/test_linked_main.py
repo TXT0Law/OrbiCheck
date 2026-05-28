@@ -31,6 +31,10 @@ LINKED_CANCEL_HOLD_URL = "https://iana.org/orbicheck-cancel-hold"
 LINKED_CANCEL_HOLD_SECONDS = 30
 
 
+def _should_hold_for_cancel(scan_url: str) -> bool:
+    return scan_url == LINKED_CANCEL_HOLD_URL
+
+
 class InMemoryPubSub:
     def __init__(self) -> None:
         self._channel: str | None = None
@@ -141,7 +145,7 @@ async def _run_deterministic_scan(scan_id: str) -> None:
         scan.started_at = now
         scan.progress = 35
         scan.completed_modules = 0
-        should_hold_for_cancel = scan.url == LINKED_CANCEL_HOLD_URL
+        should_hold_for_cancel = _should_hold_for_cancel(scan.url)
 
         for module in scan.module_results:
             module.status = ModuleStatus.SUCCESS
