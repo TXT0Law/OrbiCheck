@@ -187,6 +187,9 @@ async def _run_deterministic_scan(scan_id: str) -> None:
 
 
 class DeterministicScanDispatcher:
+    def run(self, scan_id: str, *_args, **_kwargs) -> None:
+        asyncio.create_task(_run_deterministic_scan(scan_id))
+
     def delay(self, scan_id: str, *_args, **_kwargs) -> None:
         asyncio.create_task(_run_deterministic_scan(scan_id))
 
