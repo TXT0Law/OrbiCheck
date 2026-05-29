@@ -26,6 +26,8 @@ from app.core.deps import get_redis
 from app.db.session import async_session_factory
 from app.main import create_app
 from app.models.scan import ModuleStatus, Scan, ScanStatus
+from app.tasks import url_group_run_tasks
+from app.tasks.scan_tasks import _get_sync_session
 
 LINKED_CANCEL_HOLD_URL = "https://iana.org/orbicheck-cancel-hold"
 LINKED_CANCEL_HOLD_SECONDS = 30
@@ -186,12 +188,54 @@ async def _run_deterministic_scan(scan_id: str) -> None:
         await db.commit()
 
 
+def _run_deterministic_scan_sync(scan_id: str) -> None:
+    scan_uuid = uuid.UUID(scan_id)
+    with _get_sync_session() as db:
+        scan = (
+            db.execute(
+                select(Scan)
+                .where(Scan.id == scan_uuid)
+                .options(selectinload(Scan.module_results))
+            )
+            .scalar_one()
+        )
+        now = datetime.now(timezone.utc)
+        total = max(1, scan.total_modules)
+        scan.status = ScanStatus.COMPLETED
+        scan.started_at = now
+        scan.progress = 100
+        scan.completed_modules = total
+        scan.security_score = 18
+        scan.error_message = None
+        scan.completed_at = now
+
+        for module in scan.module_results:
+            module.status = ModuleStatus.SUCCESS
+            module.duration_ms = 20
+            module.completed_at = now
+            module.error_message = None
+            module.raw_result = {
+                "module": module.module_name,
+                "ok": True,
+                "source": "linked-test-double",
+            }
+        db.commit()
+
+
 class DeterministicScanDispatcher:
     def run(self, scan_id: str, *_args, **_kwargs) -> None:
         asyncio.create_task(_run_deterministic_scan(scan_id))
 
     def delay(self, scan_id: str, *_args, **_kwargs) -> None:
         asyncio.create_task(_run_deterministic_scan(scan_id))
+
+
+class ThreadedDeterministicScanDispatcher:
+    def run(self, scan_id: str, *_args, **_kwargs) -> None:
+        _run_deterministic_scan_sync(scan_id)
+
+    def delay(self, scan_id: str, *_args, **_kwargs) -> None:
+        _run_deterministic_scan_sync(scan_id)
 
 
 async def _get_redis_stub() -> InMemoryRedis:
@@ -207,4 +251,5 @@ app = create_app()
 # Replace external side effects for linked tests only.
 scans_endpoint.execute_scan = DeterministicScanDispatcher()  # type: ignore[assignment]
 scans_endpoint.get_redis_async = _get_redis_stub  # type: ignore[assignment]
+url_group_run_tasks.execute_scan = ThreadedDeterministicScanDispatcher()  # type: ignore[assignment]
 app.dependency_overrides[get_redis] = _health_redis_override

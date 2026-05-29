@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
+from app.models.url_group import UrlGroupRunMemberStatus, UrlGroupRunStatus
 from app.utils.url_parser import normalize_url
 
 
@@ -69,6 +70,69 @@ class UrlGroupDetailResponse(UrlGroupResponse):
 
 class UrlGroupListResponse(BaseModel):
     groups: list[UrlGroupResponse]
+    total: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class UrlGroupRunCreateRequest(BaseModel):
+    modules: list[str] | None = None
+    enable_port_scan: bool = False
+    port_scan_profile: str = Field(default="quick", pattern="^(quick|standard|deep)$")
+    acknowledge_scan_authorization: bool = False
+    concurrency_limit: int | None = Field(default=None, ge=1, le=10)
+    skip_recently_scanned_within_seconds: int | None = Field(default=None, ge=1)
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class UrlGroupRunMemberResponse(BaseModel):
+    id: str
+    group_member_id: str
+    url: str
+    scan_id: str | None = None
+    status: UrlGroupRunMemberStatus
+    error_message: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+
+class UrlGroupRunResponse(BaseModel):
+    id: str
+    group_id: str
+    user_id: int | None = None
+    status: UrlGroupRunStatus
+    progress: int
+    total_members: int
+    queued_members: int
+    running_members: int
+    completed_members: int
+    failed_members: int
+    cancelled_members: int
+    skipped_members: int
+    concurrency_limit: int
+    error_message: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    members: list[UrlGroupRunMemberResponse] = Field(default_factory=list)
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+
+class UrlGroupRunListResponse(BaseModel):
+    runs: list[UrlGroupRunResponse]
     total: int
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)

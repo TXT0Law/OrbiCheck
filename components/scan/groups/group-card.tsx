@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Folder, MoreHorizontal } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, MoreHorizontal, Play } from "lucide-react";
 
 import { AddMemberDialog } from "@/components/scan/groups/add-member-dialog";
-import { RescanGroupButton } from "@/components/scan/groups/rescan-group-button";
 import { GroupMemberRow } from "@/components/scan/groups/group-member-row";
+import { GroupRunProgress } from "@/components/scan/groups/group-run-progress";
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -22,11 +23,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { UrlGroup } from "@/types/url-group";
 import { createScan } from "@/lib/api/scans";
 import {
+  useCancelGroupRun,
+  useCreateGroupRun,
   useDeleteGroup,
+  useGroupRunProgress,
+  useGroupRuns,
   useRemoveGroupMember,
+  useRetryFailedGroupRun,
   useUrlGroup,
 } from "@/lib/hooks/use-url-groups";
 import { useRescan } from "@/lib/hooks/use-scan-list";
+
+const ACTIVE_GROUP_RUN_STATUSES = ["pending", "running"];
 
 interface GroupCardProps {
   group: UrlGroup;
@@ -52,10 +60,28 @@ export function GroupCard({
   const [isOpen, setIsOpen] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const { data: detail, isLoading } = useUrlGroup(isOpen ? group.id : "");
+  const { data: runsData } = useGroupRuns(group.id, 0, 5);
   const { mutate: deleteGroup } = useDeleteGroup();
   const { mutate: removeMember, isPending: isRemoving } =
     useRemoveGroupMember(group.id);
   const { mutate: rescan, isPending: isRescanning } = useRescan();
+  const { mutate: createGroupRun, isPending: isCreatingGroupRun } =
+    useCreateGroupRun(group.id);
+  const { mutate: cancelGroupRun, isPending: isCancellingGroupRun } =
+    useCancelGroupRun(group.id);
+  const { mutate: retryFailedGroupRun, isPending: isRetryingGroupRun } =
+    useRetryFailedGroupRun(group.id);
+
+  const latestRun = runsData?.runs?.[0] ?? null;
+  const liveRun = useGroupRunProgress(
+    group.id,
+    latestRun?.id ?? "",
+    !!latestRun && ACTIVE_GROUP_RUN_STATUSES.includes(latestRun.status)
+  );
+  const displayedRun = liveRun ?? latestRun;
+  const hasActiveRun =
+    !!displayedRun && ACTIVE_GROUP_RUN_STATUSES.includes(displayedRun.status);
+  const memberCountForActions = detail?.members.length ?? group.memberCount;
 
   const memberCountLabel =
     group.memberCount === 1 ? "1 URL" : `${group.memberCount} URLs`;
@@ -94,6 +120,51 @@ export function GroupCard({
     }
   }
 
+  function handleScanGroup() {
+    setScanError(null);
+    createGroupRun(
+      { concurrencyLimit: 3 },
+      {
+        onSuccess: () => {
+          setIsOpen(true);
+          queryClient.invalidateQueries({ queryKey: ["url-group-runs", group.id] });
+          queryClient.invalidateQueries({ queryKey: ["url-groups", group.id] });
+        },
+        onError: (error) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          setScanError(`Group scan failed to start: ${msg}`);
+        },
+      }
+    );
+  }
+
+  function handleCancelGroupRun(runId: string) {
+    cancelGroupRun(runId, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["url-group-runs", group.id] });
+      },
+      onError: (error) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        setScanError(`Group scan cancel failed: ${msg}`);
+      },
+    });
+  }
+
+  function handleRetryFailed(runId: string) {
+    retryFailedGroupRun(
+      { runId, input: { concurrencyLimit: 3 } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["url-group-runs", group.id] });
+        },
+        onError: (error) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          setScanError(`Retry failed members failed: ${msg}`);
+        },
+      }
+    );
+  }
+
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <div className="space-y-2">
@@ -120,13 +191,20 @@ export function GroupCard({
               className="flex items-center gap-2"
               onClick={(e) => e.stopPropagation()}
             >
-              <RescanGroupButton
-                groupId={group.id}
-                onComplete={() => {
-                  queryClient.invalidateQueries({ queryKey: ["url-groups"] });
-                  queryClient.invalidateQueries({ queryKey: ["url-groups", group.id] });
-                }}
-              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleScanGroup}
+                disabled={
+                  isCreatingGroupRun ||
+                  hasActiveRun ||
+                  memberCountForActions === 0
+                }
+                className="gap-1.5"
+              >
+                <Play className="h-4 w-4" />
+                {isCreatingGroupRun ? "Starting..." : "Scan Group"}
+              </Button>
               <AddMemberDialog groupId={group.id} groupName={group.name} />
               <DropdownMenu>
                 <DropdownMenuTrigger>
@@ -154,6 +232,15 @@ export function GroupCard({
               <p className="rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
                 {scanError}
               </p>
+            )}
+            {displayedRun && (
+              <GroupRunProgress
+                run={displayedRun}
+                onCancel={handleCancelGroupRun}
+                onRetryFailed={handleRetryFailed}
+                isCancelling={isCancellingGroupRun}
+                isRetrying={isRetryingGroupRun}
+              />
             )}
             {isLoading ? (
               <>
