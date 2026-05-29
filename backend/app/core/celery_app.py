@@ -23,6 +23,7 @@ celery_app.conf.update(
         "app.tasks.monitor_tasks",
         "app.tasks.report_tasks",
         "app.tasks.notification_tasks",
+        "app.tasks.url_group_run_tasks",
     ],
     beat_schedule={
         "dispatch-monitor-checks": {

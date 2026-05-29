@@ -5,8 +5,10 @@ from uuid import uuid4
 
 import pytest
 
+from app.api.v1.endpoints import url_groups as url_group_endpoints
 from app.core.exceptions import ConflictError, NotFoundError
-from app.services import url_group_service
+from app.models.url_group import UrlGroupRunMemberStatus, UrlGroupRunStatus
+from app.services import url_group_run_service, url_group_service
 
 
 @pytest.mark.asyncio
@@ -351,3 +353,191 @@ async def test_url_normalization_example_com(async_client, monkeypatch) -> None:
     assert response.status_code == 201
     data = response.json()
     assert data["data"]["url"] == "https://example.com"
+
+
+def _fake_group_run(run_id, group_id, now, status=UrlGroupRunStatus.RUNNING):
+    member_id = uuid4()
+    return type("Run", (), {
+        "id": run_id,
+        "group_id": group_id,
+        "user_id": 1,
+        "status": status,
+        "total_members": 1,
+        "queued_members": 0,
+        "running_members": 1 if status == UrlGroupRunStatus.RUNNING else 0,
+        "completed_members": 0,
+        "failed_members": 0,
+        "cancelled_members": 0,
+        "skipped_members": 0,
+        "concurrency_limit": 3,
+        "error_message": None,
+        "created_at": now,
+        "started_at": now,
+        "completed_at": None,
+        "members": [
+            type("RunMember", (), {
+                "id": member_id,
+                "group_member_id": uuid4(),
+                "url": "https://example.com",
+                "scan_id": None,
+                "status": UrlGroupRunMemberStatus.RUNNING,
+                "error_message": None,
+                "created_at": now,
+                "started_at": now,
+                "completed_at": None,
+            })()
+        ],
+    })()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_create_group_run_201(async_client, monkeypatch) -> None:
+    """Create group run returns progress payload and enqueues orchestration."""
+    gid = uuid4()
+    rid = uuid4()
+    now = datetime.now(timezone.utc)
+    run = _fake_group_run(rid, gid, now)
+
+    async def _fake_create_group_run(**kwargs):
+        return run
+
+    async def _fake_publish_progress_snapshot(run_in):
+        return None
+
+    monkeypatch.setattr(
+        url_group_run_service,
+        "create_group_run",
+        _fake_create_group_run,
+    )
+    monkeypatch.setattr(
+        url_group_run_service,
+        "publish_progress_snapshot",
+        _fake_publish_progress_snapshot,
+    )
+    monkeypatch.setattr(url_group_endpoints.process_url_group_run, "delay", lambda *args: None)
+    monkeypatch.setattr(url_group_endpoints.process_url_group_run, "run", lambda *args: None)
+
+    response = await async_client.post(
+        f"/api/v1/url-groups/{gid}/runs",
+        json={"concurrencyLimit": 3},
+    )
+
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert data["id"] == str(rid)
+    assert data["status"] == "running"
+    assert data["members"][0]["status"] == "running"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_group_runs_scopes_to_current_user(async_client, monkeypatch) -> None:
+    """List group runs passes current_user.id into the service layer."""
+    gid = uuid4()
+    now = datetime.now(timezone.utc)
+    run = _fake_group_run(uuid4(), gid, now)
+    seen_user_ids = []
+
+    async def _fake_list_group_runs(**kwargs):
+        seen_user_ids.append(kwargs["user_id"])
+        return [run], 1
+
+    monkeypatch.setattr(
+        url_group_run_service,
+        "list_group_runs",
+        _fake_list_group_runs,
+    )
+
+    response = await async_client.get(f"/api/v1/url-groups/{gid}/runs")
+
+    assert response.status_code == 200
+    assert seen_user_ids == [1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_get_group_run_scopes_to_current_user(async_client, monkeypatch) -> None:
+    """Get group run passes current_user.id into the service layer."""
+    gid = uuid4()
+    rid = uuid4()
+    now = datetime.now(timezone.utc)
+    run = _fake_group_run(rid, gid, now)
+    seen_user_ids = []
+
+    async def _fake_get_group_run(group_id, run_id, db, user_id=None):
+        seen_user_ids.append(user_id)
+        return run
+
+    monkeypatch.setattr(
+        url_group_run_service,
+        "get_group_run",
+        _fake_get_group_run,
+    )
+
+    response = await async_client.get(f"/api/v1/url-groups/{gid}/runs/{rid}")
+
+    assert response.status_code == 200
+    assert seen_user_ids == [1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_cancel_group_run_200(async_client, monkeypatch) -> None:
+    """Cancel group run returns cancelled aggregate status."""
+    gid = uuid4()
+    rid = uuid4()
+    now = datetime.now(timezone.utc)
+    run = _fake_group_run(rid, gid, now, status=UrlGroupRunStatus.CANCELLED)
+
+    async def _fake_cancel_group_run(**kwargs):
+        return run
+
+    monkeypatch.setattr(
+        url_group_run_service,
+        "cancel_group_run",
+        _fake_cancel_group_run,
+    )
+
+    response = await async_client.post(f"/api/v1/url-groups/{gid}/runs/{rid}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_retry_failed_group_run_201(async_client, monkeypatch) -> None:
+    """Retry failed members creates a new run."""
+    gid = uuid4()
+    rid = uuid4()
+    retry_id = uuid4()
+    now = datetime.now(timezone.utc)
+    run = _fake_group_run(retry_id, gid, now)
+
+    async def _fake_retry_failed_group_run(**kwargs):
+        return run
+
+    async def _fake_publish_progress_snapshot(run_in):
+        return None
+
+    monkeypatch.setattr(
+        url_group_run_service,
+        "retry_failed_group_run",
+        _fake_retry_failed_group_run,
+    )
+    monkeypatch.setattr(
+        url_group_run_service,
+        "publish_progress_snapshot",
+        _fake_publish_progress_snapshot,
+    )
+    monkeypatch.setattr(url_group_endpoints.process_url_group_run, "delay", lambda *args: None)
+    monkeypatch.setattr(url_group_endpoints.process_url_group_run, "run", lambda *args: None)
+
+    response = await async_client.post(
+        f"/api/v1/url-groups/{gid}/runs/{rid}/retry-failed",
+        json={"concurrencyLimit": 2},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["id"] == str(retry_id)

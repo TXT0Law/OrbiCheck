@@ -12,7 +12,14 @@ from app.models.monitor import (
 from app.models.notification_dispatch import NotificationDispatchLog
 from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
-from app.models.url_group import UrlGroup, UrlGroupMember
+from app.models.url_group import (
+    UrlGroup,
+    UrlGroupMember,
+    UrlGroupRun,
+    UrlGroupRunMember,
+    UrlGroupRunMemberStatus,
+    UrlGroupRunStatus,
+)
 
 __all__ = [
     "AlertEvent",
@@ -34,4 +41,8 @@ __all__ = [
     "ModuleStatus",
     "UrlGroup",
     "UrlGroupMember",
+    "UrlGroupRun",
+    "UrlGroupRunMember",
+    "UrlGroupRunMemberStatus",
+    "UrlGroupRunStatus",
 ]
