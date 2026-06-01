@@ -11,6 +11,12 @@ from app.models.monitor import (
 )
 from app.models.notification_dispatch import NotificationDispatchLog
 from app.models.report import Report, ReportFormat, ReportStatus
+from app.models.report_schedule import (
+    ReportSchedule,
+    ReportScheduleCadence,
+    ReportScheduleRun,
+    ReportScheduleRunStatus,
+)
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.models.url_group import (
     UrlGroup,
@@ -34,6 +40,10 @@ __all__ = [
     "NotificationDispatchLog",
     "Report",
     "ReportFormat",
+    "ReportSchedule",
+    "ReportScheduleCadence",
+    "ReportScheduleRun",
+    "ReportScheduleRunStatus",
     "ReportStatus",
     "Scan",
     "ScanModuleResult",

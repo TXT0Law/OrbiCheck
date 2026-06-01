@@ -7,6 +7,7 @@ from app.api.v1.endpoints import (
     maintenance_windows,
     me,
     monitors,
+    report_schedules,
     reports,
     scans,
     url_groups,
@@ -23,3 +24,4 @@ api_v1_router.include_router(monitors.router)
 api_v1_router.include_router(maintenance_windows.router)
 api_v1_router.include_router(alerts.router)
 api_v1_router.include_router(reports.router)
+api_v1_router.include_router(report_schedules.router)
