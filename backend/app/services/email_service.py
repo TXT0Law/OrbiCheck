@@ -1,4 +1,4 @@
-"""SMTP email delivery for monitor alert notifications."""
+"""SMTP email delivery for monitor alert notifications and reports."""
 
 from __future__ import annotations
 
@@ -275,3 +275,87 @@ async def send_test_email(to_email: str) -> bool:
     except OSError as exc:
         logger.warning("test_email_os_error to_email=%s error=%s", to_email, str(exc)[:400])
         raise
+
+
+async def send_report_email(
+    *,
+    to_email: str,
+    schedule_name: str,
+    report_title: str,
+    target_domain: str,
+    report_url: str,
+) -> bool:
+    """Send a scheduled report notification email with a dashboard link."""
+
+    if not settings.EMAIL_DISPATCH_ENABLED:
+        logger.info("report_email_skipped_disabled to_email=%s", to_email)
+        return False
+    recipient = to_email.strip()
+    if not recipient:
+        logger.info("report_email_skipped_missing_recipient schedule=%s", schedule_name)
+        return False
+
+    safe_title = escape(report_title)
+    safe_schedule = escape(schedule_name)
+    safe_domain = escape(target_domain)
+    safe_url = escape(report_url)
+    plain = (
+        "OrbiCheck Scheduled Report\n\n"
+        f"Schedule: {schedule_name}\n"
+        f"Report: {report_title}\n"
+        f"Target: {target_domain}\n"
+        f"Open report: {report_url}\n"
+    )
+    html = f"""
+<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:24px;background:#f4f4f5;font-family:Arial,sans-serif;color:#18181b;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:16px;overflow:hidden;">
+            <tr>
+              <td style="padding:20px 24px;background:#18181b;color:#ffffff;font-size:22px;font-weight:700;">
+                OrbiCheck Reports
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px;">
+                <p style="margin:0 0 8px;color:#52525b;font-size:14px;">Scheduled report ready</p>
+                <h1 style="margin:0 0 16px;font-size:24px;line-height:1.3;">{safe_title}</h1>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                  <tr><td style="padding:8px 0;font-weight:700;">Schedule</td><td>{safe_schedule}</td></tr>
+                  <tr><td style="padding:8px 0;font-weight:700;">Target</td><td>{safe_domain}</td></tr>
+                </table>
+                <div style="margin-top:24px;">
+                  <a href="{safe_url}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#18181b;color:#ffffff;text-decoration:none;font-weight:700;">
+                    Open report
+                  </a>
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+""".strip()
+
+    message = MIMEMultipart("alternative")
+    message["Subject"] = f"[OrbiCheck] Scheduled report ready - {report_title}"
+    message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL))
+    message["To"] = recipient
+    message.attach(MIMEText(plain, "plain", "utf-8"))
+    message.attach(MIMEText(html, "html", "utf-8"))
+    await aiosmtplib.send(
+        message,
+        hostname=settings.SMTP_HOST,
+        port=settings.SMTP_PORT,
+        username=settings.SMTP_USER or None,
+        password=settings.SMTP_PASSWORD or None,
+        start_tls=settings.SMTP_USE_TLS,
+        timeout=SMTP_TIMEOUT_SECONDS,
+    )
+    logger.info("report_email_sent to_email=%s schedule=%s", recipient, schedule_name)
+    return True

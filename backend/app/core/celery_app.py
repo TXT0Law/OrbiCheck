@@ -22,6 +22,7 @@ celery_app.conf.update(
         "app.tasks.scan_tasks",
         "app.tasks.monitor_tasks",
         "app.tasks.report_tasks",
+        "app.tasks.report_schedule_tasks",
         "app.tasks.notification_tasks",
         "app.tasks.url_group_run_tasks",
     ],
@@ -36,6 +37,10 @@ celery_app.conf.update(
         },
         "retry-notification-dispatch": {
             "task": "app.tasks.notification_tasks.retry_notification_dispatch",
+            "schedule": 60.0,
+        },
+        "dispatch-due-report-schedules": {
+            "task": "app.tasks.report_schedule_tasks.dispatch_due_report_schedules",
             "schedule": 60.0,
         },
     },

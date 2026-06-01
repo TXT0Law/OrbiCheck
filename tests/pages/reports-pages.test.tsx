@@ -21,6 +21,20 @@ vi.mock("@/components/report/report-generate-dialog", () => ({
   ReportGenerateDialog: () => <div>Generate Report Dialog</div>,
 }));
 
+vi.mock("@/components/report/report-schedule-dialog", () => ({
+  ReportScheduleDialog: () => <div>Report Schedule Dialog</div>,
+}));
+
+vi.mock("@/lib/hooks/use-report-schedules", () => ({
+  useReportSchedules: vi.fn(() => ({
+    isLoading: false,
+    data: { schedules: [] },
+  })),
+  useUpdateReportSchedule: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useDeleteReportSchedule: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useRunReportScheduleNow: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+}));
+
 vi.mock("@/lib/hooks/use-reports", () => ({
   useReportList: vi.fn(() => ({
     isLoading: false,
@@ -91,6 +105,7 @@ describe("reports pages", () => {
     expect(screen.getByRole("heading", { name: "Reports" })).toBeInTheDocument();
     expect(screen.getByText("Security Report - example.com")).toBeInTheDocument();
     expect(screen.getByText("Generate Report Dialog")).toBeInTheDocument();
+    expect(screen.getByText("Report Schedule Dialog")).toBeInTheDocument();
   });
 
   it("renders the report detail preview", () => {
