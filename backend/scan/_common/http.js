@@ -179,4 +179,9 @@ export function httpWith(config = {}) {
   return instance;
 }
 
+export function withAbortSignal(config = {}, signal = null) {
+  if (!signal) return config;
+  return { ...config, signal };
+}
+
 export const HTTP_DEFAULT_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;

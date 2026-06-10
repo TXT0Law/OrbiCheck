@@ -1,5 +1,12 @@
 import net from 'net';
 
+import {
+  createAbortError,
+  createLinkedAbortController,
+  getRequestSignal,
+  isAbortError,
+  throwIfAborted,
+} from './_common/abort.js';
 import { logger } from './_common/logger.js';
 import middleware from './_common/middleware.js';
 
@@ -90,9 +97,27 @@ function parsePortsSetting(value) {
     : STANDARD_PORTS;
 }
 
-function delay(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+function delay(ms, signal = null) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      if (signal) signal.removeEventListener('abort', onAbort);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(signal?.reason || createAbortError());
+    };
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
   });
 }
 
@@ -264,7 +289,7 @@ function detectCdnProxy(openPorts, allResults) {
   return { behindProxy: false, proxyProvider: null };
 }
 
-async function mapWithConcurrency(items, fn, concurrency = MAX_CONCURRENT) {
+async function mapWithConcurrency(items, fn, concurrency = MAX_CONCURRENT, signal = null) {
   const results = new Array(items.length);
   let index = 0;
 
@@ -272,6 +297,7 @@ async function mapWithConcurrency(items, fn, concurrency = MAX_CONCURRENT) {
     { length: Math.min(concurrency, items.length) },
     async () => {
       while (index < items.length) {
+        throwIfAborted(signal);
         const currentIndex = index;
         index += 1;
         results[currentIndex] = await fn(items[currentIndex], currentIndex);
@@ -283,8 +309,9 @@ async function mapWithConcurrency(items, fn, concurrency = MAX_CONCURRENT) {
   return results;
 }
 
-async function checkPort(port, domain) {
-  return new Promise((resolve) => {
+async function checkPort(port, domain, signal = null) {
+  return new Promise((resolve, reject) => {
+    throwIfAborted(signal);
     const socket = new net.Socket();
     const startedAt = Date.now();
     let connected = false;
@@ -301,9 +328,29 @@ async function checkPort(port, domain) {
         clearTimeout(bannerTimer);
       }
       socket.removeAllListeners();
+      if (signal) {
+        signal.removeEventListener('abort', abort);
+      }
       socket.destroy();
       resolve(result);
     };
+
+    const abort = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (bannerTimer) {
+        clearTimeout(bannerTimer);
+      }
+      socket.removeAllListeners();
+      socket.destroy();
+      reject(signal?.reason || createAbortError());
+    };
+
+    if (signal) {
+      signal.addEventListener('abort', abort, { once: true });
+    }
 
     socket.setTimeout(CONNECT_TIMEOUT_MS);
 
@@ -363,11 +410,16 @@ async function checkPort(port, domain) {
   });
 }
 
-async function scanPorts(domain, profile) {
+async function scanPorts(domain, profile, signal = null) {
   const startedAtMs = Date.now();
   const startTime = new Date(startedAtMs).toISOString();
   const portsToScan = getPortsForProfile(profile);
-  const results = await mapWithConcurrency(portsToScan, (port) => checkPort(port, domain));
+  const results = await mapWithConcurrency(
+    portsToScan,
+    (port) => checkPort(port, domain, signal),
+    MAX_CONCURRENT,
+    signal,
+  );
   const openPorts = [];
   const closedPorts = [];
   const filteredPorts = [];
@@ -438,18 +490,20 @@ async function scanPorts(domain, profile) {
   };
 }
 
-async function scanPortsWithNative(domain, profile) {
-  return scanPorts(domain, profile);
+async function scanPortsWithNative(domain, profile, signal = null) {
+  return scanPorts(domain, profile, signal);
 }
 
-async function scanPortsWithNmap(domain, profile) {
+async function scanPortsWithNmap(domain, profile, signal = null) {
   const scannerBaseUrl = process.env.NMAP_SCANNER_URL;
   if (!scannerBaseUrl) {
     throw new Error('NMAP_SCANNER_URL is not configured');
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), NMAP_SCANNER_TIMEOUT_MS);
+  const { signal: nmapSignal, cleanup } = createLinkedAbortController(
+    signal,
+    NMAP_SCANNER_TIMEOUT_MS,
+  );
   try {
     const response = await fetch(`${scannerBaseUrl.replace(/\/$/, '')}/scan/ports`, {
       method: 'POST',
@@ -457,7 +511,7 @@ async function scanPortsWithNmap(domain, profile) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ target: domain, profile }),
-      signal: controller.signal,
+      signal: nmapSignal,
     });
 
     if (!response.ok) {
@@ -504,7 +558,7 @@ async function scanPortsWithNmap(domain, profile) {
       note: payload.note,
     };
   } finally {
-    clearTimeout(timer);
+    cleanup();
   }
 }
 
@@ -520,6 +574,7 @@ async function scanPortsWithNmap(domain, profile) {
  */
 const portsHandler = async (url, request) => {
   const domain = new URL(url).hostname;
+  const signal = getRequestSignal(request);
   const profile = normalizeProfile(
     request?.body?.scanOptions?.portScanProfile
       ?? request?.body?.scan_options?.port_scan_profile
@@ -536,8 +591,11 @@ const portsHandler = async (url, request) => {
       (async () => {
         if (useNmap) {
           try {
-            return await scanPortsWithNmap(domain, profile);
+            return await scanPortsWithNmap(domain, profile, signal);
           } catch (nmapError) {
+            if (isAbortError(nmapError)) {
+              throw nmapError;
+            }
             // P2-3: log the real reason the nmap scanner failed before we
             // silently fall back to the native scan. Without this,
             // misconfigurations or scanner outages were invisible.
@@ -547,9 +605,9 @@ const portsHandler = async (url, request) => {
             );
           }
         }
-        return scanPortsWithNative(domain, profile);
+        return scanPortsWithNative(domain, profile, signal);
       })(),
-      delay(GLOBAL_TIMEOUT_MS).then(() => {
+      delay(GLOBAL_TIMEOUT_MS, signal).then(() => {
         const error = new Error(
           `Port scan timed out after ${GLOBAL_TIMEOUT_MS}ms`,
         );
@@ -560,6 +618,9 @@ const portsHandler = async (url, request) => {
   } catch (error) {
     if (error?.code === 'PORTS_GLOBAL_TIMEOUT') {
       return errorResponse(error.message);
+    }
+    if (isAbortError(error)) {
+      throw error;
     }
     return errorResponse(
       `Port scan failed: ${error?.message || String(error)}`,

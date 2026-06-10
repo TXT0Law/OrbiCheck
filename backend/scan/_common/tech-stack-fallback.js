@@ -3,6 +3,8 @@
  * Uses HTTP(S) response headers only — same shape as Wappalyzer entries for transformers.
  */
 
+import { createLinkedAbortController, isAbortError } from './abort.js';
+
 const normalizeTargetUrl = (url) => {
   const u = (url || '').trim();
   if (!u) return '';
@@ -93,7 +95,7 @@ export function technologiesFromResponseHeaders(headers) {
 
 /**
  * @param {string} targetUrl
- * @param {{ timeoutMs?: number }} [options]
+ * @param {{ timeoutMs?: number, signal?: AbortSignal }} [options]
  */
 export async function detectTechFromHeaders(targetUrl, options = {}) {
   const url = normalizeTargetUrl(targetUrl);
@@ -102,23 +104,25 @@ export async function detectTechFromHeaders(targetUrl, options = {}) {
   }
 
   const timeoutMs = options.timeoutMs ?? 12000;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const { signal, cleanup } = createLinkedAbortController(options.signal, timeoutMs);
 
   try {
     const res = await fetch(url, {
       method: 'GET',
       redirect: 'follow',
-      signal: controller.signal,
+      signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; OrbiCheck-Scan/1.0)',
         Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
       },
     });
     return { technologies: technologiesFromResponseHeaders(res.headers) };
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
     return { technologies: [] };
   } finally {
-    clearTimeout(timer);
+    cleanup();
   }
 }

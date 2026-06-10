@@ -197,7 +197,13 @@ def execute_scan(
 
                 batch_failed_wholesale = False
                 try:
-                    batch_result = call_scan_batch_sync(url, modules, effective_scan_options)
+                    batch_result = call_scan_batch_sync(
+                        url,
+                        modules,
+                        effective_scan_options,
+                        scan_id=scan_id,
+                        trace_id=scan_id,
+                    )
                     results = batch_result.get("results", {})
 
                     for module_name, module_result in results.items():

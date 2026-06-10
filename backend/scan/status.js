@@ -13,6 +13,7 @@
 
 import { performance } from 'perf_hooks';
 
+import { getRequestSignal } from './_common/abort.js';
 import { http, HTTP_DEFAULT_TIMEOUT_MS } from './_common/http.js';
 import middleware from './_common/middleware.js';
 import { err, ok } from './_common/result.js';
@@ -29,13 +30,14 @@ function isUpStatus(status) {
   return Number.isFinite(status) && status >= STATUS_UP_FLOOR && status < STATUS_UP_CEILING;
 }
 
-async function probe(url, method) {
+async function probe(url, method, signal = null) {
   const startedAt = performance.now();
   const response = await http.request({
     url,
     method,
     timeout: PROBE_TIMEOUT_MS,
     maxRedirects: MAX_REDIRECTS,
+    ...(signal ? { signal } : {}),
   });
   const responseTime = performance.now() - startedAt;
   return { response, responseTime };
@@ -45,10 +47,10 @@ async function probe(url, method) {
  * Probe a URL with HEAD; fall back to GET when the server replies 405 or
  * 501 (some hosts disallow HEAD even for uptime probes).
  */
-async function probeWithFallback(url) {
-  const head = await probe(url, 'HEAD');
+async function probeWithFallback(url, signal = null) {
+  const head = await probe(url, 'HEAD', signal);
   if (head.response.status === 405 || head.response.status === 501) {
-    return probe(url, 'GET');
+    return probe(url, 'GET', signal);
   }
   return head;
 }
@@ -59,13 +61,16 @@ async function probeWithFallback(url) {
  * @param {string} url Normalised target URL (middleware injects http/https).
  * @returns {Promise<object>}
  */
-const statusHandler = async (url) => {
+const statusHandler = async (url, req) => {
   if (!url) {
     return err('Missing required URL', 0, { statusCode: 400 });
   }
 
   try {
-    const { response, responseTime } = await probeWithFallback(url);
+    const { response, responseTime } = await probeWithFallback(
+      url,
+      getRequestSignal(req),
+    );
     const responseCode = response?.status ?? 0;
     const serverHeader = response?.headers?.server || null;
     const data = {

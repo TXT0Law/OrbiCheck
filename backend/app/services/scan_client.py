@@ -1,6 +1,7 @@
 import uuid
 
 import httpx
+import structlog
 
 from app.core.config import settings
 
@@ -9,6 +10,32 @@ TIMEOUT = httpx.Timeout(
     timeout=settings.SCAN_TIMEOUT_MS / 1000,
     connect=10.0,
 )
+
+logger = structlog.get_logger(__name__)
+
+SECONDS_PER_MILLISECOND = 1000.0
+MIN_CONNECT_TIMEOUT_S = 10.0
+BATCH_WAVE_OVERHEAD_S = 5.0
+MIN_BATCH_CONCURRENCY = 1
+SLOW_BATCH_MODULES = frozenset(
+    {
+        "whois",
+        "screenshot",
+        "tech-stack",
+        "ports",
+        "tls",
+        "cookies",
+    }
+)
+
+
+def _module_timeout_budget_s(module_name: str) -> float:
+    timeout_ms = (
+        settings.EXTENDED_MODULE_TIMEOUT_MS
+        if module_name in SLOW_BATCH_MODULES
+        else settings.MODULE_TIMEOUT_MS
+    )
+    return float(timeout_ms) / SECONDS_PER_MILLISECOND
 
 
 def _build_missing_module_result(module_name: str) -> dict:
@@ -35,6 +62,51 @@ def _build_trace_headers(scan_id: str | None = None, trace_id: str | None = None
     sid = scan_id or str(uuid.uuid4())
     tid = trace_id or sid
     return {"X-Scan-Id": sid, "X-Trace-Id": tid}
+
+
+def resolve_batch_timeout_s(modules: list[str]) -> float:
+    """Resolve a deterministic wall-clock timeout for scan-service batch calls."""
+    base_timeout_s = float(settings.SCAN_TIMEOUT_MS) / SECONDS_PER_MILLISECOND
+    requested = list(dict.fromkeys(modules))
+    if not requested:
+        return base_timeout_s
+
+    batch_concurrency = max(int(settings.SCAN_BATCH_CONCURRENCY), MIN_BATCH_CONCURRENCY)
+    host_concurrency = max(int(settings.SCAN_HOST_CONCURRENCY), MIN_BATCH_CONCURRENCY)
+    concurrency = min(batch_concurrency, host_concurrency)
+
+    module_budgets_s = sorted(
+        (_module_timeout_budget_s(module_name) for module_name in requested),
+        reverse=True,
+    )
+    wave_budgets_s = [
+        max(module_budgets_s[index : index + concurrency])
+        for index in range(0, len(module_budgets_s), concurrency)
+    ]
+    candidate_s = sum(wave_budgets_s) + (len(wave_budgets_s) * BATCH_WAVE_OVERHEAD_S)
+    max_timeout_s = max(float(settings.SCAN_BATCH_TIMEOUT_MAX_S), base_timeout_s)
+    return min(max(candidate_s, base_timeout_s), max_timeout_s)
+
+
+def _batch_timeout(modules: list[str]) -> httpx.Timeout:
+    timeout_s = resolve_batch_timeout_s(modules)
+    return httpx.Timeout(timeout_s, connect=MIN_CONNECT_TIMEOUT_S)
+
+
+def _log_batch_timeout(
+    *,
+    scan_id: str | None,
+    module_count: int,
+    timeout_s: float,
+    call_style: str,
+) -> None:
+    logger.info(
+        "scan_service_batch_timeout_resolved",
+        scan_id=scan_id,
+        module_count=module_count,
+        timeout_s=timeout_s,
+        call_style=call_style,
+    )
 
 
 async def call_screenshot_service(
@@ -106,8 +178,15 @@ async def call_scan_batch(
     """Call batch scan on the Scan Service."""
     requested = list(dict.fromkeys(modules))
     headers = _build_trace_headers(scan_id, trace_id)
+    timeout_s = resolve_batch_timeout_s(requested)
+    _log_batch_timeout(
+        scan_id=scan_id,
+        module_count=len(requested),
+        timeout_s=timeout_s,
+        call_style="async",
+    )
 
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers) as client:
+    async with httpx.AsyncClient(timeout=_batch_timeout(requested), headers=headers) as client:
         available_modules = set(requested)
 
         try:
@@ -222,8 +301,15 @@ def call_scan_batch_sync(
     """Synchronous version for Celery tasks."""
     requested = list(dict.fromkeys(modules))
     headers = _build_trace_headers(scan_id, trace_id)
+    timeout_s = resolve_batch_timeout_s(requested)
+    _log_batch_timeout(
+        scan_id=scan_id,
+        module_count=len(requested),
+        timeout_s=timeout_s,
+        call_style="sync",
+    )
 
-    with httpx.Client(timeout=TIMEOUT, headers=headers) as client:
+    with httpx.Client(timeout=_batch_timeout(requested), headers=headers) as client:
         available_modules = set(requested)
 
         try:

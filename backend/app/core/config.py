@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     SCAN_TIMEOUT_MS: int = 60000
     SCAN_MAX_CONCURRENT_MODULES: int = 10
+    SCAN_BATCH_CONCURRENCY: int = 10
+    SCAN_HOST_CONCURRENCY: int = 6
+    SCAN_BATCH_TIMEOUT_MAX_S: float = 300.0
+    MODULE_TIMEOUT_MS: int = 30000
+    EXTENDED_MODULE_TIMEOUT_MS: int = 60000
 
     # Monitor / uptime probing
     AUTH_COOKIE_NAME: str = "orbicheck_auth"

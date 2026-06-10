@@ -71,6 +71,96 @@ def test_build_missing_module_result_returns_expected_shape() -> None:
 
 
 @pytest.mark.unit
+def test_resolve_batch_timeout_scales_with_batch_complexity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(scan_client.settings, "SCAN_TIMEOUT_MS", 60_000)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_CONCURRENCY", 4)
+    monkeypatch.setattr(scan_client.settings, "SCAN_HOST_CONCURRENCY", 4)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_TIMEOUT_MAX_S", 300.0)
+
+    one_module = scan_client.resolve_batch_timeout_s(["headers"])
+    medium_batch = scan_client.resolve_batch_timeout_s(
+        ["headers", "status", "screenshot", "tech-stack"]
+    )
+    heavy_batch = scan_client.resolve_batch_timeout_s(
+        ["headers", "status", "screenshot", "tech-stack", "ports", "tls", "cookies"]
+    )
+
+    assert one_module >= 60.0
+    assert medium_batch > one_module
+    assert heavy_batch > medium_batch
+
+
+@pytest.mark.unit
+def test_resolve_batch_timeout_is_bounded_by_configured_max(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(scan_client.settings, "SCAN_TIMEOUT_MS", 60_000)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_CONCURRENCY", 1)
+    monkeypatch.setattr(scan_client.settings, "SCAN_HOST_CONCURRENCY", 1)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_TIMEOUT_MAX_S", 90.0)
+
+    timeout_s = scan_client.resolve_batch_timeout_s(
+        ["screenshot", "tech-stack", "ports", "tls", "cookies"]
+    )
+
+    assert timeout_s == 90.0
+
+
+@pytest.mark.unit
+def test_resolve_batch_timeout_uses_effective_host_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(scan_client.settings, "SCAN_TIMEOUT_MS", 60_000)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_CONCURRENCY", 10)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_TIMEOUT_MAX_S", 300.0)
+    modules = ["headers", "status", "whois", "screenshot", "tech-stack"]
+
+    monkeypatch.setattr(scan_client.settings, "SCAN_HOST_CONCURRENCY", 10)
+    batch_only_timeout_s = scan_client.resolve_batch_timeout_s(modules)
+    monkeypatch.setattr(scan_client.settings, "SCAN_HOST_CONCURRENCY", 2)
+    host_limited_timeout_s = scan_client.resolve_batch_timeout_s(modules)
+
+    assert host_limited_timeout_s > batch_only_timeout_s
+
+
+@pytest.mark.unit
+def test_resolve_batch_timeout_sums_module_budget_waves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(scan_client.settings, "SCAN_TIMEOUT_MS", 60_000)
+    monkeypatch.setattr(scan_client.settings, "MODULE_TIMEOUT_MS", 30_000)
+    monkeypatch.setattr(scan_client.settings, "EXTENDED_MODULE_TIMEOUT_MS", 60_000)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_CONCURRENCY", 10)
+    monkeypatch.setattr(scan_client.settings, "SCAN_HOST_CONCURRENCY", 6)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_TIMEOUT_MAX_S", 300.0)
+
+    timeout_s = scan_client.resolve_batch_timeout_s(
+        [
+            "ssl",
+            "tls",
+            "whois",
+            "associated-hosts",
+            "dnssec",
+            "firewall",
+            "cookies",
+            "redirects",
+            "mail-config",
+            "http-security",
+            "rank",
+            "carbon",
+            "linked-pages",
+            "archives",
+            "block-lists",
+            "legacy-rank",
+        ]
+    )
+
+    assert timeout_s >= 120.0
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_call_scan_batch_merges_remote_and_missing_modules(
     monkeypatch: pytest.MonkeyPatch,
@@ -126,6 +216,41 @@ async def test_call_scan_batch_falls_back_when_registry_lookup_fails(
     assert result["totalModules"] == 1
     assert result["successCount"] == 1
     post.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_call_scan_batch_uses_resolved_batch_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    get = AsyncMock(return_value=_response(200, json_data={"modules": ["screenshot"]}))
+    post = AsyncMock(
+        return_value=httpx.Response(
+            200,
+            json={"results": {"screenshot": {"success": True}}},
+            request=httpx.Request("POST", "http://scan.local/api/scan/batch"),
+        )
+    )
+
+    def _client_factory(**kwargs: Any) -> _AsyncClientStub:
+        captured["timeout"] = kwargs.get("timeout")
+        return _AsyncClientStub(get, post)
+
+    monkeypatch.setattr(scan_client.settings, "SCAN_TIMEOUT_MS", 60_000)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_CONCURRENCY", 1)
+    monkeypatch.setattr(scan_client.settings, "SCAN_HOST_CONCURRENCY", 1)
+    monkeypatch.setattr(scan_client.settings, "SCAN_BATCH_TIMEOUT_MAX_S", 300.0)
+    monkeypatch.setattr(scan_client.httpx, "AsyncClient", _client_factory)
+
+    await scan_client.call_scan_batch(
+        "https://example.com",
+        ["screenshot"],
+        scan_id="scan-1",
+    )
+
+    assert isinstance(captured["timeout"], httpx.Timeout)
+    assert captured["timeout"].read > 60.0
 
 
 class _SyncClientStub:

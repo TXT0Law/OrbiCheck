@@ -15,6 +15,7 @@
 
 import { withBrowserContext } from './_common/playwright-browser.js';
 import middleware from './_common/middleware.js';
+import { getRequestSignal } from './_common/abort.js';
 
 const NAV_TIMEOUT_MS = 18000;
 const SELECTOR_TIMEOUT_MS_MAX = 10000;
@@ -36,6 +37,7 @@ function clampInt(value, min, max, fallback) {
 
 const renderedHandler = async (targetUrl, req) => {
   const startedAt = Date.now();
+  const signal = getRequestSignal(req);
   if (!targetUrl) {
     return {
       success: false,
@@ -87,6 +89,7 @@ const renderedHandler = async (targetUrl, req) => {
       const html = await page.content();
       return { html, status: response ? response.status() : null };
     }, {
+      signal,
       contextOptions: {
         viewport: { width: viewportWidth, height: viewportHeight },
         ignoreHTTPSErrors: true,
