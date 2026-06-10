@@ -218,4 +218,42 @@ describe('withBrowserContext (P1-5 browser pool)', () => {
     const contextResult = await mock.newContext.mock.results[0].value;
     expect(contextResult.close).toHaveBeenCalled();
   });
+
+  it('closes the active page and context when the abort signal fires', async () => {
+    const mock = buildBrowserMock();
+    const mockLaunch = jest.fn().mockResolvedValue(mock.browser);
+
+    await jest.unstable_mockModule('playwright', () => ({
+      chromium: { launch: mockLaunch },
+    }));
+    await jest.unstable_mockModule('node:fs', () => ({
+      existsSync: jest.fn().mockReturnValue(false),
+    }));
+
+    const { withBrowserContext, __resetBrowserSingletonForTests } =
+      await import('../_common/playwright-browser.js');
+    __resetBrowserSingletonForTests();
+
+    const controller = new AbortController();
+    let markStarted;
+    const started = new Promise((resolve) => {
+      markStarted = resolve;
+    });
+    const work = withBrowserContext(
+      async () => new Promise((resolve) => {
+        markStarted();
+        controller.signal.addEventListener('abort', () => resolve('aborted'));
+      }),
+      { signal: controller.signal },
+    );
+
+    await started;
+    controller.abort(new Error('stop'));
+    await expect(work).resolves.toBe('aborted');
+
+    const contextResult = await mock.newContext.mock.results[0].value;
+    const pageResult = await mock.newPage.mock.results[0].value;
+    expect(pageResult.close).toHaveBeenCalled();
+    expect(contextResult.close).toHaveBeenCalled();
+  });
 });

@@ -2,6 +2,7 @@ import { fork } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
+import { createAbortError, getRequestSignal, isAbortError, throwIfAborted } from './_common/abort.js';
 import middleware from './_common/middleware.js';
 import { detectTechFromHeaders } from './_common/tech-stack-fallback.js';
 
@@ -35,7 +36,9 @@ const FALLBACK_BUDGET_MS = Math.min(
  * @param {string} url Normalised target URL.
  * @returns {Promise<{technologies?: Array, source?: string, error?: string}>}
  */
-const techStackHandler = async (url) => {
+const techStackHandler = async (url, request) => {
+  const signal = getRequestSignal(request);
+  throwIfAborted(signal);
   const result = await new Promise((resolve) => {
     const child = fork(WORKER_PATH, [url], {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -62,10 +65,34 @@ const techStackHandler = async (url) => {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
+        if (signal) {
+          signal.removeEventListener('abort', abortWorker);
+        }
         child.kill('SIGTERM');
         resolve(data);
       }
     };
+
+    const abortWorker = () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        child.kill('SIGTERM');
+        resolve({
+          technologies: [],
+          error: signal?.reason?.message || createAbortError().message,
+          aborted: true,
+        });
+      }
+    };
+
+    if (signal) {
+      if (signal.aborted) {
+        abortWorker();
+        return;
+      }
+      signal.addEventListener('abort', abortWorker, { once: true });
+    }
 
     child.on('message', (msg) => {
       if (msg && typeof msg === 'object') {
@@ -100,9 +127,16 @@ const techStackHandler = async (url) => {
   const technologies = result.technologies || [];
   const error = result.error;
 
+  if (result.aborted) {
+    throw signal?.reason || createAbortError(error);
+  }
+
   if (technologies.length === 0) {
     try {
-      const fb = await detectTechFromHeaders(url, { timeoutMs: FALLBACK_BUDGET_MS });
+      const fb = await detectTechFromHeaders(url, {
+        timeoutMs: FALLBACK_BUDGET_MS,
+        signal,
+      });
       if (fb.technologies?.length) {
         return {
           technologies: fb.technologies,
@@ -112,7 +146,10 @@ const techStackHandler = async (url) => {
           headerFallback: true,
         };
       }
-    } catch {
+    } catch (fallbackError) {
+      if (isAbortError(fallbackError)) {
+        throw fallbackError;
+      }
       /* keep worker/timeout result */
     }
   }

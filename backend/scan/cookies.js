@@ -1,17 +1,18 @@
 import { http } from './_common/http.js';
+import { getRequestSignal } from './_common/abort.js';
 import middleware from './_common/middleware.js';
 import { withBrowserContext } from './_common/playwright-browser.js';
 
 const BROWSER_TIMEOUT_MS = 20000;
 
-const getPlaywrightCookies = async (url) => {
+const getPlaywrightCookies = async (url, signal) => {
   return withBrowserContext(async (context, page) => {
     await page.goto(url, {
       waitUntil: 'networkidle',
       timeout: BROWSER_TIMEOUT_MS,
     });
     return context.cookies();
-  });
+  }, { signal });
 };
 
 /**
@@ -22,7 +23,8 @@ const getPlaywrightCookies = async (url) => {
  * @returns {Promise<{httpCookies?: Array, clientCookies?: Array,
  *   error?: string, skipped?: string}>}
  */
-const cookieHandler = async (url) => {
+const cookieHandler = async (url, req) => {
+  const signal = getRequestSignal(req);
   let headerCookies = null;
   let clientCookies = null;
 
@@ -30,6 +32,7 @@ const cookieHandler = async (url) => {
     const response = await http.get(url, {
       withCredentials: true,
       maxRedirects: 5,
+      ...(signal ? { signal } : {}),
     });
     if (response.status >= 400) {
       return { error: `Request failed with status ${response.status}: HTTP ${response.status}` };
@@ -43,7 +46,7 @@ const cookieHandler = async (url) => {
   }
 
   try {
-    clientCookies = await getPlaywrightCookies(url);
+    clientCookies = await getPlaywrightCookies(url, signal);
   } catch (_) {
     clientCookies = null;
   }

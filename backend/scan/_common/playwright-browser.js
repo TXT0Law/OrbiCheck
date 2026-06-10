@@ -16,6 +16,7 @@ import { existsSync } from 'node:fs';
 
 import { chromium } from 'playwright';
 
+import { createAbortError, throwIfAborted } from './abort.js';
 import { logger } from './logger.js';
 
 const CHROMIUM_CANDIDATES = [
@@ -91,19 +92,38 @@ async function ensureSharedBrowser(launchOverrides = {}) {
   return sharedBrowserPromise;
 }
 
-async function acquireSlot() {
+async function acquireSlot(signal) {
+  throwIfAborted(signal);
   if (activeContexts < MAX_BROWSER_CONTEXTS) {
     activeContexts += 1;
     return;
   }
-  await new Promise((resolve) => waitQueue.push(resolve));
+  await new Promise((resolve, reject) => {
+    const queued = { resolve, reject };
+    const onAbort = () => {
+      const index = waitQueue.indexOf(queued);
+      if (index >= 0) waitQueue.splice(index, 1);
+      reject(signal.reason || createAbortError());
+    };
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    queued.resolve = () => {
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+      resolve();
+    };
+    waitQueue.push(queued);
+  });
+  throwIfAborted(signal);
   activeContexts += 1;
 }
 
 function releaseSlot() {
   activeContexts = Math.max(0, activeContexts - 1);
   const next = waitQueue.shift();
-  if (next) next();
+  if (next) next.resolve();
 }
 
 /**
@@ -117,15 +137,29 @@ function releaseSlot() {
  * @param {object} [options.launchOverrides]  Forwarded to the cold launch only.
  */
 export async function withBrowserContext(fn, options = {}) {
-  await acquireSlot();
+  const signal = options.signal || null;
+  await acquireSlot(signal);
   let context = null;
   let page = null;
+  let abortCleanup = null;
   try {
+    throwIfAborted(signal);
     const browser = await ensureSharedBrowser(options.launchOverrides || {});
+    throwIfAborted(signal);
     context = await browser.newContext(options.contextOptions || {});
     page = await context.newPage();
+    if (signal) {
+      const onAbort = () => {
+        page?.close?.().catch(() => {});
+        context?.close?.().catch(() => {});
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      abortCleanup = () => signal.removeEventListener('abort', onAbort);
+      throwIfAborted(signal);
+    }
     return await fn(context, page);
   } finally {
+    abortCleanup?.();
     if (page && !page.isClosed?.()) {
       await page.close().catch(() => {});
     }

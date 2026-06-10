@@ -63,7 +63,7 @@ describe('runner.js — runModule()', () => {
       scanId: 'scan-1',
       traceId: 'trace-1',
     });
-    expect(calledOpts).toMatchObject({ scanOptions: {} });
+    expect(calledOpts).toMatchObject({ scanOptions: {}, timeoutMs: 1000 });
     expect(envelope).toMatchObject({ success: true, data: { ok: true } });
   });
 
@@ -121,6 +121,32 @@ describe('runner.js — runModule()', () => {
     expect(envelope.statusCode).toBe(408);
     expect(envelope.timedOut).toBe(true);
     expect(envelope.error).toMatch(/timed out/i);
+  });
+
+  it('aborts handler work when the runner timeout fires', async () => {
+    let capturedSignal = null;
+    const handler = jest.fn((_url, req) => {
+      capturedSignal = req.context.signal;
+      return new Promise((resolve) => {
+        req.context.signal.addEventListener('abort', () => {
+          resolve({ success: false, data: { aborted: true } });
+        });
+      });
+    });
+    handler.runDirect = handler;
+
+    const envelope = await runModule({
+      name: 'slow',
+      handler,
+      url: 'https://example.com',
+      timeoutMs: 30,
+      logger: silentLogger(),
+    });
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(envelope.success).toBe(false);
+    expect(envelope.statusCode).toBe(408);
+    expect(envelope.timedOut).toBe(true);
   });
 
   it('masks unhandled exceptions thrown by the handler', async () => {

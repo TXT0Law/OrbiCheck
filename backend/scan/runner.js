@@ -34,8 +34,8 @@ function createDeferredTimeout(ms) {
     timer = setTimeout(() => {
       const error = new Error(`Module timed out after ${ms}ms`);
       error.code = 'RUNNER_TIMEOUT';
-      controller.abort(error);
       rejectFn(error);
+      controller.abort(error);
     }, ms);
   };
   const cancel = () => {
@@ -90,6 +90,7 @@ export async function runModule({
     query: { url, ...scanOptions },
     body: { scanOptions },
     headers: {},
+    signal,
     context: { ...context, logger: log, signal },
   };
 
@@ -109,7 +110,7 @@ export async function runModule({
         // criteria in prompt_dev/middleReport.md.
         startTimeout();
         if (typeof handler.runDirect === 'function') {
-          return handler.runDirect(url, fakeReq, { scanOptions, signal });
+          return handler.runDirect(url, fakeReq, { scanOptions, signal, timeoutMs });
         }
         return invokeExpressHandler(handler, fakeReq);
       }),

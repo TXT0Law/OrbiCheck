@@ -12,6 +12,12 @@
 // scan runner can call without fabricating Express req/res objects.
 
 import { logger } from './logger.js';
+import {
+  createAbortError,
+  createLinkedAbortController,
+  getRequestSignal,
+  isAbortError,
+} from './abort.js';
 import { err, normaliseEnvelope } from './result.js';
 import { normalizeUrl } from './url.js';
 
@@ -40,16 +46,37 @@ const DISABLED_ERROR_MESSAGE = 'Error - OrbiCheck Temporarily Disabled.\n\n'
 
 const GENERIC_ERROR_MESSAGE = 'Request failed while processing this scan module.';
 
-function createTimeoutPromise(timeoutMs) {
-  let timer;
+function resolveTimeoutMs(options = {}) {
+  return Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : TIMEOUT;
+}
+
+function createTimeoutPromise(timeoutMs, parentSignal) {
+  const { signal, cleanup, abort } = createLinkedAbortController(parentSignal);
+  let cleanupTimeout = cleanup;
   const promise = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => {
+    const onAbort = () => reject(signal.reason || createAbortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+    }
+    const timer = setTimeout(() => {
       const error = new Error(`Request timed-out after ${timeoutMs} ms`);
       error.code = 'MIDDLEWARE_TIMEOUT';
-      reject(error);
+      abort(error);
     }, timeoutMs);
+    cleanupTimeout = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      cleanup();
+    };
   });
-  return { promise, cancel: () => clearTimeout(timer) };
+  return {
+    signal,
+    promise,
+    cancel: () => cleanupTimeout(),
+  };
 }
 
 function isTimeoutError(error) {
@@ -79,7 +106,13 @@ const commonMiddleware = (handler) => {
       return err('No URL specified', Date.now() - startedAt, { statusCode: 400 });
     }
 
-    const timeout = createTimeoutPromise(TIMEOUT);
+    const timeoutMs = resolveTimeoutMs(_options);
+    const parentSignal = getRequestSignal(request, _options);
+    const timeout = createTimeoutPromise(timeoutMs, parentSignal);
+    request.context = {
+      ...(request.context || {}),
+      signal: timeout.signal,
+    };
     try {
       const handlerResult = await Promise.race([
         Promise.resolve().then(() => handler(normalisedUrl, request)),
@@ -89,8 +122,12 @@ const commonMiddleware = (handler) => {
     } catch (error) {
       const durationMs = Date.now() - startedAt;
       if (isTimeoutError(error)) {
-        log.warn({ moduleTimeoutMs: TIMEOUT }, 'module middleware request timed out');
+        log.warn({ moduleTimeoutMs: timeoutMs }, 'module middleware request timed out');
         return err(TIMEOUT_ERROR_MESSAGE, durationMs, { statusCode: 408, timedOut: true });
+      }
+      if (isAbortError(error)) {
+        log.warn({ moduleTimeoutMs: timeoutMs }, 'module middleware work aborted');
+        return err('Scan work aborted', durationMs, { statusCode: 408, timedOut: true });
       }
       // Hide internal error details from external callers; log full message
       // for operators.

@@ -5,6 +5,7 @@
 
 import { withBrowserContext } from './_common/playwright-browser.js';
 import middleware from './_common/middleware.js';
+import { getRequestSignal } from './_common/abort.js';
 
 const DEFAULT_VIEWPORT_WIDTH = 1280;
 const DEFAULT_VIEWPORT_HEIGHT = 720;
@@ -118,6 +119,7 @@ async function applyBrowserSteps(page, steps) {
  */
 const screenshotHandler = async (targetUrl, req) => {
   const startTime = Date.now();
+  const signal = getRequestSignal(req);
 
   if (!targetUrl) {
     return {
@@ -186,6 +188,7 @@ const screenshotHandler = async (targetUrl, req) => {
       const screenshotBuffer = await page.screenshot({ type: 'png', fullPage });
       return screenshotBuffer.toString('base64');
     }, {
+      signal,
       contextOptions: {
         viewport: { width: viewportWidth, height: viewportHeight },
         ignoreHTTPSErrors: true,
