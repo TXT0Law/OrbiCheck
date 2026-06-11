@@ -4,10 +4,10 @@ import { cn } from "@/lib/utils";
 
 const variantClasses = (variant: "default" | "outline" | "destructive") => {
   if (variant === "outline")
-    return "border-2 border-zinc-400 bg-white text-zinc-900 hover:bg-zinc-100 dark:border-zinc-500 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700";
+    return "border-2 border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground";
   if (variant === "destructive")
-    return "bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700";
-  return "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200";
+    return "bg-destructive text-destructive-foreground hover:bg-destructive/90";
+  return "bg-primary text-primary-foreground hover:bg-primary/90";
 };
 
 const sizeClasses = (size: "default" | "sm" | "lg") => {

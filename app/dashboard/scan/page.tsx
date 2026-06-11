@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Globe } from "lucide-react";
 
@@ -26,6 +26,64 @@ import { useScanStore } from "@/lib/stores/scan-store";
 import type { UrlGroup } from "@/types/url-group";
 
 const PORTS_MODULE = "ports";
+const DEFAULT_PAGE = 1;
+const DEFAULT_SCAN_PAGE_SIZE = 20;
+const SCAN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+const DEFAULT_SCAN_SORT: ScanListSortBy = "created_at_desc";
+const DEFAULT_SCAN_STATUS: ScanStatusGroup = "all";
+const DEFAULT_SCAN_VIEW: ScanViewMode = "flat";
+
+interface SearchParamReader {
+  get(name: string): string | null;
+}
+
+function readPositiveIntParam(
+  searchParams: SearchParamReader,
+  key: string,
+  fallback: number,
+) {
+  const raw = Number(searchParams.get(key));
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : fallback;
+}
+
+function readPageSize(searchParams: SearchParamReader) {
+  const raw = readPositiveIntParam(searchParams, "pageSize", DEFAULT_SCAN_PAGE_SIZE);
+  return SCAN_PAGE_SIZE_OPTIONS.includes(raw as (typeof SCAN_PAGE_SIZE_OPTIONS)[number])
+    ? raw
+    : DEFAULT_SCAN_PAGE_SIZE;
+}
+
+function readScanSortBy(searchParams: SearchParamReader): ScanListSortBy {
+  const raw = searchParams.get("sort");
+  switch (raw) {
+    case "created_at_asc":
+    case "security_score_desc":
+    case "security_score_asc":
+    case "domain_asc":
+    case "domain_desc":
+    case "progress_desc":
+      return raw;
+    default:
+      return DEFAULT_SCAN_SORT;
+  }
+}
+
+function readScanStatusGroup(searchParams: SearchParamReader): ScanStatusGroup {
+  const raw = searchParams.get("status");
+  switch (raw) {
+    case "active":
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return raw;
+    default:
+      return DEFAULT_SCAN_STATUS;
+  }
+}
+
+function readScanViewMode(searchParams: SearchParamReader): ScanViewMode {
+  return searchParams.get("view") === "group" ? "group" : DEFAULT_SCAN_VIEW;
+}
 
 function ScanInputFromQuery({
   onSubmit,
@@ -74,8 +132,11 @@ function ScanInputFromQuery({
   );
 }
 
-export default function ScanPage() {
+function ScanPageContent() {
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
   const activeScan = useScanStore((s) => s.activeScan);
   const setActiveScan = useScanStore((s) => s.setActiveScan);
   const clearActiveScan = useScanStore((s) => s.clearActiveScan);
@@ -84,11 +145,13 @@ export default function ScanPage() {
   const [recentScanStartedAt, setRecentScanStartedAt] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [startSuccess, setStartSuccess] = useState<string | null>(null);
-  const [searchInput, setSearchInput] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [sortBy, setSortBy] = useState<ScanListSortBy>("created_at_desc");
-  const [statusGroup, setStatusGroup] = useState<ScanStatusGroup>("all");
-  const [viewMode, setViewMode] = useState<ScanViewMode>("flat");
+  const page = readPositiveIntParam(searchParams, "page", DEFAULT_PAGE);
+  const pageSize = readPageSize(searchParams);
+  const searchTerm = searchParams.get("search")?.trim() ?? "";
+  const sortBy = readScanSortBy(searchParams);
+  const statusGroup = readScanStatusGroup(searchParams);
+  const viewMode = readScanViewMode(searchParams);
+  const [searchInput, setSearchInput] = useState(searchTerm);
   const [editingGroup, setEditingGroup] = useState<UrlGroup | null>(null);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(
     () => new Set(SCAN_MODULES.filter((moduleId) => moduleId !== PORTS_MODULE))
@@ -104,10 +167,52 @@ export default function ScanPage() {
   const { mutate: removeAllScans, isPending: isDeletingAll } = useDeleteAllScans();
   const { mutate: rescan, isPending: isRescanning } = useRescan();
 
+  useEffect(() => {
+    setSearchInput(searchTerm);
+  }, [searchTerm]);
+
+  function updateScanQuery(next: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    sortBy?: ScanListSortBy;
+    statusGroup?: ScanStatusGroup;
+    viewMode?: ScanViewMode;
+  }) {
+    const params = new URLSearchParams(searchParams.toString());
+    const nextPage = next.page ?? page;
+    const nextPageSize = next.pageSize ?? pageSize;
+    const nextSearch = next.search ?? searchTerm;
+    const nextSortBy = next.sortBy ?? sortBy;
+    const nextStatusGroup = next.statusGroup ?? statusGroup;
+    const nextViewMode = next.viewMode ?? viewMode;
+
+    if (nextPage <= DEFAULT_PAGE) params.delete("page");
+    else params.set("page", String(nextPage));
+
+    if (nextPageSize === DEFAULT_SCAN_PAGE_SIZE) params.delete("pageSize");
+    else params.set("pageSize", String(nextPageSize));
+
+    if (nextSearch.trim()) params.set("search", nextSearch.trim());
+    else params.delete("search");
+
+    if (nextSortBy === DEFAULT_SCAN_SORT) params.delete("sort");
+    else params.set("sort", nextSortBy);
+
+    if (nextStatusGroup === DEFAULT_SCAN_STATUS) params.delete("status");
+    else params.set("status", nextStatusGroup);
+
+    if (nextViewMode === DEFAULT_SCAN_VIEW) params.delete("view");
+    else params.set("view", nextViewMode);
+
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
+
   const { data: scanList, isFetching } = useScanList(
     {
-      page: 1,
-      size: 50,
+      page,
+      size: pageSize,
       search: searchTerm,
       sortBy,
       statusGroup,
@@ -250,6 +355,8 @@ export default function ScanPage() {
         ...mappedScans.filter((scan) => scan.id !== optimisticScan.id),
       ]
     : mappedScans;
+  const totalResults = scanList?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalResults / pageSize));
 
   const renderStatus = (status: string) => {
     if (status === "completed") {
@@ -302,14 +409,17 @@ export default function ScanPage() {
   };
 
   const applySearch = () => {
-    setSearchTerm(searchInput.trim());
+    updateScanQuery({ search: searchInput.trim(), page: DEFAULT_PAGE });
   };
 
   const resetFilters = () => {
     setSearchInput("");
-    setSearchTerm("");
-    setSortBy("created_at_desc");
-    setStatusGroup("all");
+    updateScanQuery({
+      search: "",
+      sortBy: DEFAULT_SCAN_SORT,
+      statusGroup: DEFAULT_SCAN_STATUS,
+      page: DEFAULT_PAGE,
+    });
   };
 
   const handleDeleteAll = () => {
@@ -410,7 +520,7 @@ export default function ScanPage() {
             <CardTitle className="text-lg font-semibold">Scan List</CardTitle>
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm text-muted-foreground">
-                {scanList?.total ?? 0} results {isFetching ? "(refreshing...)" : ""}
+                {totalResults} results {isFetching ? "(refreshing...)" : ""}
               </p>
               <RescanAllButton
                 scans={scanList?.scans ?? []}
@@ -420,9 +530,10 @@ export default function ScanPage() {
                 disabled={isFetching}
               />
               <Button
+                variant="destructive"
                 onClick={handleDeleteAll}
-                disabled={isDeletingAll || (scanList?.total ?? 0) === 0}
-                className="h-8 bg-red-600 px-3 text-white hover:bg-red-700 disabled:bg-zinc-300 disabled:text-zinc-600"
+                disabled={isDeletingAll || totalResults === 0}
+                className="h-8 px-3"
               >
                 {isDeletingAll ? "Deleting..." : "Delete All"}
               </Button>
@@ -431,7 +542,12 @@ export default function ScanPage() {
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-[1fr_180px_180px_180px_180px]">
             <div className="col-span-2 flex flex-wrap items-center gap-2">
-              <ScanViewToggle mode={viewMode} onChange={setViewMode} />
+              <ScanViewToggle
+                mode={viewMode}
+                onChange={(nextViewMode) =>
+                  updateScanQuery({ viewMode: nextViewMode, page: DEFAULT_PAGE })
+                }
+              />
               <Input
                 className="min-w-0"
                 aria-label="Search scans"
@@ -448,7 +564,12 @@ export default function ScanPage() {
             <select
               aria-label="Sort scans"
               value={sortBy}
-              onChange={(event) => setSortBy(event.target.value as ScanListSortBy)}
+              onChange={(event) =>
+                updateScanQuery({
+                  sortBy: event.target.value as ScanListSortBy,
+                  page: DEFAULT_PAGE,
+                })
+              }
               className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             >
               <option value="created_at_desc">Newest first</option>
@@ -463,7 +584,12 @@ export default function ScanPage() {
             <select
               aria-label="Category filter"
               value={statusGroup}
-              onChange={(event) => setStatusGroup(event.target.value as ScanStatusGroup)}
+              onChange={(event) =>
+                updateScanQuery({
+                  statusGroup: event.target.value as ScanStatusGroup,
+                  page: DEFAULT_PAGE,
+                })
+              }
               className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             >
               <option value="all">Category: All</option>
@@ -537,14 +663,15 @@ export default function ScanPage() {
                       scan.backendStatus === "running" ||
                       scan.backendStatus === "pending"
                     }
-                    className="h-8 bg-zinc-900 px-3 text-xs text-white hover:bg-zinc-800"
+                    className="h-8 px-3 text-xs"
                   >
                     {isRescanning ? "Rescanning..." : "Rescan"}
                   </Button>
                   <Button
+                    variant="destructive"
                     onClick={() => handleDelete(scan.id)}
                     disabled={isDeleting}
-                    className="h-8 bg-red-600 px-3 text-xs text-white hover:bg-red-700"
+                    className="h-8 px-3 text-xs"
                   >
                     {isDeleting ? "Deleting..." : "Delete"}
                   </Button>
@@ -552,6 +679,51 @@ export default function ScanPage() {
               </div>
             ))
           )}
+          {viewMode === "flat" && totalResults > 0 ? (
+            <div className="flex flex-col gap-3 rounded-md border border-zinc-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800 dark:bg-zinc-950">
+              <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+                <span>
+                  Page {page} of {totalPages} · {totalResults} total scans
+                </span>
+                <label className="flex items-center gap-2">
+                  <span>Rows per page</span>
+                  <select
+                    aria-label="Scan rows per page"
+                    value={pageSize}
+                    onChange={(event) =>
+                      updateScanQuery({
+                        pageSize: Number(event.target.value),
+                        page: DEFAULT_PAGE,
+                      })
+                    }
+                    className="h-8 rounded-md border border-zinc-300 bg-white px-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    {SCAN_PAGE_SIZE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => updateScanQuery({ page: page - 1 })}
+                  disabled={page <= DEFAULT_PAGE || isFetching}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => updateScanQuery({ page: page + 1 })}
+                  disabled={page >= totalPages || isFetching}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -561,5 +733,15 @@ export default function ScanPage() {
         onOpenChange={(open) => !open && setEditingGroup(null)}
       />
     </div>
+  );
+}
+
+export default function ScanPage() {
+  return (
+    <Suspense
+      fallback={<div className="text-sm text-muted-foreground">Loading scans...</div>}
+    >
+      <ScanPageContent />
+    </Suspense>
   );
 }

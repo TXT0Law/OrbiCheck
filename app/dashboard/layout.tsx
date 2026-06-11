@@ -29,7 +29,7 @@ export default function DashboardLayout({
 
   if (isScanDetailRoute || isMonitorDetailRoute) {
     return (
-      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="min-h-screen bg-background">
         <AlertSSEProvider />
         {children}
       </div>
@@ -37,7 +37,7 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+    <div className="min-h-screen bg-background">
       <AlertSSEProvider />
       <Sidebar />
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>

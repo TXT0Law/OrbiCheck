@@ -11,7 +11,7 @@ interface MonitorDetailLayoutProps {
 export default function MonitorDetailLayout({ children, params }: MonitorDetailLayoutProps) {
   return (
     <MonitorDetailProvider monitorId={params.monitorId}>
-      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="min-h-screen bg-background">
         <MonitorSubNav monitorId={params.monitorId} />
         <div className="md:pl-[260px]">
           <div className="space-y-6 p-4 md:p-8">

@@ -16,7 +16,9 @@ import {
   type MonitorBulkAction,
   type MonitorBulkActionResponseInput,
 } from "@/shared/schemas/monitor";
+import { z } from "zod";
 import type {
+  CheckErrorType,
   Monitor,
   MonitorBaseline,
   MonitorChange,
@@ -77,6 +79,60 @@ function normalizeCheck(c: MonitorCheck): MonitorCheck {
     ...c,
     evaluatedCapabilities: Array.isArray(c.evaluatedCapabilities) ? c.evaluatedCapabilities : [],
   };
+}
+
+const CHECK_FIELD_ALIASES: Record<string, string> = {
+  monitorId: "monitor_id",
+  checkedAt: "checked_at",
+  statusCode: "status_code",
+  responseTimeMs: "response_time_ms",
+  errorType: "error_type",
+  errorMessage: "error_message",
+  contentHash: "content_hash",
+  contentChanged: "content_changed",
+  snapshotId: "snapshot_id",
+  sslDaysRemaining: "ssl_days_remaining",
+  evaluatedCapabilities: "evaluated_capabilities",
+};
+
+const CHECK_ERROR_TYPE_ALIASES: Record<string, CheckErrorType> = {
+  TIMEOUT: "timeout",
+  DNS: "dns_resolution",
+  DNS_ERROR: "dns_resolution",
+  CONNECTION: "connection_refused",
+  CONNECTION_REFUSED: "connection_refused",
+  SSL: "ssl_error",
+  SSL_ERROR: "ssl_error",
+  HTTP: "http_error",
+  HTTP_ERROR: "http_error",
+  CONTENT_TOO_LARGE: "content_too_large",
+  BODY_LIMIT: "content_too_large",
+  UNKNOWN: "unknown",
+};
+
+function normalizeMonitorCheckWire(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) {
+    return raw;
+  }
+  const out = { ...(raw as Record<string, unknown>) };
+  for (const [camel, snake] of Object.entries(CHECK_FIELD_ALIASES)) {
+    if (out[camel] === undefined && out[snake] !== undefined) {
+      out[camel] = out[snake];
+    }
+  }
+  if (typeof out.errorType === "string") {
+    out.errorType = CHECK_ERROR_TYPE_ALIASES[out.errorType] ?? out.errorType;
+  }
+  return out;
+}
+
+const normalizedMonitorCheckSchema = z.preprocess(
+  normalizeMonitorCheckWire,
+  monitorCheckSchema,
+);
+
+function parseMonitorCheck(raw: unknown, context: string): MonitorCheck {
+  return parseOrThrow(normalizedMonitorCheckSchema, raw, context);
 }
 
 /** Maps common snake_case API keys to camelCase when camelCase is absent (defensive). */
@@ -170,6 +226,37 @@ function readMeta(res: object): MonitorListMeta | undefined {
     if (result.success) return result.data;
   }
   return undefined;
+}
+
+function readPaginatedPayload(
+  res: object,
+  context: string,
+): { data: unknown; meta?: MonitorListMeta } {
+  if ("data" in res && typeof res.data === "object" && res.data !== null) {
+    const nested = res.data as object;
+    if ("data" in nested) {
+      const payload = parseOrThrow(
+        z.object({ data: z.unknown() }).passthrough(),
+        nested,
+        context,
+      );
+      return { data: payload.data, meta: readMeta(nested) ?? readMeta(res) };
+    }
+  }
+
+  if ("meta" in res && "data" in res) {
+    const meta = readMeta(res);
+    const payload = parseOrThrow(
+      z.object({ data: z.unknown() }).passthrough(),
+      res,
+      context,
+    );
+    return { data: payload.data, meta };
+  }
+  return {
+    data: "data" in res ? (res as { data: unknown }).data : res,
+    meta: readMeta(res),
+  };
 }
 
 export async function listMonitors(
@@ -380,7 +467,7 @@ export async function triggerCheck(id: string): Promise<MonitorCheck> {
     return mockChecks(id)[0]!;
   }
   const { data } = await apiClient.post<unknown>(`${BASE}/${id}/check`);
-  return normalizeCheck(parseSingle<MonitorCheck>(monitorCheckSchema, data, "monitor check"));
+  return normalizeCheck(parseMonitorCheck(data, "monitor check"));
 }
 
 /**
@@ -408,10 +495,15 @@ export async function getMonitorChecks(
   if (params?.page) query.set("page", String(params.page));
   if (params?.limit) query.set("limit", String(params.limit));
   const res = await apiClient.get<unknown>(`${BASE}/${id}/checks?${query}`);
-  const rows = parseList<MonitorCheck>(monitorCheckSchema, res.data, "monitor check list");
+  const payload = readPaginatedPayload(res as object, "monitor check list");
+  const rows = parseList<MonitorCheck>(
+    normalizedMonitorCheckSchema,
+    payload.data,
+    "monitor check list",
+  );
   return {
     data: rows.map(normalizeCheck),
-    meta: readMeta(res as object),
+    meta: payload.meta,
   };
 }
 

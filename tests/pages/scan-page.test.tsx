@@ -8,6 +8,9 @@ import ScanPage from "@/app/dashboard/scan/page";
 import { useScanStore } from "@/lib/stores/scan-store";
 
 const pushMock = vi.hoisted(() => vi.fn());
+const replaceMock = vi.hoisted(() => vi.fn());
+const pathnameMock = vi.hoisted(() => vi.fn(() => "/dashboard/scan"));
+const searchParamsMock = vi.hoisted(() => vi.fn(() => new URLSearchParams()));
 const invalidateQueriesMock = vi.hoisted(() => vi.fn());
 const createScanMock = vi.hoisted(() => vi.fn());
 const cancelScanMock = vi.hoisted(() => vi.fn());
@@ -41,8 +44,9 @@ class MockEventSource {
 }
 
 vi.mock("next/navigation", () => ({
-  useRouter: vi.fn(() => ({ push: pushMock })),
-  useSearchParams: vi.fn(() => new URLSearchParams()),
+  useRouter: vi.fn(() => ({ push: pushMock, replace: replaceMock })),
+  usePathname: pathnameMock,
+  useSearchParams: searchParamsMock,
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -87,6 +91,8 @@ function renderPage() {
 describe("scan page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pathnameMock.mockReturnValue("/dashboard/scan");
+    searchParamsMock.mockReturnValue(new URLSearchParams());
     eventSources.length = 0;
     vi.stubGlobal("EventSource", MockEventSource);
     useScanStore.getState().clearActiveScan();
@@ -232,7 +238,59 @@ describe("scan page", () => {
     expect(screen.getByLabelText("Search scans")).toBeInTheDocument();
     expect(screen.getByLabelText("Sort scans")).toBeInTheDocument();
     expect(screen.getByLabelText("Category filter")).toBeInTheDocument();
+    expect(screen.getByLabelText("Scan rows per page")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 1 · 1 total scans")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete All" })).toBeInTheDocument();
+  });
+
+  it("updates URL query params when scan pagination changes", () => {
+    useScanListMock.mockReturnValue({
+      data: {
+        total: 75,
+        scans: [
+          {
+            id: "scan-older",
+            domain: "older.test",
+            url: "https://older.test",
+            status: "completed",
+            progress: 100,
+            securityScore: 0,
+            createdAt: "yesterday",
+          },
+        ],
+      },
+      isFetching: false,
+    });
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(replaceMock).toHaveBeenCalledWith("/dashboard/scan?page=2", {
+      scroll: false,
+    });
+
+    fireEvent.change(screen.getByLabelText("Scan rows per page"), {
+      target: { value: "50" },
+    });
+    expect(replaceMock).toHaveBeenCalledWith("/dashboard/scan?pageSize=50", {
+      scroll: false,
+    });
+  });
+
+  it("resets scan pagination when filters change", () => {
+    searchParamsMock.mockReturnValue(new URLSearchParams("page=3"));
+
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Search scans"), {
+      target: { value: "example.test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(replaceMock).toHaveBeenCalledWith(
+      "/dashboard/scan?search=example.test",
+      { scroll: false },
+    );
   });
 
   it("renders running state and cancels active scan", async () => {
