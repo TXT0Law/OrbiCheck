@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { MonitorFilterBar } from "@/components/monitor/monitor-filter-bar";
 import { MonitorListContent } from "@/components/monitor/monitor-list-content";
@@ -28,7 +29,11 @@ export default function MonitorListPage() {
       </div>
 
       <MonitorFilterBar />
-      <MonitorListContent />
+      <Suspense
+        fallback={<div className="text-sm text-muted-foreground">Loading monitors...</div>}
+      >
+        <MonitorListContent />
+      </Suspense>
     </div>
   );
 }

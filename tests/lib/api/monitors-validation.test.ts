@@ -43,6 +43,22 @@ const baseMonitor = {
   updatedAt: "2025-01-01T00:00:00.000Z",
 };
 
+const baseMonitorCheck = {
+  id: "chk-1",
+  monitorId: "m-1",
+  checkedAt: "2025-01-01T00:00:00.000Z",
+  success: true,
+  statusCode: 200,
+  responseTimeMs: 120,
+  errorType: null,
+  errorMessage: null,
+  contentHash: null,
+  contentChanged: false,
+  snapshotId: null,
+  sslDaysRemaining: null,
+  evaluatedCapabilities: ["uptime_only"],
+};
+
 describe("lib/api/monitors — boundary validation", () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -69,6 +85,58 @@ describe("lib/api/monitors — boundary validation", () => {
       name: "ApiError",
       code: INVALID_RESPONSE_CODE,
     });
+  });
+
+  it("getMonitorChecks accepts paginated data envelopes", async () => {
+    apiClientMock.get.mockResolvedValueOnce({
+      data: {
+        data: [baseMonitorCheck],
+        meta: { page: 1, limit: 50, total: 1 },
+      },
+    });
+    const mod = await import("@/lib/api/monitors");
+
+    const result = await mod.getMonitorChecks("m-1", { page: 1, limit: 50 });
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.id).toBe("chk-1");
+    expect(result.meta?.total).toBe(1);
+  });
+
+  it("getMonitorChecks normalizes backend check error labels", async () => {
+    apiClientMock.get.mockResolvedValueOnce({
+      data: [{ ...baseMonitorCheck, success: false, errorType: "HTTP_ERROR" }],
+    });
+    const mod = await import("@/lib/api/monitors");
+
+    const result = await mod.getMonitorChecks("m-1");
+    expect(result.data[0]?.errorType).toBe("http_error");
+  });
+
+  it("getMonitorChecks accepts snake_case check fields", async () => {
+    apiClientMock.get.mockResolvedValueOnce({
+      data: [
+        {
+          id: "chk-1",
+          monitor_id: "m-1",
+          checked_at: "2025-01-01T00:00:00.000Z",
+          success: false,
+          status_code: 503,
+          response_time_ms: 0,
+          error_type: "DNS",
+          error_message: "Could not resolve host",
+          content_hash: null,
+          content_changed: false,
+          snapshot_id: null,
+          ssl_days_remaining: null,
+          evaluated_capabilities: ["uptime_only"],
+        },
+      ],
+    });
+    const mod = await import("@/lib/api/monitors");
+
+    const result = await mod.getMonitorChecks("m-1");
+    expect(result.data[0]?.monitorId).toBe("m-1");
+    expect(result.data[0]?.errorType).toBe("dns_resolution");
   });
 
   it("getMonitorTimeSeries accepts the aggregated object form", async () => {

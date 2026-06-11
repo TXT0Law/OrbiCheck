@@ -86,10 +86,10 @@ export default function ScanLayout({ children }: ScanLayoutProps) {
     return (
       <div
         aria-busy="true"
-        className="min-h-screen bg-zinc-50 dark:bg-zinc-950"
+        className="min-h-screen bg-background"
       >
         <span className="sr-only">Loading scan details...</span>
-        <div className="fixed inset-y-0 left-0 hidden w-[260px] border-r border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 md:block">
+        <div className="fixed inset-y-0 left-0 hidden w-[260px] border-r border-border bg-card p-4 md:block">
           <div className="mb-6 h-4 w-24 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
           <div className="space-y-3">
             {LOADING_NAV_ITEM_WIDTHS.map((width) => (
@@ -125,7 +125,7 @@ export default function ScanLayout({ children }: ScanLayoutProps) {
 
   if (query.isError && !isNotFound) {
     return (
-      <div className="min-h-screen bg-zinc-50 p-4 dark:bg-zinc-950 md:p-8">
+      <div className="min-h-screen bg-background p-4 md:p-8">
         <div className="rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
           Failed to load scan detail: {errorMessage}
         </div>
@@ -142,7 +142,7 @@ export default function ScanLayout({ children }: ScanLayoutProps) {
 
   return (
     <ScanDetailProvider value={contextValue!}>
-      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="min-h-screen bg-background">
         <SubNav scanId={scanId} domain={detail.domain} />
         <div className="md:pl-[260px]">
           <div className="space-y-6 p-4 md:p-8">

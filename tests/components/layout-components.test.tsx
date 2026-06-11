@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
+import { SubNav } from "@/components/scan/sub-nav";
 
 const pushMock = vi.fn();
 const setTheme = vi.fn();
@@ -43,11 +44,12 @@ describe("layout components", () => {
   it("toggles theme in header and shows the current page title", () => {
     pathnameMock.mockReturnValue("/dashboard/monitor");
 
-    render(<Header />);
+    const { container } = render(<Header />);
 
     fireEvent.click(screen.getByRole("button", { name: /toggle theme/i }));
     expect(setTheme).toHaveBeenCalledWith("dark");
     expect(screen.getByText("Monitor")).toBeInTheDocument();
+    expect(container.querySelector("header")?.className).toContain("bg-card");
   });
 
   it("renders the mobile menu trigger when a callback is provided", () => {
@@ -75,5 +77,16 @@ describe("layout components", () => {
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /reports/i })).toHaveAttribute("href", "/dashboard/reports");
     expect(screen.queryByText("Soon")).not.toBeInTheDocument();
+  });
+
+  it("uses theme tokens for scan detail navigation", () => {
+    pathnameMock.mockReturnValue("/dashboard/scan/scan-1/headers");
+
+    const { container } = render(<SubNav scanId="scan-1" domain="example.test" />);
+
+    expect(container.querySelector("aside")?.className).toContain("bg-card");
+    expect(screen.getByRole("link", { name: /back to scans/i }).className).toContain(
+      "hover:bg-accent",
+    );
   });
 });

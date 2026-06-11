@@ -56,18 +56,18 @@ export function MonitorSubNav({ monitorId }: MonitorSubNavProps) {
     "flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors";
 
   return (
-    <aside className="w-full border-b border-zinc-800 bg-zinc-950 text-zinc-300 md:fixed md:left-0 md:top-0 md:z-30 md:h-screen md:w-[260px] md:border-r md:border-b-0">
-      <div className="border-b border-zinc-800 px-4 py-4">
+    <aside className="w-full border-b border-border bg-card text-muted-foreground md:fixed md:left-0 md:top-0 md:z-30 md:h-screen md:w-[260px] md:border-r md:border-b-0">
+      <div className="border-b border-border px-4 py-4">
         <Link
           href="/dashboard/monitor"
-          className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm text-zinc-400 transition hover:bg-zinc-900 hover:text-white"
+          className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4 shrink-0" />
           Back to Monitors
         </Link>
-        <p className="mt-3 text-xs uppercase tracking-wide text-zinc-400">Monitor</p>
+        <p className="mt-3 text-xs uppercase tracking-wide text-muted-foreground">Monitor</p>
         <div className="mt-1 flex items-center gap-2">
-          <p className="truncate text-sm font-semibold text-white">{monitor.displayName}</p>
+          <p className="truncate text-sm font-semibold text-foreground">{monitor.displayName}</p>
           {alertCount > 0 ? (
             <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[11px] font-medium text-red-200">
               {alertCount} alert{alertCount === 1 ? "" : "s"}
@@ -81,8 +81,8 @@ export function MonitorSubNav({ monitorId }: MonitorSubNavProps) {
           {overviewNavItem ? (
             <section>
               <div className="mb-2 flex items-center gap-2 px-2">
-                <LayoutDashboard className="h-3.5 w-3.5 text-zinc-400" />
-                <p className="text-[11px] uppercase tracking-wide text-zinc-400">Overview</p>
+                <LayoutDashboard className="h-3.5 w-3.5 text-muted-foreground" />
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Overview</p>
               </div>
               <div className="space-y-1">
                 <Link
@@ -90,8 +90,8 @@ export function MonitorSubNav({ monitorId }: MonitorSubNavProps) {
                   className={cn(
                     linkBase,
                     isActive(overviewNavItem.href)
-                      ? "bg-zinc-800 text-white"
-                      : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
                   )}
                 >
                   <span className="truncate pr-2">{overviewNavItem.label}</span>
@@ -102,8 +102,8 @@ export function MonitorSubNav({ monitorId }: MonitorSubNavProps) {
 
           <section>
             <div className="mb-2 flex items-center gap-2 px-2">
-              <Activity className="h-3.5 w-3.5 text-zinc-400" />
-              <p className="text-[11px] uppercase tracking-wide text-zinc-400">Capabilities</p>
+              <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Capabilities</p>
             </div>
             <div className="space-y-1">
               {capabilityNavItems.map((item) => {
@@ -134,10 +134,10 @@ export function MonitorSubNav({ monitorId }: MonitorSubNavProps) {
                     className={cn(
                       linkBase,
                       active && !linkDisabled
-                        ? "bg-zinc-800 text-white"
+                        ? "bg-accent text-foreground"
                         : linkDisabled
-                          ? "cursor-not-allowed text-zinc-600"
-                          : "text-zinc-400 hover:bg-zinc-900 hover:text-white",
+                          ? "cursor-not-allowed text-muted-foreground/60"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground",
                       linkDisabled && "pointer-events-none opacity-60"
                     )}
                     aria-disabled={linkDisabled}
@@ -154,10 +154,10 @@ export function MonitorSubNav({ monitorId }: MonitorSubNavProps) {
                         />
                       ) : null}
                       {showComingSoon ? (
-                        <span className="text-xs text-zinc-400">Soon</span>
+                        <span className="text-xs text-muted-foreground">Soon</span>
                       ) : null}
                       {isDisabled && !showComingSoon ? (
-                        <span className="text-xs text-zinc-400">Off</span>
+                        <span className="text-xs text-muted-foreground">Off</span>
                       ) : null}
                     </span>
                   </Link>
@@ -168,8 +168,8 @@ export function MonitorSubNav({ monitorId }: MonitorSubNavProps) {
 
           <section>
             <div className="mb-2 flex items-center gap-2 px-2">
-              <Settings className="h-3.5 w-3.5 text-zinc-400" />
-              <p className="text-[11px] uppercase tracking-wide text-zinc-400">Configuration</p>
+              <Settings className="h-3.5 w-3.5 text-muted-foreground" />
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Configuration</p>
             </div>
             <div className="space-y-1">
               {bottomItems.map((item) => {
@@ -181,8 +181,8 @@ export function MonitorSubNav({ monitorId }: MonitorSubNavProps) {
                     className={cn(
                       linkBase,
                       active
-                        ? "bg-zinc-800 text-white"
-                        : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
                     )}
                   >
                     <span>{item.label}</span>

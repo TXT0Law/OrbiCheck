@@ -41,27 +41,27 @@ export function Header({ onMenuClick }: HeaderProps) {
   };
 
   return (
-    <header className="h-14 border-b border-zinc-200 bg-white px-6 dark:border-zinc-800 dark:bg-zinc-900">
+    <header className="h-14 border-b border-border bg-card px-6">
       <div className="flex h-full items-center justify-between">
         <div className="flex items-center gap-3">
           {onMenuClick ? (
             <button
               type="button"
               onClick={onMenuClick}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 md:hidden"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
               aria-label="Open navigation"
             >
               <Menu className="h-4 w-4" />
             </button>
           ) : null}
-          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{pageTitle}</p>
+          <p className="text-sm font-medium text-foreground">{pageTitle}</p>
         </div>
 
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={toggleTheme}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             aria-label="Toggle theme"
           >
             {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -74,7 +74,7 @@ export function Header({ onMenuClick }: HeaderProps) {
               </Avatar>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
-              <div className="px-2 py-1.5 text-sm text-zinc-600 dark:text-zinc-300">{userEmail}</div>
+              <div className="px-2 py-1.5 text-sm text-muted-foreground">{userEmail}</div>
               <DropdownMenuItem disabled>Authentication disabled</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
