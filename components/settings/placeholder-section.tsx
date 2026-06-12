@@ -1,7 +1,11 @@
+"use client";
+
 import { Construction } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 
 interface PlaceholderSectionProps {
   title: string;
@@ -9,6 +13,9 @@ interface PlaceholderSectionProps {
 }
 
 export function PlaceholderSection({ title, description }: PlaceholderSectionProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).settings;
+
   return (
     <Card className="p-6">
       <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -20,7 +27,7 @@ export function PlaceholderSection({ title, description }: PlaceholderSectionPro
         </h3>
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
         <Badge variant="secondary" className="mt-4">
-          Coming Soon
+          {messages.comingSoon}
         </Badge>
       </div>
     </Card>

@@ -21,7 +21,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cancelScan, createScan, type ScanListSortBy, type ScanStatusGroup } from "@/lib/api/scans";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useDeleteAllScans, useDeleteScan, useRescan, useScanList } from "@/lib/hooks/use-scan-list";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import { useScanStore } from "@/lib/stores/scan-store";
 import type { UrlGroup } from "@/types/url-group";
 
@@ -133,6 +135,9 @@ function ScanInputFromQuery({
 }
 
 function ScanPageContent() {
+  const language = useAppearanceLanguage();
+  const dashboardMessages = getDashboardMessages(language);
+  const messages = dashboardMessages.scan;
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -229,17 +234,17 @@ function ScanPageContent() {
       setStartError(null);
       try {
         await cancelScan(scanId);
-        setStartSuccess("Scan stopped. It stays in your history with partial results.");
+        setStartSuccess(messages.stopped);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setStartError(`Could not stop scan: ${message}`);
+        setStartError(messages.stopFailed(message));
         return;
       }
       clearActiveScan();
       queryClient.invalidateQueries({ queryKey: ["scans"] });
       queryClient.invalidateQueries({ queryKey: ["url-groups"] });
     })();
-  }, [activeScan, clearActiveScan, queryClient]);
+  }, [activeScan, clearActiveScan, messages, queryClient]);
 
   const handleSubmitScans = async (
     urls: string[],
@@ -267,7 +272,7 @@ function ScanPageContent() {
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         setStartError((prev) =>
-          prev ? `${prev}\nFailed ${url}: ${reason}` : `Failed to start scan for ${url}: ${reason}`
+          prev ? `${prev}\nFailed ${url}: ${reason}` : messages.startFailed(url, reason)
         );
         console.error("Failed to start scan:", error);
       }
@@ -277,7 +282,7 @@ function ScanPageContent() {
 
     if (createdScans.length > 0) {
       setStartSuccess(
-        createdScans.length === 1 ? "Scan started" : `${createdScans.length} scans started`
+        createdScans.length === 1 ? messages.scanStarted : messages.scansStarted(createdScans.length)
       );
       const latest = createdScans[createdScans.length - 1];
       const domain =
@@ -360,29 +365,29 @@ function ScanPageContent() {
 
   const renderStatus = (status: string) => {
     if (status === "completed") {
-      return <Badge variant="secondary">Completed</Badge>;
+      return <Badge variant="secondary">{messages.statusCompleted}</Badge>;
     }
 
     if (status === "running" || status === "pending") {
-      return <Badge variant="default">Running</Badge>;
+      return <Badge variant="default">{messages.statusRunning}</Badge>;
     }
 
     if (status === "cancelled") {
-      return <Badge variant="outline">Cancelled</Badge>;
+      return <Badge variant="outline">{messages.statusCancelled}</Badge>;
     }
 
-    return <Badge variant="destructive">Failed</Badge>;
+    return <Badge variant="destructive">{messages.statusFailed}</Badge>;
   };
 
   const handleDelete = (scanId: string) => {
-    const shouldDelete = window.confirm("Delete this scan? This cannot be undone.");
+    const shouldDelete = window.confirm(messages.deleteConfirm);
     if (!shouldDelete) {
       return;
     }
     removeScan(scanId, {
       onError: (error) => {
         const reason = error instanceof Error ? error.message : String(error);
-        setStartError(`Delete failed: ${reason}`);
+        setStartError(messages.deleteFailed(reason));
       },
     });
   };
@@ -402,7 +407,7 @@ function ScanPageContent() {
         },
         onError: (error) => {
           const reason = error instanceof Error ? error.message : String(error);
-          setStartError(`Rescan failed: ${reason}`);
+          setStartError(messages.rescanFailed(reason));
         },
       }
     );
@@ -423,7 +428,7 @@ function ScanPageContent() {
   };
 
   const handleDeleteAll = () => {
-    const shouldDelete = window.confirm("Delete all scans in current filter results?");
+    const shouldDelete = window.confirm(messages.deleteAllConfirm);
     if (!shouldDelete) {
       return;
     }
@@ -435,11 +440,11 @@ function ScanPageContent() {
       },
       {
         onSuccess: (deleted) => {
-          setStartError(deleted > 0 ? null : "No scans matched current filters to delete.");
+          setStartError(deleted > 0 ? null : messages.noScansMatchedDelete);
         },
         onError: (error) => {
           const reason = error instanceof Error ? error.message : String(error);
-          setStartError(`Delete all failed: ${reason}`);
+          setStartError(messages.deleteAllFailed(reason));
         },
       }
     );
@@ -449,10 +454,10 @@ function ScanPageContent() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-          Scan
+          {messages.title}
         </h1>
         <p className="mt-1 text-muted-foreground">
-          Launch a new target scan and review external security posture signals.
+          {messages.subtitle}
         </p>
       </div>
 
@@ -517,10 +522,10 @@ function ScanPageContent() {
       <Card>
         <CardHeader className="space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <CardTitle className="text-lg font-semibold">Scan List</CardTitle>
+            <CardTitle className="text-lg font-semibold">{messages.listTitle}</CardTitle>
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm text-muted-foreground">
-                {totalResults} results {isFetching ? "(refreshing...)" : ""}
+                {messages.resultsSummary(totalResults, isFetching)}
               </p>
               <RescanAllButton
                 scans={scanList?.scans ?? []}
@@ -535,7 +540,7 @@ function ScanPageContent() {
                 disabled={isDeletingAll || totalResults === 0}
                 className="h-8 px-3"
               >
-                {isDeletingAll ? "Deleting..." : "Delete All"}
+                {isDeletingAll ? dashboardMessages.common.deleting : messages.deleteAll}
               </Button>
             </div>
           </div>
@@ -550,7 +555,7 @@ function ScanPageContent() {
               />
               <Input
                 className="min-w-0"
-                aria-label="Search scans"
+                aria-label={messages.searchAria}
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
                 onKeyDown={(event) => {
@@ -558,11 +563,11 @@ function ScanPageContent() {
                     applySearch();
                   }
                 }}
-                placeholder="Search URL or domain"
+                placeholder={messages.searchPlaceholder}
               />
             </div>
             <select
-              aria-label="Sort scans"
+              aria-label={messages.sortAria}
               value={sortBy}
               onChange={(event) =>
                 updateScanQuery({
@@ -572,17 +577,17 @@ function ScanPageContent() {
               }
               className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             >
-              <option value="created_at_desc">Newest first</option>
-              <option value="created_at_asc">Oldest first</option>
-              <option value="security_score_desc">Security score: high to low</option>
-              <option value="security_score_asc">Security score: low to high</option>
-              <option value="domain_asc">Domain: A to Z</option>
-              <option value="domain_desc">Domain: Z to A</option>
-              <option value="progress_desc">Progress: high to low</option>
+              <option value="created_at_desc">{messages.sortNewest}</option>
+              <option value="created_at_asc">{messages.sortOldest}</option>
+              <option value="security_score_desc">{messages.sortScoreHigh}</option>
+              <option value="security_score_asc">{messages.sortScoreLow}</option>
+              <option value="domain_asc">{messages.sortDomainAsc}</option>
+              <option value="domain_desc">{messages.sortDomainDesc}</option>
+              <option value="progress_desc">{messages.sortProgressHigh}</option>
             </select>
 
             <select
-              aria-label="Category filter"
+              aria-label={messages.statusFilterAria}
               value={statusGroup}
               onChange={(event) =>
                 updateScanQuery({
@@ -592,25 +597,25 @@ function ScanPageContent() {
               }
               className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             >
-              <option value="all">Category: All</option>
-              <option value="active">Category: Active</option>
-              <option value="completed">Category: Completed</option>
-              <option value="failed">Category: Failed</option>
-              <option value="cancelled">Category: Cancelled</option>
+              <option value="all">{messages.categoryAll}</option>
+              <option value="active">{messages.categoryActive}</option>
+              <option value="completed">{messages.categoryCompleted}</option>
+              <option value="failed">{messages.categoryFailed}</option>
+              <option value="cancelled">{messages.categoryCancelled}</option>
             </select>
 
             <Button
               onClick={applySearch}
               className="h-10 w-full"
             >
-              Search
+              {dashboardMessages.common.search}
             </Button>
             <Button
               variant="outline"
               onClick={resetFilters}
               className="h-10 w-full"
             >
-              Reset
+              {dashboardMessages.common.reset}
             </Button>
           </div>
         </CardHeader>
@@ -624,7 +629,7 @@ function ScanPageContent() {
             />
           ) : recentScans.length === 0 ? (
             <p className="rounded-md border border-dashed border-zinc-300 p-6 text-center text-sm text-muted-foreground dark:border-zinc-700">
-              No scans found for current filters.
+              {messages.noScansFound}
             </p>
           ) : (
             recentScans.map((scan) => (
@@ -645,7 +650,7 @@ function ScanPageContent() {
 
                 <div className="hidden text-sm text-muted-foreground md:block">{scan.progress}%</div>
                 <div className="hidden text-sm text-muted-foreground md:block">
-                  Security {scan.securityScore ?? "-"}
+                  {messages.securityLabel} {scan.securityScore ?? "-"}
                 </div>
                 {renderStatus(scan.backendStatus)}
 
@@ -665,7 +670,7 @@ function ScanPageContent() {
                     }
                     className="h-8 px-3 text-xs"
                   >
-                    {isRescanning ? "Rescanning..." : "Rescan"}
+                    {isRescanning ? messages.rescanning : messages.rescan}
                   </Button>
                   <Button
                     variant="destructive"
@@ -673,7 +678,7 @@ function ScanPageContent() {
                     disabled={isDeleting}
                     className="h-8 px-3 text-xs"
                   >
-                    {isDeleting ? "Deleting..." : "Delete"}
+                    {isDeleting ? dashboardMessages.common.deleting : dashboardMessages.common.delete}
                   </Button>
                 </div>
               </div>
@@ -683,12 +688,12 @@ function ScanPageContent() {
             <div className="flex flex-col gap-3 rounded-md border border-zinc-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800 dark:bg-zinc-950">
               <div className="flex flex-col gap-1 text-sm text-muted-foreground">
                 <span>
-                  Page {page} of {totalPages} · {totalResults} total scans
+                  {messages.pageSummary(page, totalPages, totalResults)}
                 </span>
                 <label className="flex items-center gap-2">
-                  <span>Rows per page</span>
+                  <span>{messages.rowsPerPage}</span>
                   <select
-                    aria-label="Scan rows per page"
+                    aria-label={messages.rowsPerPageAria}
                     value={pageSize}
                     onChange={(event) =>
                       updateScanQuery({
@@ -712,14 +717,14 @@ function ScanPageContent() {
                   onClick={() => updateScanQuery({ page: page - 1 })}
                   disabled={page <= DEFAULT_PAGE || isFetching}
                 >
-                  Previous
+                  {dashboardMessages.common.previous}
                 </Button>
                 <Button
                   variant="outline"
                   onClick={() => updateScanQuery({ page: page + 1 })}
                   disabled={page >= totalPages || isFetching}
                 >
-                  Next
+                  {dashboardMessages.common.next}
                 </Button>
               </div>
             </div>
@@ -737,9 +742,12 @@ function ScanPageContent() {
 }
 
 export default function ScanPage() {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).scan;
+
   return (
     <Suspense
-      fallback={<div className="text-sm text-muted-foreground">Loading scans...</div>}
+      fallback={<div className="text-sm text-muted-foreground">{messages.loadingScans}</div>}
     >
       <ScanPageContent />
     </Suspense>

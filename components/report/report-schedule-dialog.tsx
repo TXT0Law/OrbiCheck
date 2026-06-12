@@ -14,9 +14,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useMonitors } from "@/lib/hooks/use-monitors";
 import { useCreateReportSchedule, useUpdateReportSchedule } from "@/lib/hooks/use-report-schedules";
 import { useScanList } from "@/lib/hooks/use-scan-list";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import {
   reportScheduleCreateSchema,
   reportScheduleUpdateSchema,
@@ -56,7 +58,6 @@ interface FormState {
 
 const FORMAT_OPTIONS: ReportFormat[] = ["pdf", "markdown", "html", "both", "all"];
 const PERIOD_OPTIONS: ReportPeriod[] = ["24h", "7d", "30d", "90d"];
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DEFAULT_HOUR = 9;
 const DEFAULT_MINUTE = 0;
 
@@ -97,6 +98,8 @@ export function ReportScheduleDialog({
   onOpenChange,
   schedule,
 }: ReportScheduleDialogProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).reports;
   const { toast } = useToast();
   const createSchedule = useCreateReportSchedule();
   const updateSchedule = useUpdateReportSchedule();
@@ -108,7 +111,7 @@ export function ReportScheduleDialog({
   });
   const monitorsQuery = useMonitors({ page: 1, limit: 50 });
   const scans = useMemo(() => scansQuery.data?.scans ?? [], [scansQuery.data?.scans]);
-  const monitors = monitorsQuery.data?.data ?? [];
+  const monitors = useMemo(() => monitorsQuery.data?.data ?? [], [monitorsQuery.data?.data]);
   const [state, setState] = useState<FormState>(() => buildState(schedule));
   const [formError, setFormError] = useState<string | null>(null);
   const isEditing = Boolean(schedule);
@@ -163,19 +166,19 @@ export function ReportScheduleDialog({
         await createSchedule.mutateAsync(parsed);
       }
       toast({
-        title: isEditing ? "Schedule updated" : "Schedule created",
-        description: `"${payload.name}" is ready.`,
+        title: isEditing ? messages.scheduleUpdatedTitle : messages.scheduleCreatedTitle,
+        description: messages.scheduleReadyDescription(payload.name),
       });
       onOpenChange(false);
     } catch (error) {
       const message =
         error instanceof ZodError
-          ? error.issues[0]?.message ?? "Please check the schedule form."
+          ? error.issues[0]?.message ?? messages.scheduleFormFallback
           : error instanceof Error
             ? error.message
-            : "Failed to save report schedule.";
+            : messages.scheduleSaveFallback;
       setFormError(message);
-      toast({ title: "Schedule not saved", description: message, variant: "destructive" });
+      toast({ title: messages.scheduleNotSavedTitle, description: message, variant: "destructive" });
     }
   }
 
@@ -183,9 +186,11 @@ export function ReportScheduleDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit Schedule" : "Create Schedule"}</DialogTitle>
+          <DialogTitle>
+            {isEditing ? messages.scheduleDialogEditTitle : messages.scheduleDialogCreateTitle}
+          </DialogTitle>
           <DialogDescription>
-            Generate recurring weekly or monthly reports and deliver them by email or Slack.
+            {messages.scheduleDialogDescription}
           </DialogDescription>
         </DialogHeader>
 
@@ -198,11 +203,11 @@ export function ReportScheduleDialog({
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2 text-sm">
-              <span className="font-medium">Name</span>
+              <span className="font-medium">{messages.nameLabel}</span>
               <Input value={state.name} onChange={(event) => patch("name", event.target.value)} />
             </label>
             <label className="space-y-2 text-sm">
-              <span className="font-medium">Timezone</span>
+              <span className="font-medium">{messages.timezoneLabel}</span>
               <Input
                 value={state.timezone}
                 onChange={(event) => patch("timezone", event.target.value)}
@@ -213,13 +218,13 @@ export function ReportScheduleDialog({
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2 text-sm">
-              <span className="font-medium">Scan</span>
+              <span className="font-medium">{messages.scanLabel}</span>
               <select
                 className="flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 value={state.scanId}
                 onChange={(event) => patch("scanId", event.target.value)}
               >
-                <option value="">Select a completed scan</option>
+                <option value="">{messages.selectCompletedScan}</option>
                 {scans.map((scan) => (
                   <option key={scan.id} value={scan.id}>
                     {scan.domain} ({scan.createdAt.slice(0, 10)})
@@ -228,7 +233,7 @@ export function ReportScheduleDialog({
               </select>
             </label>
             <label className="space-y-2 text-sm">
-              <span className="font-medium">Format</span>
+              <span className="font-medium">{messages.formatLabel}</span>
               <select
                 className="flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 value={state.format}
@@ -250,7 +255,7 @@ export function ReportScheduleDialog({
                 checked={state.includeMonitor}
                 onChange={(event) => patch("includeMonitor", event.target.checked)}
               />
-              Include monitor summary
+              {messages.includeMonitorSummary}
             </label>
             {state.includeMonitor ? (
               <div className="grid gap-4 md:grid-cols-2">
@@ -259,7 +264,7 @@ export function ReportScheduleDialog({
                   value={state.monitorId}
                   onChange={(event) => patch("monitorId", event.target.value)}
                 >
-                  <option value="">Select a monitor</option>
+                  <option value="">{messages.selectMonitor}</option>
                   {monitors.map((monitor) => (
                     <option key={monitor.id} value={monitor.id}>
                       {monitor.displayName}
@@ -283,25 +288,27 @@ export function ReportScheduleDialog({
 
           <div className="grid gap-4 md:grid-cols-4">
             <label className="space-y-2 text-sm">
-              <span className="font-medium">Cadence</span>
+              <span className="font-medium">{messages.cadenceLabel}</span>
               <select
                 className="flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                 value={state.cadence}
                 onChange={(event) => patch("cadence", event.target.value as ReportScheduleCadence)}
               >
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
+                <option value="weekly">{messages.weekly}</option>
+                <option value="monthly">{messages.monthly}</option>
               </select>
             </label>
             <label className="space-y-2 text-sm">
-              <span className="font-medium">{state.cadence === "weekly" ? "Weekday" : "Day"}</span>
+              <span className="font-medium">
+                {state.cadence === "weekly" ? messages.weekdayLabel : messages.dayLabel}
+              </span>
               {state.cadence === "weekly" ? (
                 <select
                   className="flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                   value={state.dayOfWeek}
                   onChange={(event) => patch("dayOfWeek", Number(event.target.value))}
                 >
-                  {WEEKDAYS.map((label, index) => (
+                  {messages.weekDays.map((label, index) => (
                     <option key={label} value={index}>
                       {label}
                     </option>
@@ -318,7 +325,7 @@ export function ReportScheduleDialog({
               )}
             </label>
             <label className="space-y-2 text-sm">
-              <span className="font-medium">Hour</span>
+              <span className="font-medium">{messages.hourLabel}</span>
               <Input
                 type="number"
                 min={0}
@@ -328,7 +335,7 @@ export function ReportScheduleDialog({
               />
             </label>
             <label className="space-y-2 text-sm">
-              <span className="font-medium">Minute</span>
+              <span className="font-medium">{messages.minuteLabel}</span>
               <Input
                 type="number"
                 min={0}
@@ -340,7 +347,7 @@ export function ReportScheduleDialog({
           </div>
 
           <fieldset className="space-y-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
-            <legend className="px-1 text-sm font-medium">Delivery</legend>
+            <legend className="px-1 text-sm font-medium">{messages.deliveryLabel}</legend>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -362,11 +369,11 @@ export function ReportScheduleDialog({
                 checked={state.deliverSlack}
                 onChange={(event) => patch("deliverSlack", event.target.checked)}
               />
-              Slack using the configured notification channel
+              {messages.slackConfiguredChannel}
             </label>
             {!state.deliverEmail && !state.deliverSlack ? (
               <p className="text-sm text-amber-600">
-                No delivery channel selected. Reports will still be generated and stored.
+                {messages.noDeliveryWarning}
               </p>
             ) : null}
           </fieldset>
@@ -377,16 +384,20 @@ export function ReportScheduleDialog({
               checked={state.isEnabled}
               onChange={(event) => patch("isEnabled", event.target.checked)}
             />
-            Enabled
+            {messages.enabledLabel}
           </label>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isBusy}>
-            Cancel
+            {messages.cancel}
           </Button>
           <Button onClick={() => void handleSubmit()} disabled={isBusy || scans.length === 0}>
-            {isBusy ? "Saving..." : isEditing ? "Save Schedule" : "Create Schedule"}
+            {isBusy
+              ? messages.saving
+              : isEditing
+                ? messages.saveSchedule
+                : messages.scheduleDialogCreateTitle}
           </Button>
         </DialogFooter>
       </DialogContent>

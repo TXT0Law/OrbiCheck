@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MonitorListContent } from "@/components/monitor/monitor-list-content";
+import { APPEARANCE_KEYS } from "@/lib/mock-data";
 import { useMonitorStore } from "@/lib/stores/monitor-store";
 import type { Monitor } from "@/shared/types/monitor";
 
@@ -86,6 +87,7 @@ function buildMonitor(overrides: Partial<Monitor> = {}): Monitor {
 describe("MonitorListContent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     pathnameMock.mockReturnValue("/dashboard/monitor");
     searchParamsMock.mockReturnValue(new URLSearchParams());
     useMonitorStore.setState({
@@ -122,6 +124,17 @@ describe("MonitorListContent", () => {
     expect(replaceMock).toHaveBeenCalledWith("/dashboard/monitor?pageSize=50", {
       scroll: false,
     });
+  });
+
+  it("renders monitor pagination controls in Chinese", () => {
+    localStorage.setItem(APPEARANCE_KEYS.language, "zh");
+    searchParamsMock.mockReturnValue(new URLSearchParams("page=2&pageSize=50"));
+
+    render(<MonitorListContent />);
+
+    expect(screen.getByText("第 2 / 2 頁 · 共 75 個監控")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上一頁" })).toBeInTheDocument();
+    expect(screen.getByText("每頁筆數")).toBeInTheDocument();
   });
 
   it("resets monitor pagination when list filters change", async () => {

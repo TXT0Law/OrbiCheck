@@ -3,6 +3,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Providers } from "@/lib/providers";
+import {
+  APPEARANCE_LANGUAGE_CHANGED_EVENT,
+} from "@/lib/hooks/use-appearance-language";
+import { APPEARANCE_KEYS } from "@/lib/mock-data";
 import { useToastStore } from "@/lib/stores/toast-store";
 
 function FailingMutationButton({ withLocalToast }: { withLocalToast: boolean }) {
@@ -60,11 +64,34 @@ function DuplicateFailingQueries() {
 
 describe("Providers global mutation error handling", () => {
   beforeEach(() => {
+    localStorage.clear();
+    document.documentElement.lang = "en";
     useToastStore.setState({ toasts: [] });
   });
 
   afterEach(() => {
+    localStorage.clear();
+    document.documentElement.lang = "en";
     useToastStore.setState({ toasts: [] });
+  });
+
+  it("syncs html lang with the saved appearance language", async () => {
+    localStorage.setItem(APPEARANCE_KEYS.language, "zh");
+
+    render(
+      <Providers>
+        <div>Language fixture</div>
+      </Providers>,
+    );
+
+    await waitFor(() => expect(document.documentElement.lang).toBe("zh-TW"));
+
+    localStorage.setItem(APPEARANCE_KEYS.language, "en");
+    act(() => {
+      window.dispatchEvent(new Event(APPEARANCE_LANGUAGE_CHANGED_EVENT));
+    });
+
+    await waitFor(() => expect(document.documentElement.lang).toBe("en"));
   });
 
   it("shows a global mutation toast when no local handler emits one", async () => {

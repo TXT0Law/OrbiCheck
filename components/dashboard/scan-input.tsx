@@ -7,8 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScanRangeSelector } from "@/components/scan/scan-range-selector";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { parseAndValidateUrls, parseUrls } from "@/lib/utils/url-input-sanitizer";
 import { SCAN_MODULES } from "@/lib/constants/scan-modules";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 
 const PORTS_MODULE = "ports";
 const PORT_SCAN_PROFILES = ["quick", "standard", "deep"] as const;
@@ -50,6 +52,8 @@ export function ScanInput({
     controlledOnAcknowledgeScanAuthorizationChange,
   prefilledUrl = "",
 }: ScanInputProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).scan;
   const [internalModules, setInternalModules] = useState<Set<string>>(
     () => new Set(SCAN_MODULES)
   );
@@ -102,17 +106,17 @@ export function ScanInput({
     }
 
     if (result.urls.length === 0) {
-      setErrors(["Please enter at least one valid URL"]);
+      setErrors([messages.urlRequired]);
       return;
     }
 
     if (selectedModules.size === 0) {
-      setErrors(["Please select at least one module to scan"]);
+      setErrors([messages.moduleRequired]);
       return;
     }
 
     if (enablePortScan && !acknowledgeScanAuthorization) {
-      setErrors(["Please confirm that you are authorized to scan this target"]);
+      setErrors([messages.authorizationRequired]);
       return;
     }
 
@@ -128,7 +132,7 @@ export function ScanInput({
       setErrors([]);
     } catch (error) {
       setErrors([
-        error instanceof Error ? error.message : "Failed to start scan",
+        error instanceof Error ? error.message : messages.startFailedGeneric,
       ]);
     } finally {
       setIsSubmitting(false);
@@ -143,9 +147,7 @@ export function ScanInput({
       <Textarea
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
-        placeholder="Enter URLs to scan (one per line or comma-separated)
-https://example.com
-https://example.org"
+        placeholder={messages.inputPlaceholder}
         rows={4}
         disabled={isSubmitting}
         className="font-mono resize-none text-sm"
@@ -154,7 +156,7 @@ https://example.org"
 
       {parsedPreview.count > 0 && (
         <p className="text-sm text-muted-foreground">
-          {parsedPreview.count} URL{parsedPreview.count > 1 ? "s" : ""} detected
+          {messages.urlsDetected(parsedPreview.count)}
         </p>
       )}
 
@@ -171,18 +173,17 @@ https://example.org"
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                Port Scanning
+                {messages.portScanning}
               </span>
               <Badge
                 variant="outline"
                 className="border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
               >
-                Authorization required
+                {messages.authorizationBadge}
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground">
-              Scan for open ports on the target host. This performs active TCP
-              connections to common ports.
+              {messages.portDescription}
             </p>
           </div>
           <input
@@ -195,15 +196,15 @@ https://example.org"
           />
         </label>
         <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-          Only scan hosts you own or have permission to test.
+          {messages.permissionNotice}
         </p>
         {enablePortScan ? (
           <div className="space-y-3">
             <label className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-              Scan Depth
+              {messages.scanDepth}
             </label>
             <select
-              aria-label="Port scan depth"
+              aria-label={messages.portScanDepthAria}
               value={portScanProfile}
               onChange={(event) =>
                 onPortScanProfileChange(
@@ -229,8 +230,7 @@ https://example.org"
                 className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
               />
               <span>
-                I confirm that I own this host or have explicit authorization to
-                run active port scans against it.
+                {messages.authorizationConfirm}
               </span>
             </label>
           </div>
@@ -255,12 +255,12 @@ https://example.org"
         {isSubmitting ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Starting scan...
+            {messages.startingScan}
           </>
         ) : parsedPreview.count > 1 ? (
-          `Scan ${parsedPreview.count} URLs`
+          messages.scanUrls(parsedPreview.count)
         ) : (
-          "Start Scan"
+          messages.startScan
         )}
       </Button>
     </form>

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ScanLayout from "@/app/dashboard/scan/layout";
 import ScanPage from "@/app/dashboard/scan/page";
+import { APPEARANCE_KEYS } from "@/lib/mock-data";
 import { useScanStore } from "@/lib/stores/scan-store";
 
 const pushMock = vi.hoisted(() => vi.fn());
@@ -91,6 +92,7 @@ function renderPage() {
 describe("scan page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     pathnameMock.mockReturnValue("/dashboard/scan");
     searchParamsMock.mockReturnValue(new URLSearchParams());
     eventSources.length = 0;
@@ -132,6 +134,7 @@ describe("scan page", () => {
   });
 
   afterEach(() => {
+    localStorage.clear();
     vi.unstubAllGlobals();
   });
 
@@ -241,6 +244,17 @@ describe("scan page", () => {
     expect(screen.getByLabelText("Scan rows per page")).toBeInTheDocument();
     expect(screen.getByText("Page 1 of 1 · 1 total scans")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete All" })).toBeInTheDocument();
+  });
+
+  it("renders the scan page chrome in Chinese", () => {
+    localStorage.setItem(APPEARANCE_KEYS.language, "zh");
+
+    renderPage();
+
+    expect(screen.getByRole("heading", { name: "掃描" })).toBeInTheDocument();
+    expect(screen.getByText("掃描清單")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "開始掃描" })).toBeInTheDocument();
+    expect(screen.getByText("第 1 / 1 頁 · 共 1 筆掃描")).toBeInTheDocument();
   });
 
   it("updates URL query params when scan pagination changes", () => {

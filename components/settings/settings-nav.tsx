@@ -1,3 +1,5 @@
+"use client";
+
 import {
   Bell,
   Database,
@@ -9,6 +11,8 @@ import {
 } from "lucide-react";
 
 import { Separator } from "@/components/ui/separator";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 
 interface SettingsNavProps {
   activeTab: string;
@@ -16,16 +20,19 @@ interface SettingsNavProps {
 }
 
 const NAV_ITEMS = [
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "api-keys", label: "API Keys", icon: Key },
-  { id: "profile", label: "Profile", icon: User },
-  { id: "scan-defaults", label: "Scan Defaults", icon: SlidersHorizontal },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "security", label: "Security", icon: Shield },
-  { id: "data-privacy", label: "Data & Privacy", icon: Database },
+  { id: "appearance", labelKey: "navAppearance", icon: Palette },
+  { id: "api-keys", labelKey: "navApiKeys", icon: Key },
+  { id: "profile", labelKey: "navProfile", icon: User },
+  { id: "scan-defaults", labelKey: "navScanDefaults", icon: SlidersHorizontal },
+  { id: "notifications", labelKey: "navNotifications", icon: Bell },
+  { id: "security", labelKey: "navSecurity", icon: Shield },
+  { id: "data-privacy", labelKey: "navDataPrivacy", icon: Database },
 ] as const;
 
 export function SettingsNav({ activeTab, onTabChange }: SettingsNavProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).settings;
+
   return (
     <div className="w-full md:w-[220px] md:shrink-0">
       <div className="flex gap-1 overflow-x-auto pb-1 md:block md:space-y-1 md:overflow-visible md:pb-0">
@@ -45,7 +52,7 @@ export function SettingsNav({ activeTab, onTabChange }: SettingsNavProps) {
                 }`}
               >
                 <Icon className="h-4 w-4" />
-                <span className="whitespace-nowrap">{item.label}</span>
+                <span className="whitespace-nowrap">{messages[item.labelKey]}</span>
               </button>
 
               {index === 2 ? <Separator className="my-2 hidden md:block" /> : null}

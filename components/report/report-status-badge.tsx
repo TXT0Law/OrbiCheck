@@ -1,6 +1,8 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import type { ReportStatus } from "@/shared/types/report";
 
 interface ReportStatusBadgeProps {
@@ -21,5 +23,18 @@ function getStatusClass(status: ReportStatus): string {
 }
 
 export function ReportStatusBadge({ status }: ReportStatusBadgeProps) {
-  return <Badge className={`border-transparent capitalize ${getStatusClass(status)}`}>{status}</Badge>;
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).reports;
+  const labels: Record<ReportStatus, string> = {
+    completed: messages.statusCompleted,
+    failed: messages.statusFailed,
+    generating: messages.statusGenerating,
+    pending: messages.statusPending,
+  };
+
+  return (
+    <Badge className={`border-transparent capitalize ${getStatusClass(status)}`}>
+      {labels[status]}
+    </Badge>
+  );
 }

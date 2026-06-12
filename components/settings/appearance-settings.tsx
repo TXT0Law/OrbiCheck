@@ -5,7 +5,11 @@ import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { Card } from "@/components/ui/card";
-import { APPEARANCE_LANGUAGE_CHANGED_EVENT } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
+import {
+  APPEARANCE_LANGUAGE_CHANGED_EVENT,
+  useAppearanceLanguage,
+} from "@/lib/hooks/use-appearance-language";
 import { APPEARANCE_KEYS } from "@/lib/mock-data";
 
 type ThemeOption = "light" | "dark" | "system";
@@ -28,8 +32,14 @@ function applyFontSizeClass(fontSize: FontSizeOption) {
   }
 }
 
+function applyLanguageAttribute(language: LanguageOption) {
+  document.documentElement.lang = language === "zh" ? "zh-TW" : "en";
+}
+
 export function AppearanceSettings() {
   const { theme, setTheme } = useTheme();
+  const appearanceLanguage = useAppearanceLanguage();
+  const messages = getDashboardMessages(appearanceLanguage).settings;
   const [fontSize, setFontSize] = useState<FontSizeOption>("default");
   const [language, setLanguage] = useState<LanguageOption>("en");
 
@@ -46,6 +56,9 @@ export function AppearanceSettings() {
 
     if (savedLanguage === "en" || savedLanguage === "zh") {
       setLanguage(savedLanguage);
+      applyLanguageAttribute(savedLanguage);
+    } else {
+      applyLanguageAttribute("en");
     }
   }, []);
 
@@ -61,6 +74,7 @@ export function AppearanceSettings() {
   const handleLanguageChange = (nextLanguage: LanguageOption) => {
     setLanguage(nextLanguage);
     localStorage.setItem(APPEARANCE_KEYS.language, nextLanguage);
+    applyLanguageAttribute(nextLanguage);
     window.dispatchEvent(new Event(APPEARANCE_LANGUAGE_CHANGED_EVENT));
   };
 
@@ -69,15 +83,17 @@ export function AppearanceSettings() {
       <div className="space-y-8">
         <div className="space-y-3">
           <div>
-            <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Theme</h3>
-            <p className="text-sm text-muted-foreground">Select your preferred color scheme.</p>
+            <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+              {messages.themeTitle}
+            </h3>
+            <p className="text-sm text-muted-foreground">{messages.themeDescription}</p>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {[
-              { value: "light" as const, label: "Light", icon: Sun },
-              { value: "dark" as const, label: "Dark", icon: Moon },
-              { value: "system" as const, label: "System", icon: Monitor },
+              { value: "light" as const, label: messages.themeLight, icon: Sun },
+              { value: "dark" as const, label: messages.themeDark, icon: Moon },
+              { value: "system" as const, label: messages.themeSystem, icon: Monitor },
             ].map((option) => {
               const Icon = option.icon;
               const isActive = activeTheme === option.value;
@@ -108,18 +124,18 @@ export function AppearanceSettings() {
         <div className="space-y-3">
           <div>
             <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-              Font Size
+              {messages.fontSizeTitle}
             </h3>
             <p className="text-sm text-muted-foreground">
-              Adjust the base font size across the interface.
+              {messages.fontSizeDescription}
             </p>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {[
-              { value: "small" as const, label: "Small", previewClass: "text-xs" },
-              { value: "default" as const, label: "Default", previewClass: "text-sm" },
-              { value: "large" as const, label: "Large", previewClass: "text-base" },
+              { value: "small" as const, label: messages.fontSmall, previewClass: "text-xs" },
+              { value: "default" as const, label: messages.fontDefault, previewClass: "text-sm" },
+              { value: "large" as const, label: messages.fontLarge, previewClass: "text-base" },
             ].map((option) => {
               const isActive = fontSize === option.value;
 
@@ -139,7 +155,7 @@ export function AppearanceSettings() {
                       {option.label}
                     </p>
                     <p className={`${option.previewClass} text-muted-foreground`}>
-                      The quick brown fox jumps.
+                      {messages.fontPreview}
                     </p>
                   </div>
                 </button>
@@ -151,9 +167,9 @@ export function AppearanceSettings() {
         <div className="space-y-3">
           <div>
             <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-              Language
+              {messages.languageTitle}
             </h3>
-            <p className="text-sm text-muted-foreground">Choose your preferred display language.</p>
+            <p className="text-sm text-muted-foreground">{messages.languageDescription}</p>
           </div>
 
           <select

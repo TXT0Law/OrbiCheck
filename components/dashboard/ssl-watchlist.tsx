@@ -7,7 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useMonitors } from "@/lib/hooks/use-monitors";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import type { Monitor } from "@/shared/types/monitor";
 
 interface SslWatchlistProps {
@@ -18,6 +20,9 @@ const DASHBOARD_STALE_TIME = 30_000;
 const MAX_SSL_WINDOW_DAYS = 90;
 
 export function SslWatchlist({ className }: SslWatchlistProps) {
+  const language = useAppearanceLanguage();
+  const dashboardMessages = getDashboardMessages(language);
+  const messages = dashboardMessages.overview;
   const monitorsQuery = useMonitors(
     { page: 1, limit: 100 },
     { staleTime: DASHBOARD_STALE_TIME, refetchInterval: 60_000 }
@@ -31,16 +36,16 @@ export function SslWatchlist({ className }: SslWatchlistProps) {
     return (
       <Card className={className}>
         <CardHeader>
-          <CardTitle className="text-lg font-semibold">SSL Expiry Watchlist</CardTitle>
+          <CardTitle className="text-lg font-semibold">{messages.sslWatchlist}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
             {monitorsQuery.error instanceof Error
               ? monitorsQuery.error.message
-              : "Failed to load SSL watchlist"}
+              : messages.failedToLoadSslWatchlist}
           </p>
           <Button variant="outline" onClick={() => void monitorsQuery.refetch()}>
-            Retry
+            {dashboardMessages.common.retry}
           </Button>
         </CardContent>
       </Card>
@@ -59,12 +64,12 @@ export function SslWatchlist({ className }: SslWatchlistProps) {
   return (
     <Card className={className}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-lg font-semibold">SSL Expiry Watchlist</CardTitle>
+        <CardTitle className="text-lg font-semibold">{messages.sslWatchlist}</CardTitle>
         <Link
           href="/dashboard/monitor"
           className="text-sm text-muted-foreground transition hover:text-zinc-900 dark:hover:text-zinc-100"
         >
-          View all monitors →
+          {messages.viewAllMonitorsShort}
         </Link>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -81,7 +86,7 @@ export function SslWatchlist({ className }: SslWatchlistProps) {
               <p className="text-xs text-muted-foreground">{monitor.url}</p>
             </div>
             <div className="text-sm text-zinc-700 dark:text-zinc-300">
-              {formatExpiryDays(monitor.sslExpiryDays)}
+              {formatExpiryDays(monitor.sslExpiryDays, messages)}
             </div>
             <div className="space-y-2">
               <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
@@ -93,7 +98,7 @@ export function SslWatchlist({ className }: SslWatchlistProps) {
             </div>
             <div>
               <Badge variant={getBadgeVariant(monitor.sslExpiryDays)}>
-                {getStatusLabel(monitor.sslExpiryDays)}
+                {getStatusLabel(monitor.sslExpiryDays, messages)}
               </Badge>
             </div>
           </Link>
@@ -104,10 +109,13 @@ export function SslWatchlist({ className }: SslWatchlistProps) {
 }
 
 function SslWatchlistSkeleton({ className }: SslWatchlistProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).overview;
+
   return (
     <Card className={className}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-lg font-semibold">SSL Expiry Watchlist</CardTitle>
+        <CardTitle className="text-lg font-semibold">{messages.sslWatchlist}</CardTitle>
         <Skeleton className="h-4 w-32" />
       </CardHeader>
       <CardContent className="space-y-4">
@@ -144,10 +152,13 @@ function getMonitorLabel(monitor: Monitor) {
   }
 }
 
-function formatExpiryDays(daysRemaining: number | null) {
-  if (daysRemaining === null) return "Expiry unavailable";
-  if (daysRemaining < 0) return `Expired ${Math.abs(daysRemaining)}d ago`;
-  return `Expires in ${daysRemaining}d`;
+function formatExpiryDays(
+  daysRemaining: number | null,
+  messages: ReturnType<typeof getDashboardMessages>["overview"],
+) {
+  if (daysRemaining === null) return messages.expiryUnavailable;
+  if (daysRemaining < 0) return messages.expiredAgo(Math.abs(daysRemaining));
+  return messages.expiresIn(daysRemaining);
 }
 
 function getProgressValue(daysRemaining: number | null) {
@@ -172,10 +183,13 @@ function getBadgeVariant(
   return "success";
 }
 
-function getStatusLabel(daysRemaining: number | null) {
-  if (daysRemaining === null) return "Unknown";
-  if (daysRemaining < 0) return "Expired";
-  if (daysRemaining <= 14) return "Critical";
-  if (daysRemaining <= 30) return "Warning";
-  return "OK";
+function getStatusLabel(
+  daysRemaining: number | null,
+  messages: ReturnType<typeof getDashboardMessages>["overview"],
+) {
+  if (daysRemaining === null) return messages.sslUnknown;
+  if (daysRemaining < 0) return messages.sslExpired;
+  if (daysRemaining <= 14) return messages.sslCritical;
+  if (daysRemaining <= 30) return messages.sslWarning;
+  return messages.sslOk;
 }
