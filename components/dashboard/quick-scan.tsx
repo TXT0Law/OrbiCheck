@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { createScan } from "@/lib/api/scans";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import { parseAndValidateUrls } from "@/lib/utils/url-input-sanitizer";
 
 interface QuickScanProps {
@@ -16,6 +18,8 @@ interface QuickScanProps {
 }
 
 export function QuickScan({ className }: QuickScanProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).overview;
   const router = useRouter();
   const queryClient = useQueryClient();
   const [url, setUrl] = useState("");
@@ -40,7 +44,7 @@ export function QuickScan({ className }: QuickScanProps) {
 
     const result = parseAndValidateUrls(url, 1);
     if (result.errors.length > 0 || result.urls.length === 0) {
-      setError(result.errors[0] ?? "Please enter a valid URL");
+      setError(result.errors[0] ?? messages.quickScanInvalidUrl);
       return;
     }
 
@@ -49,7 +53,7 @@ export function QuickScan({ className }: QuickScanProps) {
       setUrl("");
     } catch (submitError) {
       setError(
-        submitError instanceof Error ? submitError.message : "Failed to start scan"
+        submitError instanceof Error ? submitError.message : messages.quickScanFailed
       );
     }
   }
@@ -57,9 +61,9 @@ export function QuickScan({ className }: QuickScanProps) {
   return (
     <Card className={className}>
       <CardHeader className="space-y-2">
-        <CardTitle className="text-lg font-semibold">Quick Scan</CardTitle>
+        <CardTitle className="text-lg font-semibold">{messages.quickScanTitle}</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Launch a full scan from the dashboard.
+          {messages.quickScanDescription}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -71,7 +75,7 @@ export function QuickScan({ className }: QuickScanProps) {
               onChange={(event) => setUrl(event.target.value)}
               placeholder="https://example.com"
               className="h-11 pl-9 font-mono"
-              aria-label="Quick scan URL"
+              aria-label={messages.quickScanUrlAria}
               disabled={mutation.isPending}
             />
           </div>
@@ -83,10 +87,10 @@ export function QuickScan({ className }: QuickScanProps) {
             {mutation.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Scanning...
+                {messages.scanning}
               </>
             ) : (
-              "Scan"
+              messages.scan
             )}
           </Button>
         </form>

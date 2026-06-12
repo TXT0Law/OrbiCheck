@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import { API_PROVIDERS } from "@/lib/mock-data";
 
 interface ProviderState {
@@ -48,6 +50,9 @@ function maskApiKey(value: string) {
 }
 
 export function ApiKeysSettings() {
+  const language = useAppearanceLanguage();
+  const dashboardMessages = getDashboardMessages(language);
+  const messages = dashboardMessages.settings;
   const [providerState, setProviderState] = useState<ProviderStateMap>(() => createInitialState());
   const timeoutIdsRef = useRef<number[]>([]);
 
@@ -187,10 +192,10 @@ export function ApiKeysSettings() {
       <div className="space-y-6">
         <div>
           <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-            API Keys
+            {messages.apiKeysTitle}
           </h3>
           <p className="text-sm text-muted-foreground">
-            Configure API keys for AI-powered analysis. Keys are stored locally in your browser.
+            {messages.apiKeysDescription}
           </p>
         </div>
 
@@ -231,7 +236,7 @@ export function ApiKeysSettings() {
                       onClick={() => handleSave(provider.id)}
                       className="bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
                     >
-                      Save
+                      {messages.save}
                     </Button>
                   </div>
                 ) : (
@@ -244,7 +249,7 @@ export function ApiKeysSettings() {
                         onClick={() => handleEdit(provider.id)}
                         className="h-9 border border-zinc-200 bg-white px-3 text-xs text-zinc-900 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
                       >
-                        Edit
+                        {messages.edit}
                       </Button>
                       <Button
                         onClick={() => handleTest(provider.id)}
@@ -254,21 +259,23 @@ export function ApiKeysSettings() {
                         {state.isTesting ? (
                           <span className="inline-flex items-center gap-1">
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            Testing...
+                            {messages.testing}
                           </span>
                         ) : (
-                          "Test"
+                          messages.test
                         )}
                       </Button>
                       <Button
                         onClick={() => handleDelete(provider.id)}
                         className="h-9 px-3 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30"
                       >
-                        Delete
+                        {dashboardMessages.common.delete}
                       </Button>
                     </div>
                     {state.showSuccess ? (
-                      <p className="text-sm text-green-600 dark:text-green-500">✓ Connection successful</p>
+                      <p className="text-sm text-green-600 dark:text-green-500">
+                        {messages.connectionSuccessful}
+                      </p>
                     ) : null}
                   </div>
                 )}

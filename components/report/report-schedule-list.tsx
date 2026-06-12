@@ -9,25 +9,28 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/use-toast";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import {
   useDeleteReportSchedule,
   useRunReportScheduleNow,
   useUpdateReportSchedule,
 } from "@/lib/hooks/use-report-schedules";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import type { ReportSchedule, ReportScheduleRunStatus } from "@/shared/types/report";
 
 interface ReportScheduleListProps {
   schedules: ReportSchedule[];
 }
 
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-function formatCadence(schedule: ReportSchedule): string {
+function formatCadence(
+  schedule: ReportSchedule,
+  messages: ReturnType<typeof getDashboardMessages>["reports"],
+): string {
   const time = `${String(schedule.hour).padStart(2, "0")}:${String(schedule.minute).padStart(2, "0")}`;
   if (schedule.cadence === "weekly") {
-    return `${WEEKDAYS[schedule.dayOfWeek ?? 0]} ${time}`;
+    return `${messages.weekDays[schedule.dayOfWeek ?? 0]} ${time}`;
   }
-  return `Day ${schedule.dayOfMonth ?? 1} ${time}`;
+  return `${messages.dayOfMonth(schedule.dayOfMonth ?? 1)} ${time}`;
 }
 
 function formatDate(value: string | null): string {
@@ -42,7 +45,20 @@ function runStatusVariant(status: ReportScheduleRunStatus | undefined) {
   return "secondary";
 }
 
+function getRunStatusLabel(
+  status: ReportScheduleRunStatus,
+  messages: ReturnType<typeof getDashboardMessages>["reports"],
+) {
+  if (status === "completed") return messages.statusCompleted;
+  if (status === "failed") return messages.statusFailed;
+  if (status === "generating") return messages.statusGenerating;
+  if (status === "delivering") return messages.statusDelivering;
+  return messages.statusPending;
+}
+
 export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).reports;
   const { toast } = useToast();
   const updateSchedule = useUpdateReportSchedule();
   const deleteSchedule = useDeleteReportSchedule();
@@ -57,12 +73,12 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
         payload: { isEnabled: !schedule.isEnabled },
       });
       toast({
-        title: schedule.isEnabled ? "Schedule paused" : "Schedule resumed",
-        description: `"${schedule.name}" was updated.`,
+        title: schedule.isEnabled ? messages.schedulePausedTitle : messages.scheduleResumedTitle,
+        description: messages.scheduleUpdatedDescription(schedule.name),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not update schedule.";
-      toast({ title: "Update failed", description: message, variant: "destructive" });
+      const message = error instanceof Error ? error.message : messages.updateScheduleFallback;
+      toast({ title: messages.updateFailedTitle, description: message, variant: "destructive" });
     }
   }
 
@@ -70,12 +86,12 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
     try {
       await runNow.mutateAsync(schedule.id);
       toast({
-        title: "Run queued",
-        description: `"${schedule.name}" is generating a report now.`,
+        title: messages.runQueuedTitle,
+        description: messages.runQueuedDescription(schedule.name),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not run schedule.";
-      toast({ title: "Run failed", description: message, variant: "destructive" });
+      const message = error instanceof Error ? error.message : messages.runScheduleFallback;
+      toast({ title: messages.runFailedTitle, description: message, variant: "destructive" });
     }
   }
 
@@ -83,11 +99,14 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
     if (!deleting) return;
     try {
       await deleteSchedule.mutateAsync(deleting.id);
-      toast({ title: "Schedule deleted", description: `"${deleting.name}" was removed.` });
+      toast({
+        title: messages.scheduleDeletedTitle,
+        description: messages.scheduleDeletedDescription(deleting.name),
+      });
       setDeleting(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not delete schedule.";
-      toast({ title: "Delete failed", description: message, variant: "destructive" });
+      const message = error instanceof Error ? error.message : messages.deleteScheduleFallback;
+      toast({ title: messages.deleteFailedTitle, description: message, variant: "destructive" });
     }
   }
 
@@ -95,10 +114,10 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg font-semibold">No schedules yet</CardTitle>
+          <CardTitle className="text-lg font-semibold">{messages.noSchedulesTitle}</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          Create a weekly or monthly schedule to generate reports automatically.
+          {messages.noSchedulesDescription}
         </CardContent>
       </Card>
     );
@@ -110,14 +129,14 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Cadence</TableHead>
-              <TableHead>Format</TableHead>
-              <TableHead>Delivery</TableHead>
-              <TableHead>Last run</TableHead>
-              <TableHead>Next run</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead>{messages.scheduleTableName}</TableHead>
+              <TableHead>{messages.scheduleTableCadence}</TableHead>
+              <TableHead>{messages.scheduleTableFormat}</TableHead>
+              <TableHead>{messages.scheduleTableDelivery}</TableHead>
+              <TableHead>{messages.scheduleTableLastRun}</TableHead>
+              <TableHead>{messages.scheduleTableNextRun}</TableHead>
+              <TableHead>{messages.scheduleTableStatus}</TableHead>
+              <TableHead className="text-right">{messages.scheduleTableActions}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -127,37 +146,39 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
                 <TableRow key={schedule.id}>
                   <TableCell className="font-medium">{schedule.name}</TableCell>
                   <TableCell>
-                    <div>{formatCadence(schedule)}</div>
+                    <div>{formatCadence(schedule, messages)}</div>
                     <div className="text-xs text-muted-foreground">{schedule.timezone}</div>
                   </TableCell>
                   <TableCell className="capitalize">{schedule.format}</TableCell>
                   <TableCell>
                     {schedule.deliveryChannels.length
                       ? schedule.deliveryChannels.join(", ")
-                      : "Store only"}
+                      : messages.storeOnly}
                   </TableCell>
                   <TableCell>{formatDate(schedule.lastRunAt)}</TableCell>
                   <TableCell>{formatDate(schedule.nextRunAt)}</TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-1">
                       <Badge variant={schedule.isEnabled ? "success" : "secondary"}>
-                        {schedule.isEnabled ? "enabled" : "paused"}
+                        {schedule.isEnabled ? messages.scheduleEnabledStatus : messages.schedulePausedStatus}
                       </Badge>
                       {lastRun ? (
                         <Badge variant={runStatusVariant(lastRun.status)}>
-                          {lastRun.status}
+                          {getRunStatusLabel(lastRun.status, messages)}
                         </Badge>
                       ) : null}
                       {lastRun?.deliverySummary &&
                       lastRun.status === "failed" ? (
-                        <span className="text-xs text-red-600">Delivery needs attention</span>
+                        <span className="text-xs text-red-600">
+                          {messages.deliveryNeedsAttention}
+                        </span>
                       ) : null}
                     </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">
                       <Button size="sm" variant="outline" onClick={() => setEditing(schedule)}>
-                        Edit
+                        {messages.edit}
                       </Button>
                       <Button
                         size="sm"
@@ -165,7 +186,7 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
                         onClick={() => void handleToggle(schedule)}
                         disabled={updateSchedule.isPending}
                       >
-                        {schedule.isEnabled ? "Pause" : "Resume"}
+                        {schedule.isEnabled ? messages.pause : messages.resume}
                       </Button>
                       <Button
                         size="sm"
@@ -173,10 +194,10 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
                         onClick={() => void handleRunNow(schedule)}
                         disabled={runNow.isPending || !schedule.scanId}
                       >
-                        Run now
+                        {messages.runNow}
                       </Button>
                       <Button size="sm" variant="destructive" onClick={() => setDeleting(schedule)}>
-                        Delete
+                        {messages.deleteScheduleTitle}
                       </Button>
                     </div>
                   </TableCell>
@@ -199,9 +220,11 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
         onOpenChange={(open) => {
           if (!open) setDeleting(null);
         }}
-        title="Delete Schedule"
-        description={`Delete "${deleting?.name ?? "this schedule"}" and its run history?`}
-        confirmLabel="Delete"
+        title={messages.deleteScheduleTitle}
+        description={messages.deleteScheduleDescription(deleting?.name ?? messages.thisSchedule)}
+        confirmLabel={messages.deleteScheduleTitle}
+        cancelLabel={messages.cancel}
+        loadingLabel={messages.pleaseWait}
         confirmVariant="destructive"
         onConfirm={() => void handleDelete()}
         isLoading={deleteSchedule.isPending}

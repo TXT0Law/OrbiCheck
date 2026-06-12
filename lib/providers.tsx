@@ -6,7 +6,7 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Toaster } from "@/components/ui/toaster";
 import {
@@ -16,6 +16,7 @@ import {
   shouldShowQueryErrorToast,
   shouldSuppressGlobalErrorToast,
 } from "@/lib/query-error-handling";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useToastStore } from "@/lib/stores/toast-store";
 
 const globalErrorToastLastShownAt = new Map<string, number>();
@@ -32,6 +33,16 @@ function toastGlobalError(error: unknown) {
     ...toast,
     variant: "destructive",
   });
+}
+
+function HtmlLanguageSync() {
+  const language = useAppearanceLanguage();
+
+  useEffect(() => {
+    document.documentElement.lang = language === "zh" ? "zh-TW" : "en";
+  }, [language]);
+
+  return null;
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -75,6 +86,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <HtmlLanguageSync />
       {children}
       <Toaster />
     </QueryClientProvider>

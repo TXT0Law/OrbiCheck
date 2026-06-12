@@ -7,17 +7,21 @@ import { AppearanceSettings } from "@/components/settings/appearance-settings";
 import { NotificationChannelSettings } from "@/components/settings/notification-channel-settings";
 import { PlaceholderSection } from "@/components/settings/placeholder-section";
 import { SettingsNav } from "@/components/settings/settings-nav";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 
 export default function SettingsPage() {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).settings;
   const [activeTab, setActiveTab] = useState("appearance");
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-          Settings
+          {messages.title}
         </h1>
-        <p className="mt-1 text-muted-foreground">Manage your account and preferences.</p>
+        <p className="mt-1 text-muted-foreground">{messages.subtitle}</p>
       </div>
 
       <div className="flex flex-col gap-8 md:flex-row">
@@ -28,27 +32,27 @@ export default function SettingsPage() {
           {activeTab === "api-keys" ? <ApiKeysSettings /> : null}
           {activeTab === "profile" ? (
             <PlaceholderSection
-              title="Profile"
-              description="Manage your display name, email, and avatar."
+              title={messages.profileTitle}
+              description={messages.profileDescription}
             />
           ) : null}
           {activeTab === "scan-defaults" ? (
             <PlaceholderSection
-              title="Scan Defaults"
-              description="Configure default timeout, concurrency, and enabled modules for new scans."
+              title={messages.scanDefaultsTitle}
+              description={messages.scanDefaultsDescription}
             />
           ) : null}
           {activeTab === "notifications" ? <NotificationChannelSettings /> : null}
           {activeTab === "security" ? (
             <PlaceholderSection
-              title="Security"
-              description="Manage your password, two-factor authentication, and active sessions."
+              title={messages.securityTitle}
+              description={messages.securityDescription}
             />
           ) : null}
           {activeTab === "data-privacy" ? (
             <PlaceholderSection
-              title="Data & Privacy"
-              description="Control data retention, export your data, or delete your account."
+              title={messages.dataPrivacyTitle}
+              description={messages.dataPrivacyDescription}
             />
           ) : null}
         </div>

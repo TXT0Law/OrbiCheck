@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { APPEARANCE_KEYS } from "@/lib/mock-data";
 
 const mocks = vi.hoisted(() => ({
   downloadReport: vi.fn(),
@@ -46,6 +48,10 @@ import type { ReportFormat, ReportListItem } from "@/shared/types/report";
 afterEach(() => {
   mocks.downloadReport.mockReset();
   mocks.toast.mockClear();
+});
+
+beforeEach(() => {
+  localStorage.clear();
 });
 
 function buildRow(overrides: Partial<ReportListItem> = {}): ReportListItem {
@@ -139,5 +145,21 @@ describe("ReportListTable downloads", () => {
     expect(mocks.toast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Download failed", variant: "destructive" }),
     );
+  });
+
+  it("renders report table actions and status in Chinese", () => {
+    localStorage.setItem(APPEARANCE_KEYS.language, "zh");
+
+    render(
+      <ReportListTable
+        reports={[buildRow({ format: "all", title: "中文報告" })]}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "標題" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "比較" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刪除報告" })).toBeInTheDocument();
   });
 });

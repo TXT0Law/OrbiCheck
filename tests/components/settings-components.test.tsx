@@ -44,12 +44,14 @@ describe("settings components", () => {
     render(<AppearanceSettings />);
 
     expect(document.documentElement.classList.contains("text-lg")).toBe(true);
+    expect(document.documentElement.lang).toBe("zh-TW");
 
-    fireEvent.click(screen.getByRole("button", { name: /dark/i }));
+    fireEvent.click(screen.getByRole("button", { name: /深色/i }));
     expect(setTheme).toHaveBeenCalledWith("dark");
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "en" } });
     expect(localStorage.getItem(APPEARANCE_KEYS.language)).toBe("en");
+    expect(document.documentElement.lang).toBe("en");
   });
 
   it("saves, tests, edits, and deletes API keys", () => {

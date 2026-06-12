@@ -6,6 +6,8 @@ import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import { useMonitorStore } from "@/lib/stores/monitor-store";
 import {
   parseMonitorTagInput,
@@ -18,24 +20,6 @@ import {
   type MonitorListSortDirection,
   type MonitorStatus,
 } from "@/shared/types/monitor";
-
-const STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "All statuses" },
-  { value: "up", label: "Up" },
-  { value: "down", label: "Down" },
-  { value: "degraded", label: "Degraded" },
-  { value: "paused", label: "Paused" },
-  { value: "pending", label: "Pending" },
-];
-
-const SORT_LABELS: Record<MonitorListSortField, string> = {
-  createdAt: "Created",
-  updatedAt: "Updated",
-  displayName: "Name",
-  lastCheckAt: "Last check",
-  lastResponseTimeMs: "Latency",
-  uptimePercentage: "Uptime",
-};
 
 function parseSortValue(raw: string): MonitorListSort | null {
   if (!raw) return null;
@@ -53,7 +37,19 @@ function sortToValue(sort: MonitorListSort | null): string {
 }
 
 export function MonitorFilterBar() {
+  const language = useAppearanceLanguage();
+  const dashboardMessages = getDashboardMessages(language);
+  const messages = dashboardMessages.monitor;
   const searchQuery = useMonitorStore((s) => s.searchQuery);
+  const statusOptions = [
+    { value: "", label: messages.allStatuses },
+    { value: "up", label: messages.statusUp },
+    { value: "down", label: messages.statusDown },
+    { value: "degraded", label: messages.statusDegraded },
+    { value: "paused", label: messages.statusPaused },
+    { value: "pending", label: messages.statusPending },
+  ];
+
   const setSearchQuery = useMonitorStore((s) => s.setSearchQuery);
   const statusFilter = useMonitorStore((s) => s.statusFilter);
   const setStatusFilter = useMonitorStore((s) => s.setStatusFilter);
@@ -98,7 +94,7 @@ export function MonitorFilterBar() {
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input
-          placeholder="Search by name or URL…"
+          placeholder={messages.searchPlaceholder}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="max-w-md min-h-11 border-2 border-zinc-300 text-base dark:border-zinc-600 sm:text-sm"
@@ -109,9 +105,9 @@ export function MonitorFilterBar() {
             setStatusFilter(e.target.value === "" ? null : (e.target.value as MonitorStatus))
           }
           className="min-h-11 min-w-[11rem] rounded-md border-2 border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
-          aria-label="Status filter"
+          aria-label={messages.statusFilterAria}
         >
-          {STATUS_OPTIONS.map((o) => (
+          {statusOptions.map((o) => (
             <option key={o.value || "all"} value={o.value}>
               {o.label}
             </option>
@@ -120,16 +116,16 @@ export function MonitorFilterBar() {
         <select
           value={sortToValue(sort)}
           onChange={(e) => setSort(parseSortValue(e.target.value))}
-          aria-label="Sort monitors"
+          aria-label={messages.sortAria}
           className="min-h-11 min-w-[11rem] rounded-md border-2 border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
         >
-          <option value="">Sort: default (newest)</option>
+          <option value="">{messages.sortDefault}</option>
           {MONITOR_LIST_SORT_FIELDS.flatMap((field) => [
             <option key={`${field}:desc`} value={`${field}:desc`}>
-              {SORT_LABELS[field]} ↓
+              {messages.sortLabels[field]} ↓
             </option>,
             <option key={`${field}:asc`} value={`${field}:asc`}>
-              {SORT_LABELS[field]} ↑
+              {messages.sortLabels[field]} ↑
             </option>,
           ])}
         </select>
@@ -140,10 +136,10 @@ export function MonitorFilterBar() {
         open={advancedActive}
       >
         <summary className="cursor-pointer text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-          Advanced filters
+          {messages.advancedFilters}
           {advancedActive ? (
             <span className="ml-2 text-xs font-normal text-blue-600 dark:text-blue-300">
-              active
+              {messages.active}
             </span>
           ) : null}
         </summary>
@@ -154,7 +150,7 @@ export function MonitorFilterBar() {
               htmlFor="monitor-tag-input"
               className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
             >
-              Tags
+              {messages.tags}
             </label>
             <div className="flex flex-wrap items-center gap-2">
               {tagFilters.map((tag) => (
@@ -166,7 +162,7 @@ export function MonitorFilterBar() {
                   {tag}
                   <button
                     type="button"
-                    aria-label={`Remove tag ${tag}`}
+                    aria-label={messages.removeTagAria(tag)}
                     className="ml-1 rounded p-0.5 hover:bg-zinc-200 dark:hover:bg-zinc-800"
                     onClick={() => removeTag(tag)}
                   >
@@ -191,7 +187,7 @@ export function MonitorFilterBar() {
                   }
                 }}
                 onBlur={commitTagDraft}
-                placeholder="Type tag, press Enter…"
+                placeholder={messages.tagPlaceholder}
                 className="min-h-9 max-w-xs flex-1 text-sm"
               />
             </div>
@@ -204,7 +200,7 @@ export function MonitorFilterBar() {
                   checked={tagMatch === "any"}
                   onChange={() => setTagMatch("any")}
                 />
-                Match any
+                {messages.matchAny}
               </label>
               <label className="flex items-center gap-1">
                 <input
@@ -214,7 +210,7 @@ export function MonitorFilterBar() {
                   checked={tagMatch === "all"}
                   onChange={() => setTagMatch("all")}
                 />
-                Match all
+                {messages.matchAll}
               </label>
             </div>
           </div>
@@ -224,7 +220,7 @@ export function MonitorFilterBar() {
               htmlFor="monitor-latency-max"
               className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
             >
-              Max latency (ms)
+              {messages.maxLatency}
             </label>
             <Input
               id="monitor-latency-max"
@@ -236,7 +232,7 @@ export function MonitorFilterBar() {
                 const v = e.target.value;
                 setLatencyMaxMs(v === "" ? null : Number(v));
               }}
-              placeholder="No limit"
+              placeholder={messages.noLimit}
               className="min-h-9 text-sm"
             />
 
@@ -244,7 +240,7 @@ export function MonitorFilterBar() {
               htmlFor="monitor-uptime-min"
               className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
             >
-              Min uptime (%)
+              {messages.minUptime}
             </label>
             <Input
               id="monitor-uptime-min"
@@ -257,7 +253,7 @@ export function MonitorFilterBar() {
                 const v = e.target.value;
                 setUptimeMinPercent(v === "" ? null : Number(v));
               }}
-              placeholder="No floor"
+              placeholder={messages.noFloor}
               className="min-h-9 text-sm"
             />
           </div>
@@ -274,7 +270,7 @@ export function MonitorFilterBar() {
             }}
             disabled={!advancedActive && !tagDraft}
           >
-            Reset
+            {dashboardMessages.common.reset}
           </Button>
         </div>
       </details>

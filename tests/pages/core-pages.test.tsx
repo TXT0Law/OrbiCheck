@@ -10,6 +10,7 @@ import HomePage from "@/app/page";
 
 const pushMock = vi.hoisted(() => vi.fn());
 const redirectMock = vi.hoisted(() => vi.fn());
+const languageMock = vi.hoisted(() => vi.fn(() => "en"));
 
 vi.mock("next/navigation", () => ({
   useRouter: vi.fn(() => ({
@@ -124,7 +125,7 @@ vi.mock("@/lib/hooks/use-alerts", () => ({
 }));
 
 vi.mock("@/lib/hooks/use-appearance-language", () => ({
-  useAppearanceLanguage: () => "en",
+  useAppearanceLanguage: () => languageMock(),
 }));
 
 vi.mock("next/link", () => ({
@@ -138,6 +139,7 @@ vi.mock("next/link", () => ({
 describe("core pages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    languageMock.mockReturnValue("en");
   });
 
   it("redirects home and login routes to dashboard", () => {
@@ -178,5 +180,28 @@ describe("core pages", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /profile/i }));
     expect(screen.getByText("Manage your display name, email, and avatar.")).toBeInTheDocument();
+  });
+
+  it("renders dashboard and settings in Chinese when selected", () => {
+    languageMock.mockReturnValue("zh");
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardHomePage />
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByRole("heading", { name: "儀表板" })).toBeInTheDocument();
+    expect(screen.getByText("掃描總數")).toBeInTheDocument();
+
+    render(<SettingsPage />);
+    expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
+    expect(screen.getByText("選擇偏好的配色方案。")).toBeInTheDocument();
   });
 });

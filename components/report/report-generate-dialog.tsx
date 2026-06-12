@@ -13,9 +13,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useCreateReport } from "@/lib/hooks/use-reports";
 import { useScanList } from "@/lib/hooks/use-scan-list";
 import { useMonitors } from "@/lib/hooks/use-monitors";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import type { ReportFormat, ReportPeriod } from "@/shared/types/report";
 
 interface ReportGenerateDialogProps {
@@ -32,6 +34,8 @@ export function ReportGenerateDialog({
   onOpenChange,
   presetScanId,
 }: ReportGenerateDialogProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).reports;
   const { toast } = useToast();
   const createReport = useCreateReport();
   const scansQuery = useScanList({
@@ -42,8 +46,8 @@ export function ReportGenerateDialog({
   });
   const monitorsQuery = useMonitors({ page: 1, limit: 50 });
 
-  const scans = scansQuery.data?.scans ?? [];
-  const monitors = monitorsQuery.data?.data ?? [];
+  const scans = useMemo(() => scansQuery.data?.scans ?? [], [scansQuery.data?.scans]);
+  const monitors = useMemo(() => monitorsQuery.data?.data ?? [], [monitorsQuery.data?.data]);
 
   const [scanId, setScanId] = useState("");
   const [includeMonitor, setIncludeMonitor] = useState(false);
@@ -83,16 +87,16 @@ export function ReportGenerateDialog({
   const titlePlaceholder = useMemo(() => {
     const date = new Date().toISOString().slice(0, 10);
     if (!selectedScan) {
-      return `Security Report - target - ${date}`;
+      return messages.defaultReportTitle("target", date);
     }
-    return `Security Report - ${selectedScan.domain} - ${date}`;
-  }, [selectedScan]);
+    return messages.defaultReportTitle(selectedScan.domain, date);
+  }, [messages, selectedScan]);
 
   async function handleSubmit() {
     if (!scanId) {
       toast({
-        title: "Scan required",
-        description: "Please select a completed scan first.",
+        title: messages.scanRequiredTitle,
+        description: messages.scanRequiredDescription,
         variant: "destructive",
       });
       return;
@@ -107,15 +111,15 @@ export function ReportGenerateDialog({
         title: title.trim() || undefined,
       });
       toast({
-        title: "Report queued",
-        description: `"${created.title}" is being generated.`,
+        title: messages.reportQueuedTitle,
+        description: messages.reportQueuedDescription(created.title),
       });
       onOpenChange(false);
       setTitle("");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to queue report.";
+      const message = error instanceof Error ? error.message : messages.queueReportFallback;
       toast({
-        title: "Generation failed",
+        title: messages.generationFailedTitle,
         description: message,
         variant: "destructive",
       });
@@ -126,16 +130,16 @@ export function ReportGenerateDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Generate Report</DialogTitle>
+          <DialogTitle>{messages.generateDialogTitle}</DialogTitle>
           <DialogDescription>
-            Create a server-side security assessment report from a completed scan and optional monitor data.
+            {messages.generateDialogDescription}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">
           <div className="space-y-2">
             <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100" htmlFor="report-scan">
-              Scan
+              {messages.scanLabel}
             </label>
             <select
               id="report-scan"
@@ -143,7 +147,7 @@ export function ReportGenerateDialog({
               value={scanId}
               onChange={(event) => setScanId(event.target.value)}
             >
-              <option value="">Select a completed scan</option>
+              <option value="">{messages.selectCompletedScan}</option>
               {scans.map((scan) => (
                 <option key={scan.id} value={scan.id}>
                   {scan.domain} ({scan.createdAt.slice(0, 10)})
@@ -159,14 +163,14 @@ export function ReportGenerateDialog({
                 checked={includeMonitor}
                 onChange={(event) => setIncludeMonitor(event.target.checked)}
               />
-              Include monitor summary
+              {messages.includeMonitorSummary}
             </label>
 
             {includeMonitor ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <label className="text-sm text-muted-foreground" htmlFor="report-monitor">
-                    Monitor
+                    {messages.monitorLabel}
                   </label>
                   <select
                     id="report-monitor"
@@ -174,7 +178,7 @@ export function ReportGenerateDialog({
                     value={monitorId}
                     onChange={(event) => setMonitorId(event.target.value)}
                   >
-                    <option value="">Select a monitor</option>
+                    <option value="">{messages.selectMonitor}</option>
                     {monitors.map((monitor) => (
                       <option key={monitor.id} value={monitor.id}>
                         {monitor.displayName}
@@ -184,7 +188,7 @@ export function ReportGenerateDialog({
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm text-muted-foreground" htmlFor="report-period">
-                    Period
+                    {messages.periodLabel}
                   </label>
                   <select
                     id="report-period"
@@ -206,7 +210,7 @@ export function ReportGenerateDialog({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100" htmlFor="report-format">
-                Format
+                {messages.formatLabel}
               </label>
               <select
                 id="report-format"
@@ -223,7 +227,7 @@ export function ReportGenerateDialog({
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-zinc-900 dark:text-zinc-100" htmlFor="report-title">
-                Title
+                {messages.titleLabel}
               </label>
               <Input
                 id="report-title"
@@ -237,10 +241,10 @@ export function ReportGenerateDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={createReport.isPending}>
-            Cancel
+            {messages.cancel}
           </Button>
           <Button onClick={() => void handleSubmit()} disabled={createReport.isPending || scans.length === 0}>
-            {createReport.isPending ? "Generating..." : "Generate Report"}
+            {createReport.isPending ? messages.generating : messages.generateReport}
           </Button>
         </DialogFooter>
       </DialogContent>

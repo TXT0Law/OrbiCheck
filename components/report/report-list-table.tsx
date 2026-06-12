@@ -10,7 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/use-toast";
 import { downloadReport } from "@/lib/api/reports";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useDeleteReport } from "@/lib/hooks/use-reports";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import type { ReportDownloadFormat, ReportListItem } from "@/shared/types/report";
 
 interface ReportListTableProps {
@@ -51,6 +53,8 @@ function formatBytes(value: number | null): string {
 }
 
 export function ReportListTable({ reports }: ReportListTableProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).reports;
   const { toast } = useToast();
   const deleteReportMutation = useDeleteReport();
   const [deleting, setDeleting] = useState<ReportListItem | null>(null);
@@ -63,14 +67,14 @@ export function ReportListTable({ reports }: ReportListTableProps) {
     try {
       await deleteReportMutation.mutateAsync(deleting.id);
       toast({
-        title: "Report deleted",
-        description: `"${deleting.title}" was removed.`,
+        title: messages.reportDeletedTitle,
+        description: messages.reportDeletedDescription(deleting.title),
       });
       setDeleting(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not delete the report.";
+      const message = error instanceof Error ? error.message : messages.deleteReportFallback;
       toast({
-        title: "Delete failed",
+        title: messages.deleteFailedTitle,
         description: message,
         variant: "destructive",
       });
@@ -81,9 +85,9 @@ export function ReportListTable({ reports }: ReportListTableProps) {
     try {
       await downloadReport(reportId, format);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Download failed.";
+      const message = error instanceof Error ? error.message : messages.downloadFailedFallback;
       toast({
-        title: "Download failed",
+        title: messages.downloadFailedTitle,
         description: message,
         variant: "destructive",
       });
@@ -96,13 +100,13 @@ export function ReportListTable({ reports }: ReportListTableProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Title</TableHead>
-              <TableHead>Domain</TableHead>
-              <TableHead>Format</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Size</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead>{messages.tableTitle}</TableHead>
+              <TableHead>{messages.tableDomain}</TableHead>
+              <TableHead>{messages.tableFormat}</TableHead>
+              <TableHead>{messages.tableStatus}</TableHead>
+              <TableHead>{messages.tableSize}</TableHead>
+              <TableHead>{messages.tableCreated}</TableHead>
+              <TableHead className="text-right">{messages.tableActions}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -165,14 +169,14 @@ export function ReportListTable({ reports }: ReportListTableProps) {
                       disabled={!report.scanId || !report.scanDomain}
                       title={
                         report.scanId
-                          ? "Compare against another scan of the same domain"
-                          : "Original scan deleted; compare unavailable"
+                          ? messages.compareAvailableTitle
+                          : messages.compareUnavailableTitle
                       }
                     >
-                      Compare
+                      {messages.compare}
                     </Button>
                     <Button size="sm" variant="destructive" onClick={() => setDeleting(report)}>
-                      Delete
+                      {messages.deleteReportTitle}
                     </Button>
                   </div>
                 </TableCell>
@@ -189,9 +193,11 @@ export function ReportListTable({ reports }: ReportListTableProps) {
             setDeleting(null);
           }
         }}
-        title="Delete Report"
-        description={`Are you sure you want to delete "${deleting?.title ?? "this report"}"?`}
-        confirmLabel="Delete"
+        title={messages.deleteReportTitle}
+        description={messages.deleteReportDescription(deleting?.title ?? messages.thisReport)}
+        confirmLabel={messages.deleteReportTitle}
+        cancelLabel={messages.cancel}
+        loadingLabel={messages.pleaseWait}
         confirmVariant="destructive"
         onConfirm={() => void handleDelete()}
         isLoading={deleteReportMutation.isPending}

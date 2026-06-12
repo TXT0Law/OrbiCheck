@@ -4,6 +4,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useMonitors } from "@/lib/hooks/use-monitors";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import { useMonitorSSE } from "@/lib/hooks/use-monitor-sse";
 import { useMonitorStore } from "@/lib/stores/monitor-store";
 
@@ -35,6 +37,9 @@ function readPageSize(searchParams: { get(name: string): string | null }) {
 
 export function MonitorListContent() {
   useMonitorSSE();
+  const language = useAppearanceLanguage();
+  const dashboardMessages = getDashboardMessages(language);
+  const messages = dashboardMessages.monitor;
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -145,7 +150,7 @@ export function MonitorListContent() {
   if (isError) {
     return (
       <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
-        {error instanceof Error ? error.message : "Failed to load monitors"}
+        {error instanceof Error ? error.message : messages.loadFailed}
       </div>
     );
   }
@@ -159,7 +164,7 @@ export function MonitorListContent() {
   if (isOutOfRangePage) {
     return (
       <p className="text-sm text-muted-foreground">
-        This monitor page is empty. Redirecting to the last available page...
+        {messages.emptyPageRedirect}
       </p>
     );
   }
@@ -168,7 +173,7 @@ export function MonitorListContent() {
   }
   if (rows.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">No monitors match your filters.</p>
+      <p className="text-sm text-muted-foreground">{messages.noFilterMatches}</p>
     );
   }
 
@@ -179,12 +184,12 @@ export function MonitorListContent() {
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-col gap-1 text-sm text-muted-foreground">
           <span>
-            Page {page} of {totalPages} · {total} total monitors
+            {messages.pageSummary(page, totalPages, total)}
           </span>
           <label className="flex items-center gap-2">
-            <span>Rows per page</span>
+            <span>{messages.rowsPerPage}</span>
             <select
-              aria-label="Monitor rows per page"
+              aria-label={messages.rowsPerPageAria}
               value={pageSize}
               onChange={(event) =>
                 updatePageQuery({
@@ -208,14 +213,14 @@ export function MonitorListContent() {
             onClick={() => updatePageQuery({ page: page - 1 })}
             disabled={page <= DEFAULT_PAGE || isLoading}
           >
-            Previous
+            {dashboardMessages.common.previous}
           </Button>
           <Button
             variant="outline"
             onClick={() => updatePageQuery({ page: page + 1 })}
             disabled={page >= totalPages || isLoading}
           >
-            Next
+            {dashboardMessages.common.next}
           </Button>
         </div>
       </div>

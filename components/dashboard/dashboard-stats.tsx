@@ -5,8 +5,10 @@ import { Activity, Bell, Search, Shield } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { Button } from "@/components/ui/button";
 import { useAlerts } from "@/lib/hooks/use-alerts";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useMonitors } from "@/lib/hooks/use-monitors";
 import { useScanList } from "@/lib/hooks/use-scan-list";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 
 interface DashboardStatsProps {
   className?: string;
@@ -16,6 +18,9 @@ const DASHBOARD_STALE_TIME = 30_000;
 const ALERT_LIMIT = 100;
 
 export function DashboardStats({ className }: DashboardStatsProps) {
+  const language = useAppearanceLanguage();
+  const dashboardMessages = getDashboardMessages(language);
+  const messages = dashboardMessages.overview;
   const scansQuery = useScanList(
     { page: 1, size: 5 },
     { refetchWhenActive: true, refetchWhenActiveMs: 30_000 }
@@ -52,7 +57,7 @@ export function DashboardStats({ className }: DashboardStatsProps) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           icon={<Search className="h-5 w-5" />}
-          label="Total Scans"
+          label={messages.totalScans}
           value={String(scansQuery.data?.total ?? 0)}
           href="/dashboard/scan"
           iconBgColor="bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300"
@@ -60,7 +65,7 @@ export function DashboardStats({ className }: DashboardStatsProps) {
         />
         <StatCard
           icon={<Shield className="h-5 w-5" />}
-          label="Active Monitors"
+          label={messages.activeMonitors}
           value={String(activeMonitors.length)}
           href="/dashboard/monitor"
           iconBgColor="bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300"
@@ -68,7 +73,7 @@ export function DashboardStats({ className }: DashboardStatsProps) {
         />
         <StatCard
           icon={<Activity className="h-5 w-5" />}
-          label="Avg Uptime"
+          label={messages.avgUptime}
           value={averageUptime !== null ? `${averageUptime.toFixed(1)}%` : "—"}
           href="/dashboard/monitor"
           iconBgColor="bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300"
@@ -76,7 +81,7 @@ export function DashboardStats({ className }: DashboardStatsProps) {
         />
         <StatCard
           icon={<Bell className="h-5 w-5" />}
-          label="Active Alerts"
+          label={messages.activeAlerts}
           value={String(activeAlerts)}
           href="/dashboard/alerts"
           iconBgColor={getAlertIconClasses(highestSeverity)}
@@ -86,7 +91,7 @@ export function DashboardStats({ className }: DashboardStatsProps) {
       {hasError ? (
         <div className="mt-4 flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/30">
           <p className="text-sm text-red-700 dark:text-red-200">
-            Some dashboard stats could not be refreshed. Retry to load the latest values.
+            {messages.statsRefreshError}
           </p>
           <div>
             <Button
@@ -97,7 +102,7 @@ export function DashboardStats({ className }: DashboardStatsProps) {
                 void alertsQuery.refetch();
               }}
             >
-              Retry
+              {dashboardMessages.common.retry}
             </Button>
           </div>
         </div>

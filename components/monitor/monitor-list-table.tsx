@@ -17,6 +17,8 @@ import {
   formatPercent,
 } from "@/lib/utils/monitor-formatters";
 import { useMonitorStore } from "@/lib/stores/monitor-store";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import type { Monitor } from "@/shared/types/monitor";
 import { CAPABILITY_CONFIG } from "@/shared/constants/monitor";
 
@@ -27,13 +29,15 @@ interface MonitorListTableProps {
   monitors: Monitor[];
 }
 
-function formatWhen(iso: string | null) {
-  if (!iso) return "Never";
+function formatWhen(iso: string | null, neverLabel: string) {
+  if (!iso) return neverLabel;
   const d = new Date(iso);
   return d.toLocaleString();
 }
 
 export function MonitorListTable({ monitors }: MonitorListTableProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).monitor;
   const selectedIds = useMonitorStore((s) => s.selectedMonitorIds);
   const toggleMonitorSelection = useMonitorStore((s) => s.toggleMonitorSelection);
   const selectMonitors = useMonitorStore((s) => s.selectMonitors);
@@ -66,7 +70,7 @@ export function MonitorListTable({ monitors }: MonitorListTableProps) {
               <input
                 type="checkbox"
                 aria-label={
-                  allSelected ? "Deselect all monitors" : "Select all monitors"
+                  allSelected ? messages.deselectAllAria : messages.selectAllAria
                 }
                 className="size-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:border-zinc-600"
                 checked={allSelected}
@@ -78,28 +82,28 @@ export function MonitorListTable({ monitors }: MonitorListTableProps) {
               />
             </TableHead>
             <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Name
+              {messages.tableName}
             </TableHead>
             <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              URL
+              {messages.tableUrl}
             </TableHead>
             <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Capabilities
+              {messages.tableCapabilities}
             </TableHead>
             <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Status
+              {messages.tableStatus}
             </TableHead>
             <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Last check
+              {messages.tableLastCheck}
             </TableHead>
             <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Uptime
+              {messages.tableUptime}
             </TableHead>
             <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Latency
+              {messages.tableLatency}
             </TableHead>
             <TableHead className="w-14 text-right text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Actions
+              {messages.tableActions}
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -119,7 +123,7 @@ export function MonitorListTable({ monitors }: MonitorListTableProps) {
                 <TableCell className="w-10">
                   <input
                     type="checkbox"
-                    aria-label={`Select ${m.displayName}`}
+                    aria-label={messages.selectMonitorAria(m.displayName)}
                     className="size-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:border-zinc-600"
                     checked={checked}
                     onChange={() => toggleMonitorSelection(m.id)}
@@ -151,7 +155,7 @@ export function MonitorListTable({ monitors }: MonitorListTableProps) {
                   <MonitorStatusBadge status={m.status} />
                 </TableCell>
                 <TableCell className="text-muted-foreground">
-                  {formatWhen(m.lastCheckAt)}
+                  {formatWhen(m.lastCheckAt, messages.never)}
                 </TableCell>
                 <TableCell className="text-zinc-700 dark:text-zinc-300">
                   {formatPercent(m.uptimePercentage, 1)}

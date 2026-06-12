@@ -7,7 +7,9 @@ import { TimeAgo } from "@/components/common/time-ago";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useScanList } from "@/lib/hooks/use-scan-list";
+import { getDashboardMessages } from "@/lib/i18n/dashboard";
 import type { ScanResponse } from "@/shared/types/api";
 
 interface RecentScansProps {
@@ -15,6 +17,9 @@ interface RecentScansProps {
 }
 
 export function RecentScans({ className }: RecentScansProps) {
+  const language = useAppearanceLanguage();
+  const dashboardMessages = getDashboardMessages(language);
+  const messages = dashboardMessages.overview;
   const scansQuery = useScanList(
     { page: 1, size: 5 },
     { refetchWhenActive: true, refetchWhenActiveMs: 30_000 }
@@ -28,26 +33,26 @@ export function RecentScans({ className }: RecentScansProps) {
     return (
       <Card className={className}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-lg font-semibold">Recent Scans</CardTitle>
+          <CardTitle className="text-lg font-semibold">{messages.recentScans}</CardTitle>
           <Link
             href="/dashboard/scan"
             className="text-sm text-muted-foreground transition hover:text-zinc-900 dark:hover:text-zinc-100"
           >
-            View all
+            {dashboardMessages.common.viewAll}
           </Link>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
             {scansQuery.error instanceof Error
               ? scansQuery.error.message
-              : "Failed to load scans"}
+              : messages.failedToLoadScans}
           </p>
           <button
             type="button"
             onClick={() => void scansQuery.refetch()}
             className="text-sm font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
           >
-            Retry
+            {dashboardMessages.common.retry}
           </button>
         </CardContent>
       </Card>
@@ -58,18 +63,18 @@ export function RecentScans({ className }: RecentScansProps) {
   return (
     <Card className={className}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-lg font-semibold">Recent Scans</CardTitle>
+        <CardTitle className="text-lg font-semibold">{messages.recentScans}</CardTitle>
         <Link
           href="/dashboard/scan"
           className="text-sm text-muted-foreground transition hover:text-zinc-900 dark:hover:text-zinc-100"
         >
-          View all
+          {dashboardMessages.common.viewAll}
         </Link>
       </CardHeader>
 
       <CardContent className="space-y-3">
         {scans.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No scans yet.</p>
+          <p className="text-sm text-muted-foreground">{messages.noScansYet}</p>
         ) : (
           scans.map((scan) => (
             <Link
@@ -83,14 +88,17 @@ export function RecentScans({ className }: RecentScansProps) {
                   <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">
                     {scan.domain}
                   </span>
-                  <SecurityScoreBadge securityScore={scan.securityScore} />
-                  {renderStatus(scan.status)}
+                  <SecurityScoreBadge
+                    securityScore={scan.securityScore}
+                    ariaLabel={messages.securityScoreAria}
+                  />
+                  {renderStatus(scan.status, messages)}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span>
-                    {scan.completedModules}/{scan.totalModules} modules
+                    {messages.modulesCount(scan.completedModules, scan.totalModules)}
                   </span>
-                  <span>{formatDuration(scan)}</span>
+                  <span>{formatDuration(scan, messages.durationUnavailable)}</span>
                   <TimeAgo date={scan.createdAt} />
                 </div>
               </div>
@@ -103,10 +111,13 @@ export function RecentScans({ className }: RecentScansProps) {
 }
 
 function RecentScansSkeleton({ className }: RecentScansProps) {
+  const language = useAppearanceLanguage();
+  const messages = getDashboardMessages(language).overview;
+
   return (
     <Card className={className}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-lg font-semibold">Recent Scans</CardTitle>
+        <CardTitle className="text-lg font-semibold">{messages.recentScans}</CardTitle>
         <Skeleton className="h-4 w-14" />
       </CardHeader>
       <CardContent className="space-y-3">
@@ -127,12 +138,18 @@ function RecentScansSkeleton({ className }: RecentScansProps) {
   );
 }
 
-function SecurityScoreBadge({ securityScore }: { securityScore: number | null }) {
+function SecurityScoreBadge({
+  securityScore,
+  ariaLabel,
+}: {
+  securityScore: number | null;
+  ariaLabel: (label: string) => string;
+}) {
   const label = securityScore === null ? "—" : String(Math.round(securityScore));
   return (
     <span
       className={`inline-flex h-8 w-8 items-center justify-center rounded-full border text-xs font-semibold ${getSecurityScoreClasses(securityScore)}`}
-      aria-label={`Security score ${label}`}
+      aria-label={ariaLabel(label)}
     >
       {label}
     </span>
@@ -153,17 +170,20 @@ function getSecurityScoreClasses(securityScore: number | null) {
   return "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300";
 }
 
-function renderStatus(status: ScanResponse["status"]) {
+function renderStatus(
+  status: ScanResponse["status"],
+  messages: ReturnType<typeof getDashboardMessages>["overview"],
+) {
   if (status === "completed") {
-    return <Badge variant="secondary">Completed</Badge>;
+    return <Badge variant="secondary">{messages.statusCompleted}</Badge>;
   }
   if (status === "running" || status === "pending") {
-    return <Badge variant="default">Running</Badge>;
+    return <Badge variant="default">{messages.statusRunning}</Badge>;
   }
-  return <Badge variant="destructive">Failed</Badge>;
+  return <Badge variant="destructive">{messages.statusFailed}</Badge>;
 }
 
-function formatDuration(scan: ScanResponse) {
+function formatDuration(scan: ScanResponse, unavailableLabel: string) {
   const start = scan.startedAt ?? scan.createdAt;
   const end =
     scan.completedAt ??
@@ -172,13 +192,13 @@ function formatDuration(scan: ScanResponse) {
       : null);
 
   if (!start || !end) {
-    return "Duration unavailable";
+    return unavailableLabel;
   }
 
   const startTime = new Date(start).getTime();
   const endTime = new Date(end).getTime();
   if (Number.isNaN(startTime) || Number.isNaN(endTime) || endTime < startTime) {
-    return "Duration unavailable";
+    return unavailableLabel;
   }
 
   const totalSeconds = Math.round((endTime - startTime) / 1000);
