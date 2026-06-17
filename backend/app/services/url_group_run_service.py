@@ -19,6 +19,7 @@ from app.models.url_group import (
     UrlGroupRunMemberStatus,
     UrlGroupRunStatus,
 )
+from app.services.operational_event_service import record_event
 from app.services import scan_service
 from app.services.url_group_service import get_group
 
@@ -220,6 +221,21 @@ async def create_group_run(
     )
     db.add(run)
     await db.flush()
+    await record_event(
+        db,
+        event_type="url_group_run.started",
+        status="started",
+        user_id=user_id,
+        group_id=group_id,
+        group_run_id=run.id,
+        trace_id=str(run.id),
+        details={
+            "totalMembers": len(members),
+            "concurrencyLimit": effective_limit,
+            "modules": modules,
+            "skipRecentlyScannedWithinSeconds": skip_recently_scanned_within_seconds,
+        },
+    )
 
     for member in members:
         recent_scan = await _find_recent_completed_scan(
@@ -239,12 +255,35 @@ async def create_group_run(
             )
             run.skipped_members += 1
             run.queued_members -= 1
+            await record_event(
+                db,
+                event_type="url_group_run.member_skipped",
+                status="skipped",
+                user_id=user_id,
+                target_url=member.url,
+                scan_id=recent_scan.id,
+                group_id=group_id,
+                group_run_id=run.id,
+                error_code="RECENT_SCAN_EXISTS",
+                message="Skipped because a recent completed scan exists",
+                trace_id=str(run.id),
+            )
         else:
             run_member = UrlGroupRunMember(
                 run_id=run.id,
                 group_member_id=member.id,
                 url=member.url,
                 status=UrlGroupRunMemberStatus.QUEUED,
+            )
+            await record_event(
+                db,
+                event_type="url_group_run.member_queued",
+                status="started",
+                user_id=user_id,
+                target_url=member.url,
+                group_id=group_id,
+                group_run_id=run.id,
+                trace_id=str(run.id),
             )
         db.add(run_member)
 
@@ -341,6 +380,20 @@ async def cancel_group_run(
     await recalculate_run_counts(run)
     run.status = UrlGroupRunStatus.CANCELLED
     run.completed_at = now
+    await record_event(
+        db,
+        event_type="url_group_run.cancelled",
+        status="cancelled",
+        user_id=user_id,
+        group_id=group_id,
+        group_run_id=run.id,
+        trace_id=str(run.id),
+        details={
+            "cancelledMembers": run.cancelled_members,
+            "queuedMembers": run.queued_members,
+            "runningMembers": run.running_members,
+        },
+    )
     await db.flush()
     await publish_progress_snapshot(run)
     return run
@@ -397,6 +450,21 @@ async def retry_failed_group_run(
         )
     await db.flush()
     await db.refresh(retry_run, attribute_names=["members"])
+    await record_event(
+        db,
+        event_type="url_group_run.retry_created",
+        status="retrying",
+        user_id=user_id,
+        group_id=group_id,
+        group_run_id=retry_run.id,
+        retry_count=1,
+        trace_id=str(retry_run.id),
+        details={
+            "sourceRunId": str(source_run.id),
+            "failedMembers": len(failed_members),
+            "concurrencyLimit": effective_limit,
+        },
+    )
     logger.info(
         "url_group_failed_members_retry_created",
         group_id=str(group_id),

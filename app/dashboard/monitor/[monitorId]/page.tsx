@@ -5,8 +5,10 @@ import { MonitorFirstRunGuide } from "@/components/monitor/monitor-first-run-gui
 import { MonitorIncidentsTimeline } from "@/components/monitor/monitor-incidents-timeline";
 import { MonitorOverviewSummaryStrip } from "@/components/monitor/monitor-overview-summary-strip";
 import { MonitorRecentActivity } from "@/components/monitor/monitor-recent-activity";
+import { OperationalEventsCard } from "@/components/common/operational-events-card";
 import { useMonitorDetail } from "@/components/monitor/monitor-detail-context";
 import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { useMonitorOperationalEvents } from "@/lib/hooks/use-operational-events";
 import { getMonitorDetailMessages } from "@/lib/i18n/monitor-detail";
 import { CAPABILITY_CONFIG } from "@/shared/constants/monitor";
 import { MONITOR_CAPABILITIES } from "@/shared/types/monitor";
@@ -15,6 +17,7 @@ export default function MonitorOverviewPage() {
   const lang = useAppearanceLanguage();
   const td = getMonitorDetailMessages(lang);
   const { monitor } = useMonitorDetail();
+  const eventsQuery = useMonitorOperationalEvents(monitor.id);
   const isFirstRun = monitor.totalChecks === 0;
 
   return (
@@ -55,6 +58,13 @@ export default function MonitorOverviewPage() {
           </div>
 
           <MonitorIncidentsTimeline monitorId={monitor.id} limit={5} />
+
+          <OperationalEventsCard
+            events={eventsQuery.data?.events ?? []}
+            isLoading={eventsQuery.isLoading}
+            error={eventsQuery.error}
+            emptyMessage="No monitor diagnostics recorded yet."
+          />
 
           <MonitorRecentActivity monitorId={monitor.id} />
         </>

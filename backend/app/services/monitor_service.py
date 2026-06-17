@@ -111,6 +111,7 @@ from app.services.scan_client import call_screenshot_service
 from app.services.notification_channels.lifecycle import (
     publish_monitor_lifecycle_webhook,
 )
+from app.services.operational_event_service import record_event
 from app.services.visual_change_helpers import (
     DHASH_BIT_LENGTH,
     compute_changed_blocks,
@@ -170,6 +171,7 @@ logger = structlog.get_logger(__name__)
 # `MonitorCheck.success`. When the only enabled capability is in this set and
 # no HTTP probe ran, the SSL probe outcome must drive `check.success`.
 SSL_ONLY_PROBE_REQUIRED: frozenset[str] = frozenset({"ssl_expiry"})
+SECONDS_TO_MILLISECONDS = 1000
 
 # HTTP methods that conventionally carry a request body. Phase 1.1 added the
 # `Monitor.http_body` column so probes for these methods send the configured
@@ -2098,13 +2100,37 @@ async def execute_check(
     redis: Redis | None = None,
 ) -> MonitorCheck | None:
     monitor = await db.get(Monitor, monitor_id)
-    if not monitor or not monitor.is_enabled:
+    if not monitor:
+        return None
+    if not monitor.is_enabled:
+        await record_event(
+            db,
+            event_type="monitor.check.skipped",
+            status="skipped",
+            user_id=monitor.user_id,
+            target_url=monitor.url,
+            monitor_id=monitor.id,
+            error_code="MONITOR_DISABLED",
+            message="Monitor is disabled",
+            trace_id=str(monitor.id),
+        )
         return None
 
     old_status = monitor.status
+    check_started_at = datetime.now(timezone.utc)
     thresholds = _parse_uptime_thresholds(monitor)
     enabled = set(monitor.enabled_capabilities or [])
     evaluated: list[str] = []
+    await record_event(
+        db,
+        event_type="monitor.check.started",
+        status="started",
+        user_id=monitor.user_id,
+        target_url=monitor.url,
+        monitor_id=monitor.id,
+        trace_id=str(monitor.id),
+        details={"capabilities": sorted(enabled)},
+    )
 
     check = MonitorCheck(
         monitor_id=monitor_id,
@@ -2437,6 +2463,21 @@ async def execute_check(
         select(Monitor.is_enabled).where(Monitor.id == monitor_id)
     )
     if not still_enabled:
+        await record_event(
+            db,
+            event_type="monitor.check.cancelled",
+            status="cancelled",
+            user_id=monitor.user_id,
+            target_url=monitor.url,
+            monitor_id=monitor.id,
+            duration_ms=int(
+                (datetime.now(timezone.utc) - check_started_at).total_seconds()
+                * SECONDS_TO_MILLISECONDS
+            ),
+            error_code="MONITOR_DISABLED_DURING_CHECK",
+            message="Monitor was disabled while the check was running",
+            trace_id=str(monitor.id),
+        )
         await db.delete(check)
         await db.flush()
         return None
@@ -2572,6 +2613,33 @@ async def execute_check(
         response_time_ms=check.response_time_ms,
         error_type=_error_type_to_api_label(check.error_type),
         status_transition=status_transition,
+    )
+    event_status = "failed"
+    if check.success:
+        event_status = "degraded" if new_status == MonitorStatus.DEGRADED else "succeeded"
+    await record_event(
+        db,
+        event_type="monitor.check.completed",
+        status=event_status,
+        user_id=monitor.user_id,
+        target_url=monitor.url,
+        monitor_id=monitor.id,
+        duration_ms=int(
+            (datetime.now(timezone.utc) - check_started_at).total_seconds()
+            * SECONDS_TO_MILLISECONDS
+        ),
+        error_code=_error_type_to_api_label(check.error_type),
+        message=check.error_message,
+        trace_id=str(monitor.id),
+        details={
+            "checkId": str(check.id),
+            "statusCode": check.status_code,
+            "responseTimeMs": check.response_time_ms,
+            "evaluatedCapabilities": evaluated,
+            "previousStatus": old_status.value,
+            "currentStatus": new_status.value,
+            "contentChanged": check.content_changed,
+        },
     )
 
     checked_at = check.checked_at or datetime.now(timezone.utc)

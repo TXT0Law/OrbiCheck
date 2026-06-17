@@ -17,6 +17,7 @@ from app.models.url_group import (
     UrlGroupRunMemberStatus,
     UrlGroupRunStatus,
 )
+from app.models.operational_event import OperationalEvent
 from app.services import url_group_run_service
 
 
@@ -56,7 +57,16 @@ async def test_create_group_run_creates_member_rows() -> None:
     assert run.total_members == 1
     assert run.queued_members == 1
     assert run.concurrency_limit == 2
-    assert db.add.call_count == 2
+    added_events = [
+        call.args[0]
+        for call in db.add.call_args_list
+        if isinstance(call.args[0], OperationalEvent)
+    ]
+    assert {event.event_type for event in added_events} == {
+        "url_group_run.started",
+        "url_group_run.member_queued",
+    }
+    assert any(isinstance(call.args[0], UrlGroupRunMember) for call in db.add.call_args_list)
 
 
 @pytest.mark.unit

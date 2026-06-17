@@ -5,6 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.common import SuccessResponse
+from app.api.v1.schemas.operational_event import OperationalEventListResponse
 from app.api.v1.schemas.report import (
     ReportCreateRequest,
     ReportListResponse,
@@ -13,7 +14,7 @@ from app.api.v1.schemas.report import (
 )
 from app.core.config import settings
 from app.core.deps import CurrentUser, get_current_user, get_db
-from app.services import report_service
+from app.services import operational_event_service, report_service
 from app.tasks.report_tasks import generate_report
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -67,6 +68,24 @@ async def get_report(
 ):
     report = await report_service.get_report(db, report_id, current_user.id)
     return SuccessResponse(data=ReportResponse.model_validate(report))
+
+
+@router.get("/{report_id}/events", response_model=SuccessResponse[OperationalEventListResponse])
+async def get_report_events(
+    report_id: uuid.UUID,
+    limit: int = Query(default=25, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    events = await operational_event_service.list_events_for_report(
+        db,
+        report_id=report_id,
+        user_id=current_user.id,
+        limit=limit,
+    )
+    return SuccessResponse(
+        data=OperationalEventListResponse(events=events)
+    )
 
 
 @router.get("/{report_id}/preview", response_model=SuccessResponse[ReportPreviewResponse])

@@ -32,6 +32,7 @@ from app.models.notification_dispatch import (
     NOTIFICATION_DISPATCH_STATUS_SUCCEEDED,
     NotificationDispatchLog,
 )
+from app.services.operational_event_service import record_event
 from app.services.notification_channels.types import (
     AlertPayload,
     ChannelDispatchResult,
@@ -90,6 +91,21 @@ async def reserve_attempt(
     )
     db.add(row)
     await db.flush()
+    await record_event(
+        db,
+        event_type="notification.delivery.attempted",
+        status="started",
+        user_id=user_id,
+        monitor_id=monitor_id,
+        retry_count=int(row.attempts or 0),
+        trace_id=str(row.id),
+        details={
+            "channelId": channel_id,
+            "eventType": payload.event_type,
+            "alertEventId": str(alert_event_id) if alert_event_id else None,
+            "dedupKey": payload.dedup_key,
+        },
+    )
     return row
 
 
@@ -117,6 +133,31 @@ async def mark_result(
         else:
             row.status = NOTIFICATION_DISPATCH_STATUS_FAILED
             row.next_attempt_at = _next_backoff_at(row.attempts, now=moment)
+    await record_event(
+        db,
+        event_type=(
+            "notification.delivery.succeeded"
+            if result.success
+            else "notification.delivery.failed"
+        ),
+        status=row.status,
+        user_id=row.user_id,
+        monitor_id=row.monitor_id,
+        duration_ms=result.latency_ms,
+        retry_count=int(row.attempts or 0),
+        error_code=None if result.success else "NOTIFICATION_DELIVERY_FAILED",
+        message=result.error,
+        trace_id=str(row.id),
+        details={
+            "channelId": row.channel_id,
+            "eventType": row.event_type,
+            "alertEventId": str(row.alert_event_id) if row.alert_event_id else None,
+            "dispatchLogId": str(row.id),
+            "nextAttemptAt": row.next_attempt_at.isoformat()
+            if row.next_attempt_at
+            else None,
+        },
+    )
     await db.flush()
     return row
 

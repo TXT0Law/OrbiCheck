@@ -91,6 +91,14 @@ vi.mock("@/lib/hooks/use-reports", () => ({
   })),
 }));
 
+vi.mock("@/lib/hooks/use-operational-events", () => ({
+  useReportOperationalEvents: vi.fn(() => ({
+    data: { events: [] },
+    isLoading: false,
+    error: null,
+  })),
+}));
+
 vi.mock("@/lib/api/reports", () => ({
   downloadReport: vi.fn(),
 }));
