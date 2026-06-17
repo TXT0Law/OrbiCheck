@@ -10,6 +10,7 @@ from app.models.monitor import (
     MonitorVisualChange,
 )
 from app.models.notification_dispatch import NotificationDispatchLog
+from app.models.operational_event import OperationalEvent
 from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.report_schedule import (
     ReportSchedule,
@@ -38,6 +39,7 @@ __all__ = [
     "MonitorVisualCapture",
     "MonitorVisualChange",
     "NotificationDispatchLog",
+    "OperationalEvent",
     "Report",
     "ReportFormat",
     "ReportSchedule",

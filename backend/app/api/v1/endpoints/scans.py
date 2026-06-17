@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.common import SuccessResponse
+from app.api.v1.schemas.operational_event import OperationalEventListResponse
 from app.api.v1.schemas.scan import (
     ScanCreateRequest,
     ScanDetailResponse,
@@ -19,7 +20,7 @@ from app.api.v1.schemas.scan import (
 from app.core.deps import CurrentUser, get_current_user, get_db
 from app.core.config import settings
 from app.core.redis import get_redis_async
-from app.services import scan_service, scan_trend
+from app.services import operational_event_service, scan_service, scan_trend
 from app.services.recommendations import generate_recommendations
 from app.services.scan_trend import (
     DEFAULT_TIMELINE_LIMIT,
@@ -302,6 +303,23 @@ async def get_scan(
     """Get a scan with all module results."""
     scan = await scan_service.get_scan(db, scan_id, current_user.id)
     return SuccessResponse(data=ScanDetailResponse.model_validate(scan))
+
+
+@router.get("/{scan_id}/events", response_model=SuccessResponse[OperationalEventListResponse])
+async def get_scan_events(
+    scan_id: uuid.UUID,
+    limit: int = Query(default=25, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List recent diagnostics for one scan."""
+    events = await operational_event_service.list_events_for_scan(
+        db,
+        scan_id=scan_id,
+        user_id=current_user.id,
+        limit=limit,
+    )
+    return SuccessResponse(data=OperationalEventListResponse(events=events))
 
 
 @router.get("/{scan_id}/modules/{module_name}")

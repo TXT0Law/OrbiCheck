@@ -10,6 +10,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.common import SuccessResponse
+from app.api.v1.schemas.operational_event import OperationalEventListResponse
 from app.api.v1.schemas.monitor import (
     MaintenanceRecurrenceSpec,
     MaintenanceWindowResponse,
@@ -40,6 +41,7 @@ from app.services import (
     dns_monitor_service,
     maintenance_window_service,
     monitor_service,
+    operational_event_service,
 )
 
 router = APIRouter(prefix="/monitors", tags=["monitors"])
@@ -185,6 +187,22 @@ async def get_monitor(
 ):
     row = await monitor_service.get_monitor(monitor_id, current_user.id, db)
     return SuccessResponse(data=row)
+
+
+@router.get("/{monitor_id}/events", response_model=SuccessResponse[OperationalEventListResponse])
+async def get_monitor_events(
+    monitor_id: uuid.UUID,
+    limit: int = Query(default=25, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    events = await operational_event_service.list_events_for_monitor(
+        db,
+        monitor_id=monitor_id,
+        user_id=current_user.id,
+        limit=limit,
+    )
+    return SuccessResponse(data=OperationalEventListResponse(events=events))
 
 
 @router.put("/{monitor_id}", response_model=SuccessResponse[MonitorResponse])

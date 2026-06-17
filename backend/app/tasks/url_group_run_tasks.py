@@ -20,6 +20,7 @@ from app.models.url_group import (
     UrlGroupRunMemberStatus,
     UrlGroupRunStatus,
 )
+from app.services.operational_event_service import record_event_sync
 from app.services.scan_service import DEFAULT_PORT_SCAN_PROFILE, PORTS_MODULE
 from app.services.transformers import ALL_MODULES
 from app.services.url_group_run_service import GROUP_RUN_PROGRESS_REDIS_TTL_SECONDS
@@ -237,6 +238,11 @@ def process_url_group_run(
                 return {"run_id": run_id, "status": run.status.value}
 
             now = datetime.now(timezone.utc)
+            effective_options = {
+                **effective_options,
+                "urlGroupId": str(run.group_id),
+                "urlGroupRunId": str(run.id),
+            }
             db.execute(
                 update(UrlGroupRun)
                 .where(
@@ -244,6 +250,17 @@ def process_url_group_run(
                     UrlGroupRun.status == UrlGroupRunStatus.PENDING,
                 )
                 .values(status=UrlGroupRunStatus.RUNNING, started_at=now)
+            )
+            db.commit()
+            record_event_sync(
+                db,
+                event_type="url_group_run.processing_started",
+                status="started",
+                user_id=run.user_id,
+                group_id=run.group_id,
+                group_run_id=run.id,
+                trace_id=str(run.id),
+                details={"concurrencyLimit": run.concurrency_limit},
             )
             db.commit()
             db.refresh(run)
@@ -294,6 +311,18 @@ def process_url_group_run(
                             continue
                         member.status = UrlGroupRunMemberStatus.RUNNING
                         runnable.append((member, scan))
+                        record_event_sync(
+                            db,
+                            event_type="url_group_run.member_scan_started",
+                            status="started",
+                            user_id=run.user_id,
+                            target_url=member.url,
+                            scan_id=scan.id,
+                            group_id=run.group_id,
+                            group_run_id=run.id,
+                            group_run_member_id=member.id,
+                            trace_id=str(scan.id),
+                        )
                     except Exception as exc:
                         logger.exception(
                             "url_group_member_scan_create_failed run_id=%s member_id=%s",
@@ -303,6 +332,19 @@ def process_url_group_run(
                         member.status = UrlGroupRunMemberStatus.FAILED
                         member.error_message = str(exc)
                         member.completed_at = datetime.now(timezone.utc)
+                        record_event_sync(
+                            db,
+                            event_type="url_group_run.member_failed",
+                            status="failed",
+                            user_id=run.user_id,
+                            target_url=member.url,
+                            group_id=run.group_id,
+                            group_run_id=run.id,
+                            group_run_member_id=member.id,
+                            error_code="GROUP_MEMBER_SCAN_CREATE_FAILED",
+                            message=str(exc),
+                            trace_id=str(run.id),
+                        )
 
                 _recalculate_counts(run)
                 db.commit()
@@ -341,6 +383,24 @@ def process_url_group_run(
                             member.status = UrlGroupRunMemberStatus.FAILED
                             member.error_message = str(exc)
                             member.completed_at = datetime.now(timezone.utc)
+                        record_event_sync(
+                            db,
+                            event_type="url_group_run.member_completed",
+                            status=member.status.value,
+                            user_id=run.user_id,
+                            target_url=member.url,
+                            scan_id=member.scan_id,
+                            group_id=run.group_id,
+                            group_run_id=run.id,
+                            group_run_member_id=member.id,
+                            error_code=(
+                                "GROUP_MEMBER_SCAN_FAILED"
+                                if member.status == UrlGroupRunMemberStatus.FAILED
+                                else None
+                            ),
+                            message=member.error_message,
+                            trace_id=str(member.scan_id or run.id),
+                        )
                         _recalculate_counts(run)
                         db.commit()
                         _publish_progress(redis, run)
@@ -349,6 +409,23 @@ def process_url_group_run(
             db.refresh(run)
             _recalculate_counts(run)
             _finalize_run_status(run)
+            record_event_sync(
+                db,
+                event_type="url_group_run.completed",
+                status=run.status.value,
+                user_id=run.user_id,
+                group_id=run.group_id,
+                group_run_id=run.id,
+                error_code="GROUP_RUN_FAILED" if run.status == UrlGroupRunStatus.FAILED else None,
+                message=run.error_message,
+                trace_id=str(run.id),
+                details={
+                    "completedMembers": run.completed_members,
+                    "failedMembers": run.failed_members,
+                    "cancelledMembers": run.cancelled_members,
+                    "skippedMembers": run.skipped_members,
+                },
+            )
             db.commit()
             _publish_progress(redis, run)
             return {"run_id": run_id, "status": run.status.value}
@@ -365,6 +442,17 @@ def process_url_group_run(
                 run.error_message = "Group run orchestration failed"
                 run.completed_at = datetime.now(timezone.utc)
                 _recalculate_counts(run)
+                record_event_sync(
+                    db,
+                    event_type="url_group_run.failed",
+                    status="failed",
+                    user_id=run.user_id,
+                    group_id=run.group_id,
+                    group_run_id=run.id,
+                    error_code="GROUP_RUN_ORCHESTRATION_FAILED",
+                    message="Group run orchestration failed",
+                    trace_id=str(run.id),
+                )
                 db.commit()
                 _publish_progress(redis, run)
         raise

@@ -13,6 +13,37 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("@/lib/hooks/use-operational-events", () => ({
+  useUrlGroupRunOperationalEvents: () => ({
+    data: {
+      events: [
+        {
+          id: "event-1",
+          userId: 1,
+          eventType: "url_group_run.member_failed",
+          status: "failed",
+          targetUrl: "https://bad.example.com",
+          scanId: null,
+          monitorId: null,
+          reportId: null,
+          groupId: "group-1",
+          groupRunId: "run-1",
+          groupRunMemberId: "member-run-2",
+          durationMs: 1200,
+          retryCount: 1,
+          errorCode: "GROUP_MEMBER_SCAN_FAILED",
+          message: "Scan failed",
+          traceId: "trace-123456",
+          details: null,
+          createdAt: "2026-05-28T00:01:00Z",
+        },
+      ],
+    },
+    isLoading: false,
+    error: null,
+  }),
+}));
+
 function buildRun(overrides: Partial<UrlGroupRun> = {}): UrlGroupRun {
   return {
     id: "run-1",
@@ -79,7 +110,9 @@ describe("GroupRunProgress", () => {
       "href",
       "/dashboard/scan/scan-1"
     );
-    expect(screen.getByText("Scan failed")).toBeInTheDocument();
+    expect(screen.getAllByText("Scan failed").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Group Run Diagnostics")).toBeInTheDocument();
+    expect(screen.getByText(/GROUP_MEMBER_SCAN_FAILED/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry failed" }));
     expect(onRetryFailed).toHaveBeenCalledWith("run-1");

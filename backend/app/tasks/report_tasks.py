@@ -8,6 +8,7 @@ from sqlalchemy import select, update
 from app.core.celery_app import celery_app
 from app.core.redis import get_redis_sync
 from app.models.report import Report, ReportStatus
+from app.services.operational_event_service import record_event_sync
 from app.services.report_service import generate_report_artifacts_sync
 from app.tasks.scan_tasks import _get_sync_session
 
@@ -36,6 +37,18 @@ def generate_report(self, report_id: str) -> dict:
                     error_message=None,
                     celery_task_id=self.request.id,
                 )
+            )
+            record_event_sync(
+                db,
+                event_type="report.generation.started",
+                status="started",
+                user_id=report.user_id,
+                target_url=(report.report_meta or {}).get("scanUrl"),
+                scan_id=report.scan_id,
+                monitor_id=report.monitor_id,
+                report_id=report.id,
+                trace_id=str(report.id),
+                details={"taskId": self.request.id},
             )
             db.commit()
             redis.set(
@@ -89,6 +102,22 @@ def generate_report(self, report_id: str) -> dict:
                     error_message=None,
                 )
             )
+            record_event_sync(
+                db,
+                event_type="report.generated",
+                status="succeeded",
+                user_id=report.user_id,
+                target_url=(report.report_meta or {}).get("scanUrl"),
+                scan_id=report.scan_id,
+                monitor_id=report.monitor_id,
+                report_id=report.id,
+                duration_ms=None,
+                trace_id=str(report.id),
+                details={
+                    "fileSizeBytes": file_size,
+                    "format": report.format.value,
+                },
+            )
             db.commit()
 
             redis.set(
@@ -119,6 +148,9 @@ def generate_report(self, report_id: str) -> dict:
         )
         redis.expire(progress_key, 3600)
         with _get_sync_session() as db:
+            failed_report = db.execute(
+                select(Report).where(Report.id == uuid.UUID(report_id))
+            ).scalar_one_or_none()
             db.execute(
                 update(Report)
                 .where(Report.id == uuid.UUID(report_id))
@@ -128,6 +160,20 @@ def generate_report(self, report_id: str) -> dict:
                     completed_at=datetime.now(timezone.utc),
                 )
             )
+            if failed_report is not None:
+                record_event_sync(
+                    db,
+                    event_type="report.failed",
+                    status="failed",
+                    user_id=failed_report.user_id,
+                    target_url=(failed_report.report_meta or {}).get("scanUrl"),
+                    scan_id=failed_report.scan_id,
+                    monitor_id=failed_report.monitor_id,
+                    report_id=failed_report.id,
+                    error_code="REPORT_GENERATION_FAILED",
+                    message=str(exc),
+                    trace_id=str(failed_report.id),
+                )
             db.commit()
         return {"report_id": report_id, "status": ReportStatus.FAILED.value}
     finally:

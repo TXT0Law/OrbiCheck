@@ -22,6 +22,7 @@ from app.models.monitor import Monitor, MonitorChange, MonitorCheck
 from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.services.recommendations import generate_recommendations
+from app.services.operational_event_service import record_event
 from app.services.report_charts import (
     render_module_duration_bar,
     render_score_radar,
@@ -1300,6 +1301,22 @@ async def create_report(
     )
     db.add(report)
     await db.flush()
+    await record_event(
+        db,
+        event_type="report.requested",
+        status="started",
+        user_id=user_id,
+        target_url=scan.url,
+        scan_id=request.scan_id,
+        monitor_id=request.monitor_id,
+        report_id=report.id,
+        trace_id=str(report.id),
+        details={
+            "format": request.format,
+            "monitorPeriod": request.monitor_period,
+            "scanDomain": scan.domain,
+        },
+    )
     return report
 
 

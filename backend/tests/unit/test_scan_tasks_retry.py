@@ -56,6 +56,7 @@ class _StubSession:
         self._scan_status = scan_status
         self._scan = scan
         self.executed: list[Any] = []
+        self.added: list[Any] = []
         self.commits: int = 0
         # The first status SELECT must report the pre-transition value
         # (PENDING) so execute_scan flips it to RUNNING. Every subsequent
@@ -109,6 +110,9 @@ class _StubSession:
 
     def commit(self) -> None:
         self.commits += 1
+
+    def add(self, obj: Any) -> None:
+        self.added.append(obj)
 
 
 class _StubRedis:

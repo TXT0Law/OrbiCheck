@@ -16,6 +16,7 @@ from app.services.security_analyzer import (
     compute_security_score_v2,
     resolve_security_score_for_detail,
 )
+from app.services.operational_event_service import record_event_sync
 from app.services.scan_client import call_scan_batch_sync, call_scan_module_sync
 from app.services.transformers import ALL_MODULES, MODULE_BATCHES
 from app.utils.url_safety import validate_url_safety
@@ -31,6 +32,7 @@ SCAN_PER_MODULE_RETRY_TIMEOUT_S = float(settings.SCAN_TIMEOUT_MS) / 1000.0
 # in the current batch have failed; the SSE payload exposes this so the
 # frontend can show "target may be slow / unhealthy" UX hints.
 SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD = 3
+SECONDS_TO_MILLISECONDS = 1000
 
 logger = logging.getLogger(__name__)
 sync_engine = None
@@ -63,6 +65,17 @@ def _is_scan_aborted(db: Session, scan_id: str, redis) -> bool:
 
 def _get_sync_session() -> Session:
     return Session(_get_sync_engine())
+
+
+def _coerce_uuid_option(value: object) -> uuid.UUID | None:
+    if isinstance(value, uuid.UUID):
+        return value
+    if isinstance(value, str):
+        try:
+            return uuid.UUID(value)
+        except ValueError:
+            return None
+    return None
 
 
 @celery_app.task(name="execute_scan", bind=True, max_retries=1)
@@ -132,6 +145,11 @@ def execute_scan(
                 **persisted_options,
                 **(scan_options or {}),
             }
+            group_id = _coerce_uuid_option(effective_scan_options.get("urlGroupId"))
+            group_run_id = _coerce_uuid_option(
+                effective_scan_options.get("urlGroupRunId")
+            )
+            scan_started_at = datetime.now(timezone.utc)
 
             all_raw_results: dict[str, dict | None] = {}
             selected = (
@@ -144,6 +162,42 @@ def execute_scan(
                 if selected is not None
                 else sum(len(b) for b in MODULE_BATCHES.values())
             )
+            record_event_sync(
+                db,
+                event_type="scan.started",
+                status="started",
+                user_id=scan.user_id,
+                target_url=url,
+                scan_id=scan.id,
+                group_id=group_id,
+                group_run_id=group_run_id,
+                trace_id=scan_id,
+                details={
+                    "modulesFilter": selected,
+                    "totalModules": total_modules,
+                },
+            )
+            db.commit()
+
+            def _record_scan_cancelled(reason: str) -> None:
+                record_event_sync(
+                    db,
+                    event_type="scan.cancelled",
+                    status="cancelled",
+                    user_id=scan.user_id,
+                    target_url=url,
+                    scan_id=scan.id,
+                    group_id=group_id,
+                    group_run_id=group_run_id,
+                    duration_ms=int(
+                        (datetime.now(timezone.utc) - scan_started_at).total_seconds()
+                        * SECONDS_TO_MILLISECONDS
+                    ),
+                    error_code="SCAN_CANCELLED",
+                    message=reason,
+                    trace_id=scan_id,
+                )
+                db.commit()
             completed = 0
             # S-11: aggregated failure count across batches feeds the
             # degradedTarget flag in the SSE progress payload.
@@ -157,6 +211,7 @@ def execute_scan(
             ):
                 if _is_scan_aborted(db, scan_id, redis):
                     logger.info("Scan was cancelled, stopping: scan_id=%s", scan_id)
+                    _record_scan_cancelled("Scan was cancelled before batch work")
                     return {"scan_id": scan_id, "status": ScanStatus.CANCELLED.value}
 
                 batch_modules = MODULE_BATCHES[batch_name]
@@ -193,6 +248,7 @@ def execute_scan(
                         "Scan was cancelled before batch HTTP: scan_id=%s",
                         scan_id,
                     )
+                    _record_scan_cancelled("Scan was cancelled before scan-service batch call")
                     return {"scan_id": scan_id, "status": ScanStatus.CANCELLED.value}
 
                 batch_failed_wholesale = False
@@ -238,7 +294,7 @@ def execute_scan(
                     )
                     db.commit()
 
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "Batch failed: scan_id=%s batch=%s completed=%s total=%s",
                         scan_id,
@@ -246,6 +302,21 @@ def execute_scan(
                         completed,
                         total_modules,
                     )
+                    record_event_sync(
+                        db,
+                        event_type="scan_service.batch_failed",
+                        status="retrying",
+                        user_id=scan.user_id,
+                        target_url=url,
+                        scan_id=scan.id,
+                        group_id=group_id,
+                        group_run_id=group_run_id,
+                        error_code="SCAN_SERVICE_BATCH_FAILED",
+                        message=str(exc),
+                        trace_id=scan_id,
+                        details={"batch": batch_name, "modules": modules},
+                    )
+                    db.commit()
                     batch_failed_wholesale = True
 
                 if batch_failed_wholesale:
@@ -271,6 +342,20 @@ def execute_scan(
                             )
                         )
                         db.commit()
+                        record_event_sync(
+                            db,
+                            event_type="scan_service.per_module_retry_started",
+                            status="retrying",
+                            user_id=scan.user_id,
+                            target_url=url,
+                            scan_id=scan.id,
+                            group_id=group_id,
+                            group_run_id=group_run_id,
+                            retry_count=len(pending_modules),
+                            trace_id=scan_id,
+                            details={"batch": batch_name, "modules": pending_modules},
+                        )
+                        db.commit()
                         redis.set(
                             progress_key,
                             json.dumps(
@@ -288,8 +373,11 @@ def execute_scan(
                                 }
                             ),
                         )
+                        retry_success_count = 0
+                        retry_failure_count = 0
                         for module_name in pending_modules:
                             if _is_scan_aborted(db, scan_id, redis):
+                                _record_scan_cancelled("Scan was cancelled during per-module retry")
                                 return {
                                     "scan_id": scan_id,
                                     "status": ScanStatus.CANCELLED.value,
@@ -306,6 +394,10 @@ def execute_scan(
                             success = bool(envelope.get("success"))
                             duration_ms = int(envelope.get("durationMs") or 0)
                             all_raw_results[module_name] = raw_data if success else None
+                            if success:
+                                retry_success_count += 1
+                            else:
+                                retry_failure_count += 1
                             if not success:
                                 target_failure_count += 1
                             error_message = None
@@ -337,6 +429,30 @@ def execute_scan(
                             )
                             completed += 1
                             db.commit()
+                        record_event_sync(
+                            db,
+                            event_type="scan_service.per_module_retry_completed",
+                            status="failed" if retry_failure_count else "succeeded",
+                            user_id=scan.user_id,
+                            target_url=url,
+                            scan_id=scan.id,
+                            group_id=group_id,
+                            group_run_id=group_run_id,
+                            retry_count=len(pending_modules),
+                            error_code=(
+                                "MODULE_RETRY_FAILED"
+                                if retry_failure_count
+                                else None
+                            ),
+                            trace_id=scan_id,
+                            details={
+                                "batch": batch_name,
+                                "retriedModules": pending_modules,
+                                "succeeded": retry_success_count,
+                                "failed": retry_failure_count,
+                            },
+                        )
+                        db.commit()
                     db.execute(
                         update(Scan)
                         .where(Scan.id == uuid.UUID(scan_id))
@@ -349,6 +465,7 @@ def execute_scan(
                         "Scan was cancelled after batch work: scan_id=%s",
                         scan_id,
                     )
+                    _record_scan_cancelled("Scan was cancelled after batch work")
                     return {"scan_id": scan_id, "status": ScanStatus.CANCELLED.value}
 
                 redis.set(
@@ -373,6 +490,7 @@ def execute_scan(
             ).scalar_one()
             if current_status == ScanStatus.CANCELLED:
                 logger.info("Scan was cancelled, skipping final update: scan_id=%s", scan_id)
+                _record_scan_cancelled("Scan was cancelled before final update")
                 return {"scan_id": scan_id, "status": ScanStatus.CANCELLED.value}
 
             success_count = sum(1 for v in all_raw_results.values() if v is not None)
@@ -406,6 +524,45 @@ def execute_scan(
                     error_message=None if success_count > 0 else "Scan failed for all modules",
                     security_score=security_score,
                 )
+            )
+            if target_failure_count >= SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD:
+                record_event_sync(
+                    db,
+                    event_type="scan_service.target_degraded",
+                    status="degraded",
+                    user_id=scan.user_id,
+                    target_url=url,
+                    scan_id=scan.id,
+                    group_id=group_id,
+                    group_run_id=group_run_id,
+                    error_code="TARGET_DEGRADED",
+                    message="Multiple scan modules failed for this target",
+                    trace_id=scan_id,
+                    details={"failedModules": target_failure_count},
+                )
+            record_event_sync(
+                db,
+                event_type="scan.completed",
+                status=final_status.value,
+                user_id=scan.user_id,
+                target_url=url,
+                scan_id=scan.id,
+                group_id=group_id,
+                group_run_id=group_run_id,
+                duration_ms=int(
+                    (datetime.now(timezone.utc) - scan_started_at).total_seconds()
+                    * SECONDS_TO_MILLISECONDS
+                ),
+                error_code="SCAN_FAILED" if final_status == ScanStatus.FAILED else None,
+                message=None if success_count > 0 else "Scan failed for all modules",
+                trace_id=scan_id,
+                details={
+                    "succeededModules": success_count,
+                    "totalModules": total_modules,
+                    "securityScore": security_score,
+                    "degradedTarget": target_failure_count
+                    >= SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD,
+                },
             )
             db.commit()
 
@@ -474,6 +631,24 @@ def execute_scan(
                     from_incomplete_run=True,
                 )
                 security_val = resolved_fatal.score
+                fatal_options = (
+                    scan_row.scan_options if isinstance(scan_row.scan_options, dict) else {}
+                )
+                record_event_sync(
+                    db,
+                    event_type="scan.failed",
+                    status="failed",
+                    user_id=scan_row.user_id,
+                    target_url=scan_row.url,
+                    scan_id=scan_row.id,
+                    group_id=_coerce_uuid_option(fatal_options.get("urlGroupId")),
+                    group_run_id=_coerce_uuid_option(
+                        fatal_options.get("urlGroupRunId")
+                    ),
+                    error_code="SCAN_TASK_FATAL",
+                    message="Scan failed due to an internal error",
+                    trace_id=scan_id,
+                )
 
             values: dict[str, Any] = {
                 "status": ScanStatus.FAILED,

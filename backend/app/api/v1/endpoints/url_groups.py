@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from app.api.v1.schemas.common import SuccessResponse
+from app.api.v1.schemas.operational_event import OperationalEventListResponse
 from app.api.v1.schemas.url_group import (
     UrlGroupCreateRequest,
     UrlGroupDetailResponse,
@@ -24,7 +25,7 @@ from app.core.config import settings
 from app.core.deps import CurrentUser, get_current_user, get_db
 from app.core.redis import get_redis_async
 from app.models.url_group import UrlGroupRunStatus
-from app.services import url_group_run_service, url_group_service
+from app.services import operational_event_service, url_group_run_service, url_group_service
 from app.tasks.url_group_run_tasks import process_url_group_run
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -326,6 +327,28 @@ async def cancel_group_run(
     )
     await db.commit()
     return SuccessResponse(data=_run_to_response(run))
+
+
+@router.get(
+    "/{group_id}/runs/{run_id}/events",
+    response_model=SuccessResponse[OperationalEventListResponse],
+)
+async def get_group_run_events(
+    group_id: uuid.UUID,
+    run_id: uuid.UUID,
+    limit: int = Query(default=25, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List recent diagnostics for one URL group scan run."""
+    events = await operational_event_service.list_events_for_group_run(
+        db,
+        group_id=group_id,
+        group_run_id=run_id,
+        user_id=current_user.id,
+        limit=limit,
+    )
+    return SuccessResponse(data=OperationalEventListResponse(events=events))
 
 
 @router.post(
