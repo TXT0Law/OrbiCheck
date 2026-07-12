@@ -5,9 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardLayout from "@/app/dashboard/layout";
 
 const pathnameMock = vi.hoisted(() => vi.fn(() => "/dashboard"));
+const sessionGuardMock = vi.hoisted(() => vi.fn(() => "authenticated"));
 
 vi.mock("next/navigation", () => ({
   usePathname: pathnameMock,
+}));
+
+vi.mock("@/lib/hooks/use-auth", () => ({
+  useSessionGuard: sessionGuardMock,
 }));
 
 vi.mock("@/components/alerts/alert-sse-provider", () => ({
@@ -41,6 +46,7 @@ vi.mock("@/components/ui/sheet", () => ({
 describe("dashboard layout auth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionGuardMock.mockReturnValue("authenticated");
   });
 
   it("renders the dashboard shell on top-level dashboard routes", async () => {
@@ -91,5 +97,17 @@ describe("dashboard layout auth", () => {
 
     expect(screen.queryByText("Sidebar")).not.toBeInTheDocument();
     expect(screen.queryByText("Header")).not.toBeInTheDocument();
+  });
+
+  it("does not render protected content for an unauthenticated session", () => {
+    sessionGuardMock.mockReturnValue("unauthenticated");
+
+    render(
+      <DashboardLayout>
+        <div>Protected content</div>
+      </DashboardLayout>
+    );
+
+    expect(screen.queryByText("Protected content")).not.toBeInTheDocument();
   });
 });

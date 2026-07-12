@@ -7,6 +7,7 @@ import { AlertSSEProvider } from "@/components/alerts/alert-sse-provider";
 import { Header } from "@/components/layout/header";
 import { Sidebar, SidebarContent } from "@/components/layout/sidebar";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { useSessionGuard } from "@/lib/hooks/use-auth";
 
 export default function DashboardLayout({
   children,
@@ -14,6 +15,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const sessionStatus = useSessionGuard();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const scanReservedSegments = ["groups", "new"];
@@ -26,6 +28,21 @@ export default function DashboardLayout({
   const monitorFirstSegment = monitorMatch?.[1];
   const isMonitorDetailRoute =
     !!monitorFirstSegment && monitorFirstSegment !== "new";
+
+  if (sessionStatus === "checking") {
+    return (
+      <div
+        className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground"
+        role="status"
+      >
+        Verifying session...
+      </div>
+    );
+  }
+
+  if (sessionStatus === "unauthenticated") {
+    return null;
+  }
 
   if (isScanDetailRoute || isMonitorDetailRoute) {
     return (

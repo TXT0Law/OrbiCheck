@@ -142,12 +142,12 @@ describe("core pages", () => {
     languageMock.mockReturnValue("en");
   });
 
-  it("redirects home and login routes to dashboard", () => {
+  it("redirects the home route and renders the login page", () => {
     HomePage();
     expect(redirectMock).toHaveBeenCalledWith("/dashboard");
 
-    LoginPage();
-    expect(redirectMock).toHaveBeenCalledWith("/dashboard");
+    render(<LoginPage />);
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
   });
 
   it("dashboard page renders key sections", () => {

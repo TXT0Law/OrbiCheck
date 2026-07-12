@@ -13,7 +13,7 @@ test.describe("Connected URL groups workflow", () => {
       page.getByRole("heading", { name: "URL Groups", exact: true })
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "New Group" }).click();
+    await page.getByRole("button", { name: "New Group" }).first().click();
     await page.getByLabel("Name *").fill(groupName);
     await page.getByRole("button", { name: "Create" }).click();
 

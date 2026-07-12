@@ -62,3 +62,34 @@ async def test_login_rejects_invalid_credentials(async_client, monkeypatch) -> N
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_login_returns_503_when_session_secret_is_missing(
+    async_client,
+    monkeypatch,
+) -> None:
+    fake_session = SimpleNamespace(
+        user_id=1,
+        email="admin@orbicheck.local",
+        csrf_token="csrf-token",
+    )
+    monkeypatch.setattr(
+        auth_endpoints,
+        "validate_login_credentials",
+        lambda email, password: fake_session,
+    )
+
+    def _missing_secret(**_kwargs):
+        raise ValueError("AUTH_SESSION_SECRET is not configured")
+
+    monkeypatch.setattr(auth_endpoints, "create_session_token", _missing_secret)
+
+    response = await async_client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@orbicheck.local", "password": "secret"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AUTH_NOT_CONFIGURED"

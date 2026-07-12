@@ -8,6 +8,9 @@ import asyncpg
 import uvicorn
 
 
+LINKED_TEST_AUTH_RATE_LIMIT = "100"
+
+
 # Linked test backend defaults. Override via environment when needed.
 os.environ.setdefault(
     "DATABASE_URL",
@@ -20,6 +23,11 @@ os.environ.setdefault(
 )
 os.environ.setdefault("APP_ENV", "test-linked")
 os.environ.setdefault("DEBUG", "false")
+os.environ.setdefault("AUTH_LOGIN_EMAIL", "admin@orbicheck.local")
+os.environ.setdefault("AUTH_LOGIN_PASSWORD", "linked-test-password")
+os.environ.setdefault("AUTH_SESSION_SECRET", "linked-test-session-secret")
+os.environ.setdefault("AUTH_COOKIE_SECURE", "false")
+os.environ.setdefault("RATE_LIMIT_AUTH_REQUESTS", LINKED_TEST_AUTH_RATE_LIMIT)
 
 from app.db.base import Base
 from app.db.session import get_engine

@@ -6,6 +6,27 @@ from app.core import security
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("app_env", "enabled", "expected"),
+    [
+        ("development", True, True),
+        ("production", True, False),
+        ("development", False, False),
+    ],
+)
+def test_auth_dev_bypass_is_restricted_to_development(
+    monkeypatch: pytest.MonkeyPatch,
+    app_env: str,
+    enabled: bool,
+    expected: bool,
+) -> None:
+    monkeypatch.setattr(security.settings, "APP_ENV", app_env)
+    monkeypatch.setattr(security.settings, "AUTH_DEV_BYPASS_ENABLED", enabled)
+
+    assert security.is_auth_dev_bypass_enabled() is expected
+
+
+@pytest.mark.unit
 def test_decode_session_token_returns_user_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

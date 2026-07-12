@@ -14,7 +14,7 @@ import {
 
 import { AlertCountBadge } from "@/components/alerts/alert-count-badge";
 import OrbiCheckLogo from "@/components/icon/OrbiCheck.png";
-import { getUserEmail } from "@/lib/auth";
+import { useUserEmail } from "@/lib/hooks/use-auth";
 import { cn } from "@/lib/utils";
 
 interface NavChild {
@@ -144,7 +144,7 @@ function SidebarNavSection({
 
 export function SidebarContent({ onClose, className }: SidebarContentProps) {
   const pathname = usePathname();
-  const userEmail = getUserEmail();
+  const userEmail = useUserEmail();
   const mainItems = navItems.filter((item) => item.section !== "settings");
   const settingsItems = navItems.filter((item) => item.section === "settings");
 
