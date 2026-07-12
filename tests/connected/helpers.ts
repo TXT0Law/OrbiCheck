@@ -1,11 +1,47 @@
-import { expect, type Page } from "@playwright/test";
+import {
+  expect,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
 import { randomUUID } from "node:crypto";
 
+const CONNECTED_AUTH_EMAIL = "admin@orbicheck.local";
+const CONNECTED_AUTH_PASSWORD = "linked-test-password";
+const CSRF_COOKIE_PATTERN = /orbicheck_csrf=([^;]+)/;
+
+export async function authenticateRequest(
+  request: APIRequestContext,
+  apiBaseUrl = "/api/v1"
+): Promise<string> {
+  const response = await request.post(`${apiBaseUrl}/auth/login`, {
+    data: {
+      email: CONNECTED_AUTH_EMAIL,
+      password: CONNECTED_AUTH_PASSWORD,
+    },
+  });
+  expect(response.ok()).toBe(true);
+
+  const setCookieHeader = response.headers()["set-cookie"] ?? "";
+  const csrfCookie = setCookieHeader.match(CSRF_COOKIE_PATTERN)?.[1];
+  expect(csrfCookie).toBeTruthy();
+  return decodeURIComponent(csrfCookie ?? "");
+}
+
+export async function authenticate(page: Page): Promise<void> {
+  await authenticateRequest(page.request);
+}
+
 export async function openScanPage(page: Page): Promise<void> {
+  await authenticate(page);
+  await page.goto("/dashboard/scan");
+  await expect(page.getByRole("heading", { name: "Scan", exact: true })).toBeVisible();
+}
+
+export async function openScanPageWithoutBackend(page: Page): Promise<void> {
   await page.context().addCookies([
     {
       name: "orbicheck_auth",
-      value: "1",
+      value: "backend-unavailable",
       domain: "127.0.0.1",
       path: "/",
       sameSite: "Lax",
@@ -45,15 +81,7 @@ export async function startScanAndGetId(page: Page, target: string): Promise<str
 }
 
 export async function navigateTo(page: Page, path: string): Promise<void> {
-  await page.context().addCookies([
-    {
-      name: "orbicheck_auth",
-      value: "1",
-      domain: "127.0.0.1",
-      path: "/",
-      sameSite: "Lax",
-    },
-  ]);
+  await authenticate(page);
   await page.goto(path);
 }
 

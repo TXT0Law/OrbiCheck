@@ -4,6 +4,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required for production}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required for production}
       NMAP_SCANNER_URL: ${NMAP_SCANNER_URL:-}
+      AUTH_DEV_BYPASS_ENABLED: "false"
 
   celery-worker:
     environment:
@@ -16,3 +17,10 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required for production}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required for production}
       NMAP_SCANNER_URL: ${NMAP_SCANNER_URL:-}
+
+  frontend:
+    build:
+      args:
+        NEXT_PUBLIC_AUTH_DEV_BYPASS_ENABLED: "false"
+    environment:
+      NEXT_PUBLIC_AUTH_DEV_BYPASS_ENABLED: "false"

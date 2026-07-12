@@ -95,6 +95,7 @@ services:
       NMAP_SCANNER_URL: ${DOCKER_NMAP_SCANNER_URL:-http://scanner:5000}
       CORS_ORIGINS: '["http://localhost:3000","http://frontend:3000"]'
       AUTH_COOKIE_SECURE: "false"
+      AUTH_DEV_BYPASS_ENABLED: ${AUTH_DEV_BYPASS_ENABLED:-true}
       MONITOR_INLINE_DISPATCH: "false"
     ports:
       - "8000:8000"
@@ -198,10 +199,12 @@ services:
       dockerfile: docker/frontend/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_AUTH_DEV_BYPASS_ENABLED: ${NEXT_PUBLIC_AUTH_DEV_BYPASS_ENABLED:-true}
         INTERNAL_API_URL: ${INTERNAL_API_URL:-http://backend:8000}
         DISABLE_API_REWRITE: ${DISABLE_API_REWRITE:-0}
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_AUTH_DEV_BYPASS_ENABLED: ${NEXT_PUBLIC_AUTH_DEV_BYPASS_ENABLED:-true}
     ports:
       - "3000:3000"
     depends_on:

@@ -8,10 +8,16 @@ from uuid import uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.config import settings
 from app.core.deps import CurrentUser, get_current_user, get_db
+from app.core.security import create_session_token
 from app.main import create_app
 from app.models.scan import ScanStatus
 from app.services import scan_service
+
+
+TEST_SESSION_SECRET = "rate-limit-test-session-secret"
+TEST_CSRF_TOKEN = "csrf"
 
 
 class _FakeDb:
@@ -64,6 +70,7 @@ async def test_rate_limit_resets_after_window(
     monkeypatch.setattr("app.core.config.settings.RATE_LIMIT_WINDOW_SECONDS", 1)
     monkeypatch.setattr("app.core.config.settings.RATE_LIMIT_DEFAULT_REQUESTS", 1)
     monkeypatch.setattr("app.core.config.settings.RATE_LIMIT_SCAN_CREATE_REQUESTS", 1)
+    monkeypatch.setattr(settings, "AUTH_SESSION_SECRET", TEST_SESSION_SECRET)
 
     scan = SimpleNamespace(
         id=uuid4(),
@@ -105,7 +112,22 @@ async def test_rate_limit_resets_after_window(
     app.dependency_overrides[get_current_user] = _fake_user
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+    session_token = create_session_token(
+        user_id=1,
+        email="admin@orbicheck.local",
+        csrf_token=TEST_CSRF_TOKEN,
+    )
+    cookies = {
+        settings.AUTH_COOKIE_NAME: session_token,
+        settings.AUTH_CSRF_COOKIE_NAME: TEST_CSRF_TOKEN,
+    }
+    headers = {"X-CSRF-Token": TEST_CSRF_TOKEN}
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        cookies=cookies,
+        headers=headers,
+    ) as client:
         first = await client.post("/api/v1/scans", json={"url": "https://example.com"})
         second = await client.post("/api/v1/scans", json={"url": "https://example.com"})
         sleep(1.1)

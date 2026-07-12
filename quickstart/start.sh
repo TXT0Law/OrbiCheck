@@ -19,7 +19,10 @@ AUTH_LOGIN_EMAIL="${AUTH_LOGIN_EMAIL:-admin@orbicheck.local}"
 AUTH_LOGIN_PASSWORD="${AUTH_LOGIN_PASSWORD:-change-me}"
 AUTH_SESSION_SECRET="${AUTH_SESSION_SECRET:-dev-only-change-me-session-secret}"
 AUTH_COOKIE_SECURE="${AUTH_COOKIE_SECURE:-false}"
+AUTH_DEV_BYPASS_ENABLED="${AUTH_DEV_BYPASS_ENABLED:-true}"
+NEXT_PUBLIC_AUTH_DEV_BYPASS_ENABLED="${NEXT_PUBLIC_AUTH_DEV_BYPASS_ENABLED:-true}"
 export AUTH_LOGIN_EMAIL AUTH_LOGIN_PASSWORD AUTH_SESSION_SECRET AUTH_COOKIE_SECURE
+export AUTH_DEV_BYPASS_ENABLED NEXT_PUBLIC_AUTH_DEV_BYPASS_ENABLED
 # Max concurrent Celery tasks per worker process pool (prefork = this many child processes).
 # Each active scan or monitor check may hold a DB connection for the whole task; cap this on small Postgres
 # max_connections. Default 10; raise for heavier hardware or raise Postgres max_connections instead.
@@ -29,7 +32,7 @@ CELERY_WORKER_CONCURRENCY="${CELERY_WORKER_CONCURRENCY:-10}"
 : > "$PID_FILE"
 
 echo "Project root: $PROJECT_ROOT"
-echo "[AUTH] Dev login email: $AUTH_LOGIN_EMAIL"
+echo "[AUTH] Development bypass: $AUTH_DEV_BYPASS_ENABLED"
 echo "[AUTH] AUTH_COOKIE_SECURE=$AUTH_COOKIE_SECURE"
 echo ""
 

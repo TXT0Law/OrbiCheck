@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
@@ -10,6 +11,14 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
+from app.core.security import decode_session_token, is_auth_dev_bypass_enabled
+
+
+SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+CSRF_EXEMPT_PATHS = frozenset({"/api/v1/auth/login"})
+API_PATH_PREFIX = "/api/v1/"
+
+
 def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
@@ -40,6 +49,34 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 class CsrfProtectionMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable[..., Any]):
+        if (
+            is_auth_dev_bypass_enabled()
+            or request.method in SAFE_HTTP_METHODS
+            or request.url.path in CSRF_EXEMPT_PATHS
+            or not request.url.path.startswith(API_PATH_PREFIX)
+        ):
+            return await call_next(request)
+
+        session_token = request.cookies.get(settings.AUTH_COOKIE_NAME, "")
+        if not session_token:
+            return _error_response(401, "UNAUTHENTICATED", "Authentication required")
+
+        try:
+            session = decode_session_token(session_token)
+        except ValueError:
+            return _error_response(401, "UNAUTHENTICATED", "Authentication required")
+
+        csrf_cookie = request.cookies.get(settings.AUTH_CSRF_COOKIE_NAME, "")
+        csrf_header = request.headers.get("X-CSRF-Token", "")
+        tokens_match = (
+            bool(csrf_cookie)
+            and bool(csrf_header)
+            and hmac.compare_digest(csrf_cookie, csrf_header)
+            and hmac.compare_digest(session.csrf_token, csrf_header)
+        )
+        if not tokens_match:
+            return _error_response(403, "CSRF_INVALID", "CSRF token is missing or invalid")
+
         return await call_next(request)
 
 

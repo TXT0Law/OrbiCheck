@@ -6,6 +6,7 @@ import { useScanProgress } from "@/lib/hooks/use-scan-progress";
 
 type MockEventSourceInstance = {
   url: string;
+  withCredentials: boolean;
   onmessage: ((event: MessageEvent) => void) | null;
   onerror: ((event: Event) => void) | null;
   close: ReturnType<typeof vi.fn>;
@@ -16,14 +17,17 @@ const eventSources: MockEventSourceInstance[] = [];
 class MockEventSource {
   url: string;
 
+  withCredentials: boolean;
+
   onmessage: ((event: MessageEvent) => void) | null = null;
 
   onerror: ((event: Event) => void) | null = null;
 
   close = vi.fn();
 
-  constructor(url: string) {
+  constructor(url: string, options?: EventSourceInit) {
     this.url = url;
+    this.withCredentials = options?.withCredentials ?? false;
     eventSources.push(this as unknown as MockEventSourceInstance);
   }
 }
@@ -63,6 +67,7 @@ describe("useScanProgress", () => {
 
     expect(eventSources).toHaveLength(1);
     expect(eventSources[0].url).toContain("/api/v1/scans/scan-1/progress");
+    expect(eventSources[0].withCredentials).toBe(true);
 
     act(() => {
       eventSources[0].onmessage?.(

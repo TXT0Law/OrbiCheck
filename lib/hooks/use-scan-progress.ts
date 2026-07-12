@@ -55,7 +55,7 @@ export function useScanProgress({
     }
 
     const url = `${PROGRESS_BASE}/scans/${encodeURIComponent(scanId)}/progress`;
-    const source = new EventSource(url);
+    const source = new EventSource(url, { withCredentials: true });
     sourceRef.current = source;
     setError(null);
     onStreamErrorRef.current?.(null);

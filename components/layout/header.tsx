@@ -5,7 +5,7 @@ import { Menu, Moon, Sun } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 
-import { getUserEmail } from "@/lib/auth";
+import { useLogout, useUserEmail } from "@/lib/hooks/use-auth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { isAuthDevBypassEnabled } from "@/lib/auth-mode";
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -31,7 +32,9 @@ function getPageTitle(path: string): string {
 export function Header({ onMenuClick }: HeaderProps) {
   const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
-  const userEmail = getUserEmail();
+  const { isSubmitting: isLoggingOut, submit: submitLogout } = useLogout();
+  const userEmail = useUserEmail();
+  const authDevBypassEnabled = isAuthDevBypassEnabled();
 
   const initial = useMemo(() => userEmail.charAt(0).toUpperCase() || "U", [userEmail]);
   const pageTitle = getPageTitle(pathname);
@@ -67,17 +70,30 @@ export function Header({ onMenuClick }: HeaderProps) {
             {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger>
-              <Avatar>
-                <AvatarFallback>{initial}</AvatarFallback>
-              </Avatar>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <div className="px-2 py-1.5 text-sm text-muted-foreground">{userEmail}</div>
-              <DropdownMenuItem disabled>Authentication disabled</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {authDevBypassEnabled ? (
+            <Avatar aria-label="Development mode">
+              <AvatarFallback>{initial}</AvatarFallback>
+            </Avatar>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger>
+                <Avatar>
+                  <AvatarFallback>{initial}</AvatarFallback>
+                </Avatar>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">{userEmail}</div>
+                <DropdownMenuItem
+                  disabled={isLoggingOut}
+                  onClick={() => {
+                    void submitLogout();
+                  }}
+                >
+                  {isLoggingOut ? "Signing out..." : "Sign out"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
     </header>

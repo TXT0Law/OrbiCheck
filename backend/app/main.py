@@ -97,6 +97,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    app.add_middleware(CsrfProtectionMiddleware)
+    app.add_middleware(SimpleRateLimitMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
@@ -104,9 +107,6 @@ def create_app() -> FastAPI:
         allow_methods=settings.CORS_ALLOW_METHODS,
         allow_headers=settings.CORS_ALLOW_HEADERS,
     )
-    app.add_middleware(SimpleRateLimitMiddleware)
-    app.add_middleware(CsrfProtectionMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware)
 
     register_exception_handlers(app)
     app.include_router(api_v1_router, prefix="/api/v1")

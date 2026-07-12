@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     AUTH_COOKIE_SECURE: bool = True
     AUTH_COOKIE_SAMESITE: str = "strict"
     AUTH_COOKIE_DOMAIN: str | None = None
+    AUTH_DEV_BYPASS_ENABLED: bool = False
     MAX_MONITORS_PER_USER: int = 50
     MIN_MONITOR_INTERVAL_SECONDS: int = 10
     MAX_MONITOR_INTERVAL_SECONDS: int = 3600

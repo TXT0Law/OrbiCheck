@@ -48,7 +48,10 @@ def _clear_auth_cookies(response: Response) -> None:
 
 
 @router.post("/login", response_model=SuccessResponse[SessionResponse])
-async def login(body: LoginRequest, response: Response):
+async def login(
+    body: LoginRequest,
+    response: Response,
+) -> SuccessResponse[SessionResponse]:
     try:
         session = validate_login_credentials(body.email, body.password)
     except ValueError as exc:
@@ -65,11 +68,18 @@ async def login(body: LoginRequest, response: Response):
             status_code=401,
         ) from exc
 
-    session_token = create_session_token(
-        user_id=session.user_id,
-        email=session.email,
-        csrf_token=session.csrf_token,
-    )
+    try:
+        session_token = create_session_token(
+            user_id=session.user_id,
+            email=session.email,
+            csrf_token=session.csrf_token,
+        )
+    except ValueError as exc:
+        raise AppException(
+            code="AUTH_NOT_CONFIGURED",
+            message="Authentication is not configured on the server",
+            status_code=503,
+        ) from exc
     _set_auth_cookies(
         response,
         session_token=session_token,
@@ -80,8 +90,12 @@ async def login(body: LoginRequest, response: Response):
     )
 
 
-@router.post("/logout", response_model=SuccessResponse[dict])
-async def logout(response: Response):
+@router.post("/logout", response_model=SuccessResponse[dict[str, bool]])
+async def logout(
+    response: Response,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> SuccessResponse[dict[str, bool]]:
+    _ = current_user
     _clear_auth_cookies(response)
     return SuccessResponse(data={"ok": True})
 
@@ -89,7 +103,7 @@ async def logout(response: Response):
 @router.get("/session", response_model=SuccessResponse[SessionResponse])
 async def get_session(
     current_user: CurrentUser = Depends(get_current_user),
-):
+) -> SuccessResponse[SessionResponse]:
     return SuccessResponse(
         data=SessionResponse(authenticated=True, email=current_user.email)
     )

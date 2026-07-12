@@ -29,7 +29,11 @@ from app.services import operational_event_service, url_group_run_service, url_g
 from app.tasks.url_group_run_tasks import process_url_group_run
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/url-groups", tags=["url-groups"])
+router = APIRouter(
+    prefix="/url-groups",
+    tags=["url-groups"],
+    dependencies=[Depends(get_current_user)],
+)
 GROUP_RUN_PROGRESS_POLL_SECONDS = 0.5
 INLINE_GROUP_RUN_ENVS = {"development", "test-linked"}
 

@@ -11,12 +11,23 @@ from dataclasses import dataclass
 from app.core.config import settings
 
 
+DEVELOPMENT_ENVIRONMENT = "development"
+
+
 @dataclass(frozen=True, slots=True)
 class SessionData:
     user_id: int
     email: str
     csrf_token: str
     issued_at: int
+
+
+def is_auth_dev_bypass_enabled() -> bool:
+    """Return whether local auth bypass is active in a development environment."""
+    return (
+        settings.AUTH_DEV_BYPASS_ENABLED
+        and settings.APP_ENV.strip().lower() == DEVELOPMENT_ENVIRONMENT
+    )
 
 
 def _get_secret_bytes() -> bytes:
