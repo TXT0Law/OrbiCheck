@@ -4,6 +4,7 @@
  */
 
 import { createLinkedAbortController, isAbortError } from './abort.js';
+import { http } from './http.js';
 
 const normalizeTargetUrl = (url) => {
   const u = (url || '').trim();
@@ -95,7 +96,11 @@ export function technologiesFromResponseHeaders(headers) {
 
 /**
  * @param {string} targetUrl
- * @param {{ timeoutMs?: number, signal?: AbortSignal }} [options]
+ * @param {{
+ *   timeoutMs?: number,
+ *   signal?: AbortSignal,
+ *   request?: (url: string, config: object) => Promise<object>
+ * }} [options]
  */
 export async function detectTechFromHeaders(targetUrl, options = {}) {
   const url = normalizeTargetUrl(targetUrl);
@@ -104,12 +109,12 @@ export async function detectTechFromHeaders(targetUrl, options = {}) {
   }
 
   const timeoutMs = options.timeoutMs ?? 12000;
+  const request = options.request || ((requestUrl, config) => http.get(requestUrl, config));
   const { signal, cleanup } = createLinkedAbortController(options.signal, timeoutMs);
 
   try {
-    const res = await fetch(url, {
+    const res = await request(url, {
       method: 'GET',
-      redirect: 'follow',
       signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; OrbiCheck-Scan/1.0)',

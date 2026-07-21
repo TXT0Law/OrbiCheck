@@ -2,7 +2,7 @@
 // fields (Contact, Expires, Encryption, etc.).
 //
 // History:
-//   - Pre S-4 (middleReport.md): used `follow-redirects` with NO per-call
+//   - Legacy implementation used `follow-redirects` with no per-call
 //     timeout. A slow upstream would bleed into the middleware-level 60 s
 //     limit, blocking the runner for the full module budget.
 //   - S-4: switch to the shared `_common/http.js` axios instance. Each

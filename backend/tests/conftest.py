@@ -1,3 +1,4 @@
+import os
 from collections.abc import AsyncGenerator, Callable
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -12,6 +13,8 @@ from app.api.v1.router import api_v1_router
 from app.core.deps import CurrentUser, get_current_user, get_db, get_redis
 from app.core.exceptions import register_exception_handlers
 from app.models.scan import ModuleStatus, ScanStatus
+
+os.environ.setdefault("OUTBOUND_HTTP_DISABLE_DNS_PINNING", "true")
 
 
 class _FakeDbSession:

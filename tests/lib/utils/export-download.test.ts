@@ -28,7 +28,7 @@ describe("downloadFromApiGet", () => {
       set download(_value: string) {},
       set rel(_value: string) {},
     } as unknown as HTMLAnchorElement);
-    const mod = await import("@/lib/utils/export-download");
+    const mod = await import("@/lib/api/download");
 
     await mod.downloadFromApiGet("/changes/export.csv", "changes.csv");
 
@@ -56,7 +56,7 @@ describe("downloadFromApiGet", () => {
       set download(_value: string) {},
       set rel(_value: string) {},
     } as unknown as HTMLAnchorElement);
-    const mod = await import("@/lib/utils/export-download");
+    const mod = await import("@/lib/api/download");
 
     await mod.downloadFromApiGet("/reports/export.pdf", "report.pdf");
 
@@ -74,7 +74,7 @@ describe("downloadFromApiGet", () => {
         status: 500,
       }),
     );
-    const mod = await import("@/lib/utils/export-download");
+    const mod = await import("@/lib/api/download");
 
     await expect(
       mod.downloadFromApiGet("/changes/export.csv", "changes.csv"),

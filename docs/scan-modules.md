@@ -1,6 +1,9 @@
 # Scan Modules Reference
 
-The Scan Service (`backend/scan/`) contains 30+ OSINT modules. Each module is a standalone `.js` file that accepts a URL and returns structured data about the target.
+The Scan Service (`backend/scan/`) contains 34 registered OSINT modules. The
+generated [`inventory.json`](inventory.json) and
+`shared/constants/modules.ts` are the source of truth; files explicitly excluded
+by `registry.js` are not modules.
 
 ## Module Result Format
 
@@ -52,12 +55,18 @@ Each entry in `results` uses the following fields:
 
 ## Scan Service API
 
-The Scan Service runs on port 4000 and is called internally by the backend. It is not exposed to end users directly.
+The Scan Service runs on port 4000 and is called internally by the backend. It
+is not exposed to end users directly. Every route except `/health` requires the
+timestamped HMAC service signature configured through `INTERNAL_SERVICE_SECRET`.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Service health + loaded module count |
 | GET | `/api/scan/modules` | List all available module names |
+| GET | `/api/scan/config` | Read-only runtime configuration summary |
+| GET | `/metrics` | Prometheus/OpenMetrics exposition |
+| GET | `/api/scan/page-source-rendered?url=TARGET` | Monitor-only rendered DOM fetch |
+| POST | `/api/scan/screenshot` | Screenshot with browser options in the request body |
 | GET | `/api/scan/:module?url=TARGET` | Run a single module |
 | POST | `/api/scan/batch` | Run multiple modules in parallel |
 
@@ -85,7 +94,6 @@ If `modules` is omitted, all registered modules are executed.
 | `dns-server` | `dns-server.js` | Authoritative DNS server information |
 | `txt-records` | `txt-records.js` | TXT record analysis (SPF, DKIM selectors, verification tokens) |
 | `whois` | `whois.js` | WHOIS domain registration data (registrar, dates, nameservers) |
-| `trace-route` | `trace-route.js` | Network path traceroute to the target |
 | `ports` | `ports.js` | Common open port scanning |
 | `associated-hosts` | `associated-hosts.js` | Discover related hostnames sharing the same IP |
 
@@ -154,7 +162,6 @@ The following modules receive an extended timeout budget during batch execution 
 - `screenshot`
 - `tech-stack`
 - `ports`
-- `trace-route`
 - `tls`
 - `cookies`
 
@@ -183,11 +190,18 @@ export default handler;
 
 The middleware handles URL normalization, timeout racing, and error formatting. At runtime, `registry.js` calls the exported `handler` (or `default`) as an Express-compatible `(req, res)` function — the middleware bridges the two signatures.
 
-3. The module is **automatically registered** by `registry.js` on startup. Any `.js` file at the root of `backend/scan/` that is not in the exclusion list and exports a callable `handler` or `default` will be loaded. No manual registration step is needed.
+3. The module is **automatically registered** by `registry.js` on startup. Any
+   `.js` file at the root of `backend/scan/` that is not in the exclusion list
+   and exports a callable `handler` or `default` will be loaded.
 
 4. Add a test file in `backend/scan/__tests__/my-module.test.js`.
 
-5. The module key will be the filename without `.js` (e.g., `my-module`).
+5. Add the module key to `shared/constants/modules.ts` and update its frontend
+   mapping. Registry/shared synchronization tests reject drift.
+
+`trace-route.js` is retained as disabled code but intentionally excluded from
+the registry. `page-source-rendered.js` is a monitor-only route and is also not
+part of the 34-module batch registry.
 
 ### Naming Conventions
 

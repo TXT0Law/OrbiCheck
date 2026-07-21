@@ -1,15 +1,14 @@
-import https from 'https';
-import axios from 'axios';
-
+import { httpWith } from './_common/http.js';
 import middleware from './_common/middleware.js';
 
 const PAGE_SOURCE_TIMEOUT_MS = 30000;
 
-// Bypass SSL verification for OSINT (hostname mismatch, self-signed certs)
-const httpsAgent = new https.Agent({
-  rejectUnauthorized: false,
-});
 const MAX_HTML_LENGTH = 2 * 1024 * 1024; // 2MB limit
+const pageSourceHttp = httpWith({
+  timeout: PAGE_SOURCE_TIMEOUT_MS,
+  maxContentLength: MAX_HTML_LENGTH,
+  orbicheckRejectUnauthorized: false,
+});
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
@@ -41,12 +40,8 @@ const pageSourceHandler = async (url) => {
   }
 
   try {
-    const response = await axios.get(url, {
-      validateStatus: () => true,
+    const response = await pageSourceHttp.get(url, {
       responseType: 'text',
-      timeout: PAGE_SOURCE_TIMEOUT_MS,
-      maxContentLength: MAX_HTML_LENGTH,
-      httpsAgent: url.startsWith('https') ? httpsAgent : undefined,
       headers: {
         'User-Agent': USER_AGENT,
         'Accept': 'text/html,application/xhtml+xml',

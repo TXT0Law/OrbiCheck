@@ -1,7 +1,27 @@
 name: orbicheck
 
+x-service-limits: &service-limits
+  init: true
+  restart: unless-stopped
+  cpus: "1.0"
+  mem_limit: 512m
+  pids_limit: 256
+  stop_grace_period: 30s
+
+x-app-hardening: &app-hardening
+  <<: *service-limits
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,mode=1777,size=256m
+
 services:
   postgres:
+    <<: *service-limits
+    mem_limit: 768m
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orbicheck}
@@ -21,6 +41,8 @@ services:
       - orbicheck
 
   redis:
+    <<: *service-limits
+    mem_limit: 256m
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     expose:
@@ -34,6 +56,11 @@ services:
       - orbicheck
 
   scan-service:
+    <<: *app-hardening
+    mem_limit: 1536m
+    pids_limit: 512
+    tmpfs:
+      - /tmp:rw,nosuid,mode=1777,size=512m
     build:
       context: .
       dockerfile: docker/scan/Dockerfile
@@ -41,6 +68,8 @@ services:
       - ./backend/scan/.env
     environment:
       SCAN_SERVICE_PORT: 4000
+      INTERNAL_SERVICE_AUTH_REQUIRED: "true"
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-orbicheck-local-internal-auth-secret-0001}
     expose:
       - "4000"
     # R-4: scan-service makes high-volume outbound DNS lookups for arbitrary
@@ -65,16 +94,20 @@ services:
       - orbicheck
 
   scanner:
+    <<: *app-hardening
     build:
       context: .
       dockerfile: docker/scanner/Dockerfile
     expose:
       - "5000"
+    environment:
+      INTERNAL_SERVICE_AUTH_REQUIRED: "true"
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-orbicheck-local-internal-auth-secret-0001}
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3)\"",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/ready', timeout=3)\"",
         ]
       interval: 10s
       timeout: 5s
@@ -83,6 +116,8 @@ services:
       - orbicheck
 
   backend:
+    <<: *app-hardening
+    mem_limit: 1024m
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
@@ -93,10 +128,13 @@ services:
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379/0}
       SCAN_SERVICE_URL: ${DOCKER_SCAN_SERVICE_URL:-http://scan-service:4000}
       NMAP_SCANNER_URL: ${DOCKER_NMAP_SCANNER_URL:-http://scanner:5000}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-orbicheck-local-internal-auth-secret-0001}
       CORS_ORIGINS: '["http://localhost:3000","http://frontend:3000"]'
       AUTH_COOKIE_SECURE: "false"
       AUTH_DEV_BYPASS_ENABLED: ${AUTH_DEV_BYPASS_ENABLED:-true}
       MONITOR_INLINE_DISPATCH: "false"
+      HOME: /tmp
+      MPLCONFIGDIR: /tmp/matplotlib
     ports:
       - "8000:8000"
     # R-4: SSRF guard (`backend/app/utils/url_safety.py`) calls
@@ -119,6 +157,9 @@ services:
       - orbicheck
 
   celery-worker:
+    <<: *app-hardening
+    mem_limit: 1024m
+    pids_limit: 512
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
@@ -130,8 +171,11 @@ services:
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379/0}
       SCAN_SERVICE_URL: ${DOCKER_SCAN_SERVICE_URL:-http://scan-service:4000}
       NMAP_SCANNER_URL: ${DOCKER_NMAP_SCANNER_URL:-http://scanner:5000}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-orbicheck-local-internal-auth-secret-0001}
       MONITOR_INLINE_DISPATCH: "false"
       CELERY_MODE: worker
+      HOME: /tmp
+      MPLCONFIGDIR: /tmp/matplotlib
     # R-4: Celery worker calls `validate_url_safety` (DNS lookup) before
     # dispatching scan modules — same fix as the backend service.
     dns:
@@ -150,7 +194,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import pathlib, sys; sys.exit(0 if 'worker' in pathlib.Path('/proc/1/cmdline').read_text() else 1)\"",
+          "celery -A app.core.celery_app.celery_app inspect ping --destination celery@$$(hostname) --timeout 5 >/dev/null",
         ]
       interval: 15s
       timeout: 5s
@@ -159,6 +203,7 @@ services:
       - orbicheck
 
   celery-beat:
+    <<: *app-hardening
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
@@ -170,8 +215,12 @@ services:
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379/0}
       SCAN_SERVICE_URL: ${DOCKER_SCAN_SERVICE_URL:-http://scan-service:4000}
       NMAP_SCANNER_URL: ${DOCKER_NMAP_SCANNER_URL:-http://scanner:5000}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-orbicheck-local-internal-auth-secret-0001}
       MONITOR_INLINE_DISPATCH: "false"
       CELERY_MODE: beat
+      CELERY_BEAT_SCHEDULE_FILE: /tmp/celerybeat-schedule
+      HOME: /tmp
+      MPLCONFIGDIR: /tmp/matplotlib
     depends_on:
       postgres:
         condition: service_healthy
@@ -185,7 +234,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import pathlib, sys; sys.exit(0 if 'beat' in pathlib.Path('/proc/1/cmdline').read_text() else 1)\"",
+          "python -c \"from pathlib import Path; from redis import Redis; from app.core.config import settings; Redis.from_url(settings.REDIS_URL).ping(); commands = [p.read_bytes().decode(errors='ignore') for p in Path('/proc').glob('[0-9]*/cmdline') if p.exists()]; raise SystemExit(0 if any('celery' in command and 'beat' in command for command in commands) else 1)\"",
         ]
       interval: 15s
       timeout: 5s
@@ -194,6 +243,11 @@ services:
       - orbicheck
 
   frontend:
+    <<: *app-hardening
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,mode=1777,size=128m
+      - /app/.next/cache:rw,noexec,nosuid,mode=1777,size=256m
     build:
       context: .
       dockerfile: docker/frontend/Dockerfile

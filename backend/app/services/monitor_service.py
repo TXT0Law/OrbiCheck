@@ -163,6 +163,11 @@ from app.services.content_selector_extraction import (
     get_selector_extraction_config,
     validate_selectors_against_html,
 )
+from app.services.outbound_http import (
+    OutboundRequestBlocked,
+    OutboundResponseTooLarge,
+    request_safely,
+)
 from app.utils.url_safety import validate_url_safety
 
 logger = structlog.get_logger(__name__)
@@ -1363,22 +1368,19 @@ async def _validate_selector_extraction_if_needed(
     if snap and snap.content:
         html = snap.content
     else:
-        validate_url_safety(str(monitor.url))
-        async with httpx.AsyncClient(
+        r = await request_safely(
+            "GET",
+            str(monitor.url),
+            headers={"User-Agent": settings.MONITOR_PROBE_USER_AGENT},
             timeout=settings.MONITOR_REQUEST_TIMEOUT_S,
-            follow_redirects=True,
-            max_redirects=5,
-        ) as client:
-            r = await client.get(
-                str(monitor.url),
-                headers={"User-Agent": settings.MONITOR_PROBE_USER_AGENT},
+            max_response_bytes=settings.MONITOR_MAX_BODY_BYTES,
+        )
+        if r.status_code >= 400:
+            raise ValidationError(
+                code="SELECTOR_PROBE_HTTP",
+                message=f"Probe HTTP status {r.status_code}",
             )
-            if r.status_code >= 400:
-                raise ValidationError(
-                    code="SELECTOR_PROBE_HTTP",
-                    message=f"Probe HTTP status {r.status_code}",
-                )
-            html = r.text
+        html = r.text
     raw = html.encode("utf-8", errors="replace")
     if len(raw) > settings.MONITOR_MAX_BODY_BYTES:
         raise ValidationError(
@@ -2207,75 +2209,77 @@ async def execute_check(
             )
             rendered_dom = False
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.MONITOR_REQUEST_TIMEOUT_S,
-                follow_redirects=True,
-                max_redirects=5,
-            ) as client:
-                t0 = datetime.now(timezone.utc)
-                if "content_change" in enabled:
-                    if rendered_dom:
-                        try:
-                            response = await fetch_rendered_dom(
-                                str(monitor.url),
-                                options=get_rendered_fetch_options(
-                                    monitor.capabilities
-                                ),
-                                monitor_id=str(monitor.id),
-                            )
-                        except RenderedFetchError as exc:
-                            logger.warning(
-                                "content_change_rendered_fetch_failed",
-                                monitor_id=str(monitor.id),
-                                error=str(exc)[:300],
-                            )
-                            # Fall back to the cheap HTTP path so a transient
-                            # browser-pool issue does not blank the monitor.
-                            response = await client.request(
-                                method,
-                                monitor.url,
-                                headers=headers,
-                                content=request_body,
-                            )
-                    else:
-                        response = await client.request(
+            t0 = datetime.now(timezone.utc)
+            if "content_change" in enabled:
+                if rendered_dom:
+                    try:
+                        response = await fetch_rendered_dom(
+                            str(monitor.url),
+                            options=get_rendered_fetch_options(
+                                monitor.capabilities
+                            ),
+                            monitor_id=str(monitor.id),
+                        )
+                    except RenderedFetchError as exc:
+                        logger.warning(
+                            "content_change_rendered_fetch_failed",
+                            monitor_id=str(monitor.id),
+                            error=str(exc)[:300],
+                        )
+                        # Fall back to the safe HTTP path so a transient
+                        # browser-pool issue does not blank the monitor.
+                        response = await request_safely(
                             method,
-                            monitor.url,
+                            str(monitor.url),
                             headers=headers,
                             content=request_body,
-                        )
-                    elapsed_ms = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
-                    check.status_code = response.status_code
-                    check.response_time_ms = elapsed_ms
-                    check.success = _evaluate_probe_success(
-                        response.status_code,
-                        monitor.expected_status_code,
-                    )
-                    if check.success:
-                        await _run_content_change_capture(
-                            monitor, response, check, db, redis
+                            timeout=settings.MONITOR_REQUEST_TIMEOUT_S,
+                            max_response_bytes=settings.MONITOR_MAX_BODY_BYTES,
                         )
                 else:
-                    async with client.stream(
+                    response = await request_safely(
                         method,
-                        monitor.url,
+                        str(monitor.url),
                         headers=headers,
                         content=request_body,
-                    ) as response:
-                        check.status_code = response.status_code
-                        read_bytes = 0
-                        async for chunk in response.aiter_bytes():
-                            read_bytes += len(chunk)
-                            if read_bytes >= settings.MONITOR_PROBE_MAX_BODY_BYTES:
-                                await response.aclose()
-                                break
-                        elapsed_ms = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
-                        check.response_time_ms = elapsed_ms
-                        check.success = _evaluate_probe_success(
-                            response.status_code,
-                            monitor.expected_status_code,
-                        )
+                        timeout=settings.MONITOR_REQUEST_TIMEOUT_S,
+                        max_response_bytes=settings.MONITOR_MAX_BODY_BYTES,
+                    )
+                elapsed_ms = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
+                check.status_code = response.status_code
+                check.response_time_ms = elapsed_ms
+                check.success = _evaluate_probe_success(
+                    response.status_code,
+                    monitor.expected_status_code,
+                )
+                if check.success:
+                    await _run_content_change_capture(
+                        monitor, response, check, db, redis
+                    )
+            else:
+                response = await request_safely(
+                    method,
+                    str(monitor.url),
+                    headers=headers,
+                    content=request_body,
+                    timeout=settings.MONITOR_REQUEST_TIMEOUT_S,
+                    max_response_bytes=settings.MONITOR_PROBE_MAX_BODY_BYTES,
+                    truncate_response=True,
+                )
+                check.status_code = response.status_code
+                elapsed_ms = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
+                check.response_time_ms = elapsed_ms
+                check.success = _evaluate_probe_success(
+                    response.status_code,
+                    monitor.expected_status_code,
+                )
 
+        except OutboundRequestBlocked as exc:
+            check.error_type = CheckErrorType.UNKNOWN
+            check.error_message = f"Outbound target blocked: {exc}"[:500]
+        except OutboundResponseTooLarge:
+            check.error_type = CheckErrorType.CONTENT_TOO_LARGE
+            check.error_message = "Response body exceeds maximum allowed size"
         except httpx.TimeoutException:
             check.error_type = CheckErrorType.TIMEOUT
             check.error_message = "Request timed out"

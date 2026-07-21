@@ -92,14 +92,14 @@ describe("SslDetail", () => {
     expect(screen.getAllByText("github.com").length).toBeGreaterThan(0);
   });
 
-  it("renders the visual snapshot section with three chart subsections", () => {
+  it("renders the visual snapshot section with three chart subsections", async () => {
     render(<SslDetail data={FULL_DATA} />);
 
-    expect(screen.getByText("Visual Snapshot")).toBeInTheDocument();
-    expect(screen.getByText("Certificate Validity")).toBeInTheDocument();
-    expect(screen.getByText("Protocol Support Matrix")).toBeInTheDocument();
-    expect(screen.getByText("Cipher Strength Distribution")).toBeInTheDocument();
-    expect(screen.getByText("180 days remaining")).toBeInTheDocument();
+    expect(await screen.findByText("Visual Snapshot")).toBeInTheDocument();
+    expect(await screen.findByText("Certificate Validity")).toBeInTheDocument();
+    expect(await screen.findByText("Protocol Support Matrix")).toBeInTheDocument();
+    expect(await screen.findByText("Cipher Strength Distribution")).toBeInTheDocument();
+    expect(await screen.findByText("180 days remaining")).toBeInTheDocument();
   });
 
   it("renders certificate chain table when chainDetails present", () => {

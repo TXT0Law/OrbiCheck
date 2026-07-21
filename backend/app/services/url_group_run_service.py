@@ -45,6 +45,10 @@ TERMINAL_SCAN_STATUSES = (
 )
 
 
+def is_run_terminal(run: UrlGroupRun) -> bool:
+    return run.status in TERMINAL_GROUP_RUN_STATUSES
+
+
 def _progress_key(run_id: uuid.UUID | str) -> str:
     return f"url-group-run:{run_id}:progress"
 

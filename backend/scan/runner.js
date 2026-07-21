@@ -106,8 +106,7 @@ export async function runModule({
       hostLimiter.run(() => {
         // B-5: only start the module timeout once the limiter slot is
         // acquired. Queue wait counts against the batch wall-clock but
-        // not against the per-module budget — see S-7 acceptance
-        // criteria in prompt_dev/middleReport.md.
+        // not against the per-module execution budget.
         startTimeout();
         if (typeof handler.runDirect === 'function') {
           return handler.runDirect(url, fakeReq, { scanOptions, signal, timeoutMs });

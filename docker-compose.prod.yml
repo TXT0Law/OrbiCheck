@@ -1,22 +1,60 @@
 services:
+  scan-service:
+    environment:
+      NODE_ENV: production
+      INTERNAL_SERVICE_AUTH_REQUIRED: "true"
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET is required for production}
+
+  scanner:
+    environment:
+      APP_ENV: production
+      INTERNAL_SERVICE_AUTH_REQUIRED: "true"
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET is required for production}
+
   backend:
     environment:
+      APP_ENV: production
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required for production}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required for production}
       NMAP_SCANNER_URL: ${NMAP_SCANNER_URL:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required for production}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required for production}
+      AUTH_LOGIN_PASSWORD: ${AUTH_LOGIN_PASSWORD:?AUTH_LOGIN_PASSWORD is required for production}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:?AUTH_SESSION_SECRET is required for production}
+      MONITOR_SECRET_ENCRYPTION_KEY: ${MONITOR_SECRET_ENCRYPTION_KEY:?MONITOR_SECRET_ENCRYPTION_KEY is required for production}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET is required for production}
+      AUTH_COOKIE_SECURE: "true"
       AUTH_DEV_BYPASS_ENABLED: "false"
 
   celery-worker:
     environment:
+      APP_ENV: production
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required for production}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required for production}
       NMAP_SCANNER_URL: ${NMAP_SCANNER_URL:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required for production}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required for production}
+      AUTH_LOGIN_PASSWORD: ${AUTH_LOGIN_PASSWORD:?AUTH_LOGIN_PASSWORD is required for production}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:?AUTH_SESSION_SECRET is required for production}
+      MONITOR_SECRET_ENCRYPTION_KEY: ${MONITOR_SECRET_ENCRYPTION_KEY:?MONITOR_SECRET_ENCRYPTION_KEY is required for production}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET is required for production}
+      AUTH_COOKIE_SECURE: "true"
+      AUTH_DEV_BYPASS_ENABLED: "false"
 
   celery-beat:
     environment:
+      APP_ENV: production
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required for production}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required for production}
       NMAP_SCANNER_URL: ${NMAP_SCANNER_URL:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required for production}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required for production}
+      AUTH_LOGIN_PASSWORD: ${AUTH_LOGIN_PASSWORD:?AUTH_LOGIN_PASSWORD is required for production}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:?AUTH_SESSION_SECRET is required for production}
+      MONITOR_SECRET_ENCRYPTION_KEY: ${MONITOR_SECRET_ENCRYPTION_KEY:?MONITOR_SECRET_ENCRYPTION_KEY is required for production}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:?INTERNAL_SERVICE_SECRET is required for production}
+      AUTH_COOKIE_SECURE: "true"
+      AUTH_DEV_BYPASS_ENABLED: "false"
 
   frontend:
     build:

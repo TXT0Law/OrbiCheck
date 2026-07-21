@@ -1,12 +1,28 @@
 "use client";
 
+import dynamic from "next/dynamic";
+
 import { useScanDetailContext } from "@/components/scan/scan-detail-context";
 import { ExecutiveSummaryCard } from "@/components/scan/summary/executive-summary-card";
 import { ModuleTimelineCard } from "@/components/scan/summary/module-timeline-card";
 import { RecommendationsCard } from "@/components/scan/summary/recommendations-card";
-import { SeverityAndBreakdownSection } from "@/components/scan/summary/severity-and-breakdown-section";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+const SeverityAndBreakdownSection = dynamic(
+  () =>
+    import("@/components/scan/summary/severity-and-breakdown-section").then(
+      (module) => module.SeverityAndBreakdownSection,
+    ),
+  {
+    loading: () => (
+      <p className="text-sm text-muted-foreground" role="status">
+        Loading security charts…
+      </p>
+    ),
+    ssr: false,
+  },
+);
 
 function getCategoryStatusClass(status: "pass" | "warn" | "fail") {
   if (status === "pass") {

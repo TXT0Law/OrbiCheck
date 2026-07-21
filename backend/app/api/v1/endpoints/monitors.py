@@ -53,7 +53,7 @@ async def monitor_event_stream(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
-):
+) -> StreamingResponse:
     """SSE: Redis Pub/Sub monitor events + heartbeat."""
     row = await monitor_service.get_monitor(monitor_id, current_user.id, db)
     _ = row
@@ -72,7 +72,7 @@ async def monitor_event_stream(
 async def monitors_live_stream(
     current_user: CurrentUser = Depends(get_current_user),
     redis: Redis = Depends(get_redis),
-):
+) -> StreamingResponse:
     """SSE: all monitor events for the current user (unnamed messages for EventSource.onmessage)."""
     return StreamingResponse(
         monitor_service.stream_user_monitors_live(current_user.id, redis),
@@ -388,7 +388,7 @@ async def export_monitor_changes_csv(
     sort: str = Query("desc", pattern="^(asc|desc)$", description="Sort by detectedAt"),
     limit: int = Query(2000, ge=1, le=5000, description="Max rows (server may cap lower)"),
     db: AsyncSession = Depends(get_db),
-):
+) -> Response:
     body, filename = await monitor_service.export_monitor_changes_csv(
         monitor_id,
         current_user.id,
@@ -428,7 +428,7 @@ async def export_monitor_changes_pdf(
     sort: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(2000, ge=1, le=5000),
     db: AsyncSession = Depends(get_db),
-):
+) -> Response:
     body, filename = await monitor_service.export_monitor_changes_pdf(
         monitor_id,
         current_user.id,
@@ -469,7 +469,7 @@ async def get_snapshot_raw(
     snapshot_id: uuid.UUID,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> StreamingResponse:
     snap = await monitor_service.get_snapshot_raw_for_owner(
         monitor_id, snapshot_id, current_user.id, db
     )
@@ -581,7 +581,7 @@ async def get_visual_capture_png(
     capture_id: uuid.UUID,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> Response:
     body, _cap = await monitor_service.get_visual_capture_png_for_owner(
         monitor_id, capture_id, current_user.id, db
     )

@@ -1,13 +1,40 @@
+import { rowsToCsv, type CsvRow } from "@/lib/utils/export-csv";
+
 /**
- * GET binary/text from API with cookies and trigger download (same-origin session).
+ * GET binary/text from API with cookies and trigger a browser download.
  */
 export async function downloadFromApiGet(path: string, filename: string): Promise<void> {
   const url = getBrowserApiAbsoluteUrl(path);
-  const res = await fetch(url, { credentials: "include", method: "GET" });
-  if (!res.ok) {
-    throw new Error(`Download failed: HTTP ${res.status}`);
+  const response = await fetch(url, { credentials: "include", method: "GET" });
+  if (!response.ok) {
+    throw new Error(`Download failed: HTTP ${response.status}`);
   }
-  const blob = await res.blob();
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
+export function downloadCsv(filename: string, rows: readonly CsvRow[]): void {
+  const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
+  const csv = rowsToCsv(rows, headers);
+  downloadBlob(filename, new Blob(["\ufeff", csv], {
+    type: "text/csv;charset=utf-8",
+  }));
+}
+
+export function downloadJson(filename: string, data: unknown): void {
+  downloadBlob(
+    filename,
+    new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+  );
+}
+
+function downloadBlob(filename: string, blob: Blob): void {
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = objectUrl;

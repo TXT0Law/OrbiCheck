@@ -46,6 +46,26 @@ class WindowSummary:
     suppress_probes: bool
 
 
+def serialize_window(row: MaintenanceWindow) -> dict[str, object]:
+    """Convert an ORM row into the API-facing primitive mapping."""
+    return {
+        "id": str(row.id),
+        "user_id": row.user_id,
+        "monitor_id": str(row.monitor_id) if row.monitor_id else None,
+        "title": row.title,
+        "starts_at": row.starts_at,
+        "ends_at": row.ends_at,
+        "suppress_alerts": row.suppress_alerts,
+        "suppress_probes": row.suppress_probes,
+        "is_enabled": row.is_enabled,
+        "notes": row.notes,
+        "recurrence": row.recurrence,
+        "tag_scope": list(row.tag_scope) if row.tag_scope else None,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
 def _ensure_aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 

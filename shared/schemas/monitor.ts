@@ -693,6 +693,24 @@ export const monitorListMetaSchema = z.object({
   total: z.number().int().min(0),
 });
 
+export const alertEventSchema = z.object({
+  id: z.string(),
+  monitorId: z.string(),
+  capability: monitorCapabilityEnum,
+  eventType: z.string(),
+  severity: z.enum(["info", "warning", "critical"]),
+  thresholdConfig: z.record(z.string(), z.unknown()),
+  actualValue: z.string(),
+  message: z.string(),
+  dispatchedChannels: z.array(z.string()),
+  suppressed: z.boolean(),
+  suppressReason: z.string().nullable(),
+  createdAt: z.string(),
+  resolvedAt: z.string().nullable(),
+  acknowledgedAt: z.string().nullable(),
+  acknowledgedBy: z.string().nullable().optional(),
+});
+
 export const monitorCheckSchema = z
   .object({
     id: z.string(),

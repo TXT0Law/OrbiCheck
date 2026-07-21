@@ -18,9 +18,7 @@ from app.core.middleware import (
     SecurityHeadersMiddleware,
     SimpleRateLimitMiddleware,
 )
-from app.db.base import Base
 from app.db.session import get_engine
-from app.models import monitor, scan, url_group  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +48,6 @@ async def lifespan(app: FastAPI):
     # Startup: verify DB connection.
     async with engine.begin() as conn:
         await conn.execute(text("SELECT 1"))
-        # Ensure required tables exist in local/dev environments.
-        await conn.run_sync(Base.metadata.create_all)
 
     # Check Scan service reachability; warn if unreachable (avoids cryptic "Connection refused" later)
     try:

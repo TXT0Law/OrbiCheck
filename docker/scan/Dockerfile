@@ -6,6 +6,8 @@ FROM node:20-alpine
 ENV NODE_ENV=production
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV HOME=/tmp
+ENV XDG_CACHE_HOME=/tmp/.cache
 
 WORKDIR /app
 
@@ -23,9 +25,12 @@ RUN set -eu; \
       exit 1; \
     fi
 
-COPY backend/scan/package.json backend/scan/package-lock.json* ./
+COPY --chown=node:node backend/scan/package.json backend/scan/package-lock.json* ./
 RUN npm ci --omit=dev --ignore-scripts
-COPY backend/scan ./
+COPY --chown=node:node backend/scan ./
 
 EXPOSE 4000
+
+USER node
+
 CMD ["node", "server.js"]

@@ -1,7 +1,7 @@
 /**
  * Live integration test for the full batch pipeline (TASK-P3-6).
  *
- * Status: SKIPPED BY DEFAULT.
+ * Status: EXCLUDED FROM THE HERMITIC CONFIG.
  *
  * This test boots the real registry (loads all 34 scan modules) and runs a
  * batch scan against a real public target — `https://example.com` by default.
@@ -12,8 +12,7 @@
  * Because it makes ~30 outbound HTTP / DNS / Playwright calls, it must NEVER
  * run in `make test-osint`'s default path. To run locally:
  *
- *     SCAN_LIVE_TEST=1 SCAN_LIVE_TARGET=https://example.com \
- *       npm test -- --testPathPattern=batch.live
+ *     SCAN_LIVE_TARGET=https://example.com npm run test:live
  *
  * Recommended for CI cron job (nightly or on release tags), not per-PR.
  *
@@ -29,16 +28,11 @@ import request from 'supertest';
 import { app, setModulesForTest } from '../server.js';
 import { loadModules } from '../registry.js';
 
-const RUN_LIVE = process.env.SCAN_LIVE_TEST === '1' || process.env.SCAN_LIVE_TEST === 'true';
 const LIVE_TARGET = process.env.SCAN_LIVE_TARGET || 'https://example.com';
 const LIVE_TIMEOUT_MS = 90000;
 const SUCCESS_THRESHOLD = 0.8;
 
-// Use describe.skip when env flag is absent so the test still appears in the
-// Jest report (visible reminder that opt-in coverage exists).
-const describeOrSkip = RUN_LIVE ? describe : describe.skip;
-
-describeOrSkip('batch live integration (P3-6)', () => {
+describe('batch live integration (P3-6)', () => {
   jest.setTimeout(LIVE_TIMEOUT_MS + 5000);
 
   it(`runs every loadable module against ${LIVE_TARGET} and returns a conformant envelope`, async () => {

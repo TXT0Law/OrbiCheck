@@ -1,16 +1,33 @@
+import hashlib
+import hmac
+import logging
+import os
 import re
 import shlex
+import shutil
+import socket
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from ipaddress import ip_address
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 APP_TITLE = "OrbiCheck nmap scanner"
+logger = logging.getLogger(__name__)
+SIGNATURE_VERSION = "v1"
+INTERNAL_TIMESTAMP_HEADER = "x-orbi-timestamp"
+INTERNAL_SIGNATURE_HEADER = "x-orbi-signature"
+DEFAULT_INTERNAL_AUTH_MAX_SKEW_SECONDS = 60
+MIN_INTERNAL_SECRET_LENGTH = 32
+KNOWN_SECRET_PLACEHOLDERS = ("change-me", "replace-with", "dev-only")
+HTTP_UNAUTHORIZED = 401
+HTTP_SERVICE_UNAVAILABLE = 503
 PORT_SCAN_TIMEOUTS = {
     "quick": 60,
     "standard": 180,
@@ -18,8 +35,8 @@ PORT_SCAN_TIMEOUTS = {
 }
 PROFILE_ARGS = {
     "quick": ["-sT", "-T4", "--top-ports", "100"],
-    "standard": ["-sT", "-sV", "-O", "-T3", "--top-ports", "1000"],
-    "deep": ["-sT", "-sV", "-sC", "-O", "-A", "--traceroute", "-v", "-T3", "-p-"],
+    "standard": ["-sT", "-sV", "-T3", "--top-ports", "1000"],
+    "deep": ["-sT", "-sV", "-sC", "-v", "-T3", "-p-"],
 }
 PRIVATE_HOST_PATTERNS = (
     re.compile(r"^localhost$", re.IGNORECASE),
@@ -36,9 +53,131 @@ PRIVATE_HOST_PATTERNS = (
 app = FastAPI(title=APP_TITLE)
 
 
+@dataclass(frozen=True)
+class ResolvedTarget:
+    hostname: str
+    address: str
+
+
+def _is_internal_auth_required() -> bool:
+    return (
+        os.getenv("INTERNAL_SERVICE_AUTH_REQUIRED", "").lower() == "true"
+        or os.getenv("APP_ENV", "").lower() in {"production", "prod"}
+        or bool(os.getenv("INTERNAL_SERVICE_SECRET", "").strip())
+    )
+
+
+@app.on_event("startup")
+def validate_runtime_configuration() -> None:
+    if os.getenv("APP_ENV", "").lower() not in {"production", "prod"}:
+        return
+    secret = os.getenv("INTERNAL_SERVICE_SECRET", "").strip()
+    if len(secret) < MIN_INTERNAL_SECRET_LENGTH:
+        raise RuntimeError(
+            f"INTERNAL_SERVICE_SECRET must be at least "
+            f"{MIN_INTERNAL_SECRET_LENGTH} characters"
+        )
+    lowered = secret.lower()
+    if any(fragment in lowered for fragment in KNOWN_SECRET_PLACEHOLDERS):
+        raise RuntimeError("INTERNAL_SERVICE_SECRET contains a known placeholder")
+
+
+def _signature_payload(
+    timestamp: str,
+    method: str,
+    target: str,
+    body: bytes,
+) -> bytes:
+    body_digest = hashlib.sha256(body).hexdigest()
+    return (
+        f"{SIGNATURE_VERSION}\n{timestamp}\n{method.upper()}\n"
+        f"{target}\n{body_digest}"
+    ).encode()
+
+
+@app.middleware("http")
+async def verify_internal_auth(request: Request, call_next):
+    if request.url.path in {"/health", "/ready"} or not _is_internal_auth_required():
+        return await call_next(request)
+
+    secret = os.getenv("INTERNAL_SERVICE_SECRET", "").strip()
+    if not secret:
+        return JSONResponse(
+            status_code=HTTP_UNAUTHORIZED,
+            content={"error": "Internal authentication is not configured"},
+        )
+    timestamp_text = request.headers.get(INTERNAL_TIMESTAMP_HEADER, "")
+    signature = request.headers.get(INTERNAL_SIGNATURE_HEADER, "")
+    try:
+        timestamp = int(timestamp_text)
+    except ValueError:
+        timestamp = 0
+    max_skew = int(
+        os.getenv(
+            "INTERNAL_SERVICE_AUTH_MAX_SKEW_SECONDS",
+            str(DEFAULT_INTERNAL_AUTH_MAX_SKEW_SECONDS),
+        )
+    )
+    if abs(int(time.time()) - timestamp) > max_skew:
+        return JSONResponse(
+            status_code=HTTP_UNAUTHORIZED,
+            content={"error": "Internal authentication timestamp is invalid"},
+        )
+
+    body = await request.body()
+    target = request.url.path
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    expected_digest = hmac.new(
+        secret.encode(),
+        _signature_payload(timestamp_text, request.method, target, body),
+        hashlib.sha256,
+    ).hexdigest()
+    expected = f"{SIGNATURE_VERSION}={expected_digest}"
+    if not hmac.compare_digest(signature, expected):
+        return JSONResponse(
+            status_code=HTTP_UNAUTHORIZED,
+            content={"error": "Internal authentication signature is invalid"},
+        )
+    return await call_next(request)
+
+
+def resolve_public_target(hostname: str) -> ResolvedTarget:
+    try:
+        literal = ip_address(hostname)
+    except ValueError:
+        try:
+            records = socket.getaddrinfo(
+                hostname,
+                None,
+                socket.AF_UNSPEC,
+                socket.SOCK_STREAM,
+            )
+        except socket.gaierror as exc:
+            raise ValueError(f"Cannot resolve target hostname: {hostname}") from exc
+        addresses = list(
+            dict.fromkeys(
+                record[4][0]
+                for record in records
+                if record[4]
+            )
+        )
+    else:
+        addresses = [str(literal)]
+
+    if not addresses:
+        raise ValueError(f"Cannot resolve target hostname: {hostname}")
+    for address in addresses:
+        parsed_address = ip_address(address)
+        if not parsed_address.is_global or parsed_address.is_multicast:
+            raise ValueError(f"Target resolves to blocked network: {address}")
+    return ResolvedTarget(hostname=hostname, address=addresses[0])
+
+
 class PortScanRequest(BaseModel):
     target: str
     profile: Literal["quick", "standard", "deep"] = "quick"
+    authorization_acknowledged: bool = False
 
     @field_validator("target")
     @classmethod
@@ -49,20 +188,22 @@ class PortScanRequest(BaseModel):
 
         parsed = urlparse(raw if "://" in raw else f"https://{raw}")
         hostname = parsed.hostname or raw
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("Target credentials are not allowed")
 
         if any(pattern.search(hostname) for pattern in PRIVATE_HOST_PATTERNS):
             raise ValueError("Cannot scan private/internal addresses")
 
-        try:
-            addr = ip_address(hostname)
-        except ValueError:
-            if "." not in hostname:
-                raise ValueError("Target must be a valid hostname")
-        else:
-            if addr.is_private or addr.is_loopback or addr.is_link_local:
-                raise ValueError("Cannot scan private/internal addresses")
+        if "." not in hostname and ":" not in hostname:
+            raise ValueError("Target must be a valid hostname")
 
         return hostname
+
+    @model_validator(mode="after")
+    def validate_authorization_acknowledged(self) -> "PortScanRequest":
+        if self.authorization_acknowledged is not True:
+            raise ValueError("Explicit scan authorization is required")
+        return self
 
 
 class PortEntry(BaseModel):
@@ -136,6 +277,9 @@ class PortScanResponse(BaseModel):
     os_detection: OsDetection | None = None
     traceroute: list[TracerouteHop] = Field(default_factory=list)
     scan_stats: ScanStats | None = None
+    original_target: str
+    resolved_ip: str
+    authorization_acknowledged: bool
 
 
 @app.get("/health")
@@ -143,9 +287,29 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/ready")
+def readiness() -> dict[str, str]:
+    if shutil.which("nmap") is None:
+        raise HTTPException(
+            status_code=HTTP_SERVICE_UNAVAILABLE,
+            detail="nmap executable is unavailable",
+        )
+    return {"status": "ready"}
+
+
 @app.post("/scan/ports", response_model=PortScanResponse)
 def scan_ports(request: PortScanRequest) -> PortScanResponse:
-    command = build_nmap_command(request.target, request.profile)
+    try:
+        resolved = resolve_public_target(request.target)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    command = build_nmap_command(resolved.address, request.profile)
+    logger.info(
+        "authorized_nmap_scan target=%s resolved_ip=%s profile=%s",
+        resolved.hostname,
+        resolved.address,
+        request.profile,
+    )
     started_at = time.perf_counter()
 
     try:
@@ -184,6 +348,9 @@ def scan_ports(request: PortScanRequest) -> PortScanResponse:
         os_detection=parsed.get("os_detection"),
         traceroute=parsed.get("traceroute", []),
         scan_stats=parsed.get("scan_stats"),
+        original_target=resolved.hostname,
+        resolved_ip=resolved.address,
+        authorization_acknowledged=request.authorization_acknowledged,
     )
 
 

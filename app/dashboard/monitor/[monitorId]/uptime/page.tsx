@@ -1,15 +1,13 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Suspense } from "react";
 
 import { MonitorCapabilityDisabled } from "@/components/monitor/monitor-capability-disabled";
 import { MonitorChecksTable } from "@/components/monitor/monitor-checks-table";
 import { useMonitorDetail } from "@/components/monitor/monitor-detail-context";
-import { MonitorFailureDistribution } from "@/components/monitor/monitor-failure-distribution";
-import { MonitorLatencyChart } from "@/components/monitor/monitor-latency-chart";
 import { MonitorSloTargetBar } from "@/components/monitor/monitor-slo-target-bar";
 import { MonitorTimeRangePicker } from "@/components/monitor/monitor-time-range-picker";
-import { MonitorUptimeChart } from "@/components/monitor/monitor-uptime-chart";
 import { MonitorUptimeSummary } from "@/components/monitor/monitor-uptime-summary";
 import { MonitorUptimeThresholdsBanner } from "@/components/monitor/monitor-uptime-thresholds-banner";
 import { MonitorUptimeSkeleton } from "@/components/monitor/skeletons/monitor-uptime-skeleton";
@@ -17,6 +15,34 @@ import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useMonitorPeriod } from "@/lib/hooks/use-monitor-period";
 import { getMonitorDetailMessages } from "@/lib/i18n/monitor-detail";
 import { useMonitorUptime } from "@/lib/hooks/use-monitors";
+
+const chartLoadingFallback = () => (
+  <p className="text-sm text-muted-foreground" role="status">
+    Loading chart…
+  </p>
+);
+
+const MonitorFailureDistribution = dynamic(
+  () =>
+    import("@/components/monitor/monitor-failure-distribution").then(
+      (module) => module.MonitorFailureDistribution,
+    ),
+  { loading: chartLoadingFallback, ssr: false },
+);
+const MonitorLatencyChart = dynamic(
+  () =>
+    import("@/components/monitor/monitor-latency-chart").then(
+      (module) => module.MonitorLatencyChart,
+    ),
+  { loading: chartLoadingFallback, ssr: false },
+);
+const MonitorUptimeChart = dynamic(
+  () =>
+    import("@/components/monitor/monitor-uptime-chart").then(
+      (module) => module.MonitorUptimeChart,
+    ),
+  { loading: chartLoadingFallback, ssr: false },
+);
 
 export default function MonitorUptimePage() {
   return (

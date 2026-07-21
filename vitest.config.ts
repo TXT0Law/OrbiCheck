@@ -21,6 +21,12 @@ export default defineConfig({
         "components/ui/**",
         "lib/providers.tsx",
       ],
+      thresholds: {
+        statements: 70,
+        branches: 70,
+        functions: 60,
+        lines: 70,
+      },
     },
   },
   resolve: {

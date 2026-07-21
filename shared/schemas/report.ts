@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 import type {
+  ReportListItem,
+  ReportPreview,
+  ReportRecord,
   ReportSchedule,
   ReportScheduleCreateParams,
   ReportScheduleRun,
@@ -18,8 +21,60 @@ export const reportScheduleRunStatusSchema = z.enum([
   "failed",
 ]);
 export const reportScheduleDeliveryChannelSchema = z.enum(["email", "slack"]);
+export const reportStatusSchema = z.enum([
+  "pending",
+  "generating",
+  "completed",
+  "failed",
+]);
 
 const isoStringSchema = z.string().min(1);
+
+export const reportRecordSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  format: reportFormatSchema,
+  status: reportStatusSchema,
+  scanId: z.string().nullable(),
+  monitorId: z.string().nullable(),
+  monitorPeriod: reportPeriodSchema.nullable(),
+  fileSizeBytes: z.number().int().nullable(),
+  errorMessage: z.string().nullable(),
+  reportMeta: z.record(z.string(), z.unknown()).nullable().optional(),
+  createdAt: isoStringSchema,
+  completedAt: isoStringSchema.nullable(),
+}) satisfies z.ZodType<ReportRecord>;
+
+export const reportListItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  format: reportFormatSchema,
+  status: reportStatusSchema,
+  scanId: z.string().nullable(),
+  scanDomain: z.string().nullable(),
+  fileSizeBytes: z.number().int().nullable(),
+  createdAt: isoStringSchema,
+  completedAt: isoStringSchema.nullable(),
+}) satisfies z.ZodType<ReportListItem>;
+
+export const reportPreviewSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: reportStatusSchema,
+  contentMd: z.string(),
+  reportMeta: z.record(z.string(), z.unknown()).nullable().optional(),
+}) satisfies z.ZodType<ReportPreview>;
+
+export const reportListPayloadSchema = z.object({
+  reports: z.array(reportListItemSchema),
+});
+
+export const reportListMetaSchema = z.object({
+  page: z.number().int().min(0),
+  limit: z.number().int().min(0),
+  total: z.number().int().min(0),
+  status: reportStatusSchema.nullable().optional(),
+});
 
 export const reportScheduleRunSchema = z.object({
   id: z.string(),

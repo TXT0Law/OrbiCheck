@@ -18,7 +18,7 @@ import { SCAN_MODULES } from "@/lib/constants/scan-modules";
 import { ScanProgress } from "@/components/scan/scan-progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cancelScan, createScan, type ScanListSortBy, type ScanStatusGroup } from "@/lib/api/scans";
 import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
@@ -522,7 +522,7 @@ function ScanPageContent() {
       <Card>
         <CardHeader className="space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <CardTitle className="text-lg font-semibold">{messages.listTitle}</CardTitle>
+            <h2 className="text-lg font-semibold">{messages.listTitle}</h2>
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm text-muted-foreground">
                 {messages.resultsSummary(totalResults, isFetching)}

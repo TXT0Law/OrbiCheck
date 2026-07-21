@@ -43,4 +43,4 @@ git diff --name-only
 ## References
 
 - [AGENTS.md](../../AGENTS.md) — ownership table
-- [prompt_dev/projectprompt.md](../../prompt_dev/projectprompt.md) — agent responsibilities
+- [AGENTS.md](../../AGENTS.md) — agent responsibilities

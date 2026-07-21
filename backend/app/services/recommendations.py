@@ -3,7 +3,7 @@
 Used by both ``GET /scans/{id}/detail`` (live web summary) and
 ``services/report_service`` (offline PDF/Markdown), so users see the
 same actionable advice on the dashboard and inside downloaded reports
-(see middleReport.md G3 / T0.3).
+using stable module and severity inputs.
 
 Inputs are the transformed ``scan_detail`` dict and the pre-computed
 ``key_findings`` list. The function is pure: no DB / Celery / IO.

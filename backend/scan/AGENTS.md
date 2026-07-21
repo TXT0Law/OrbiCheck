@@ -11,7 +11,7 @@ Rules for the Node.js Express OSINT scan service at `backend/scan/`.
 ## Allowed
 
 1. Each OSINT module is a standalone `.js` file at `backend/scan/` root (flat layout).
-2. Modules return `{ success, data, error?, duration_ms }` — standard result format.
+2. Modules return `{ success, data, error?, durationMs }` — standard result format.
 3. Shared utilities go in `backend/scan/_common/`.
 4. Use ESM (`import`/`export`), not CommonJS.
 5. One module failure must never crash the batch runner — isolate errors.
@@ -35,5 +35,5 @@ make test-osint    # cd backend/scan && npm test (Jest)
 
 1. `make test-osint` exits 0.
 2. New modules have corresponding test files in `__tests__/`.
-3. Module output matches `{ success, data, error?, duration_ms }` shape.
+3. Module output matches `{ success, data, error?, durationMs }` shape.
 4. `grep -rn "require(" backend/scan/*.js` returns empty (ESM only).

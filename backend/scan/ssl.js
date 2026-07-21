@@ -1,6 +1,7 @@
 import tls from 'tls';
 
 import middleware from './_common/middleware.js';
+import { targetAddressFromRequest } from './_common/url-safety.js';
 
 const SSL_TIMEOUT_MS = parseInt(process.env.SSL_TIMEOUT_MS || '15000', 10);
 
@@ -12,13 +13,13 @@ const SSL_TIMEOUT_MS = parseInt(process.env.SSL_TIMEOUT_MS || '15000', 10);
  * @returns {Promise<{subject?: object, issuer?: object, valid_from?: string,
  *   valid_to?: string, subjectaltname?: string, error?: string}>}
  */
-const sslHandler = async (urlString) => {
+const sslHandler = async (urlString, request) => {
   const startTime = Date.now();
 
   try {
     const parsedUrl = new URL(urlString);
     const options = {
-      host: parsedUrl.hostname,
+      host: targetAddressFromRequest(request, parsedUrl.hostname),
       port: parsedUrl.port || 443,
       servername: parsedUrl.hostname,
       rejectUnauthorized: false,

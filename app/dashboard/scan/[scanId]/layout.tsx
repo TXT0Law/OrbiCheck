@@ -155,7 +155,9 @@ export default function ScanLayout({ children }: ScanLayoutProps) {
                 moduleJobs={detail.moduleJobs}
               />
             ) : null}
-            <main>{children}</main>
+            <main id="main-content" tabIndex={-1}>
+              {children}
+            </main>
           </div>
         </div>
       </div>

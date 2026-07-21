@@ -22,6 +22,8 @@ const FALLBACK_BUDGET_MS = Math.min(
   12000,
   Math.max(4000, PARENT_TIMEOUT_MS - WORKER_BUDGET_MS - 2000),
 );
+const WAPPALYZER_BROWSER_ENABLED = process.env.NODE_ENV === 'test'
+  || process.env.WAPPALYZER_BROWSER_NETWORK_ISOLATED === 'true';
 
 /**
  * Run Wappalyzer in an isolated child process to prevent crashes
@@ -39,7 +41,7 @@ const FALLBACK_BUDGET_MS = Math.min(
 const techStackHandler = async (url, request) => {
   const signal = getRequestSignal(request);
   throwIfAborted(signal);
-  const result = await new Promise((resolve) => {
+  const result = WAPPALYZER_BROWSER_ENABLED ? await new Promise((resolve) => {
     const child = fork(WORKER_PATH, [url], {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
       env: {
@@ -122,7 +124,10 @@ const techStackHandler = async (url, request) => {
         error: err?.message || String(err),
       });
     });
-  });
+  }) : {
+    technologies: [],
+    error: 'Wappalyzer browser disabled unless an isolated egress network is configured.',
+  };
 
   const technologies = result.technologies || [];
   const error = result.error;

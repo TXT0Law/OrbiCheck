@@ -1,4 +1,4 @@
-.PHONY: help test test-frontend test-backend test-backend-unit test-backend-integration test-backend-e2e test-osint test-watch test-cov lint lint-frontend lint-backend lint-osint clean-safe db-migrate db-rollback export-openapi check-harness
+.PHONY: help test test-frontend test-backend test-backend-unit test-backend-integration test-backend-e2e test-osint test-scanner test-phase1-network test-p2-hardening test-watch test-cov lint lint-frontend lint-backend lint-osint clean-safe db-migrate db-rollback export-openapi docs-generate check-docs check-bundle backup-restore-drill check-harness
 
 .DEFAULT_GOAL := help
 
@@ -25,7 +25,7 @@ lint-backend: ## Lint backend (Ruff)
 lint-osint: ## Lint scan service
 	cd backend/scan && npm run lint
 
-test: test-frontend test-backend test-osint ## Run all tests
+test: test-frontend test-backend test-osint test-scanner ## Run all tests
 
 test-frontend: ## Run frontend unit tests (Vitest)
 	pnpm test
@@ -45,6 +45,15 @@ test-backend-e2e: ## Run backend e2e tests only
 test-osint: ## Run scan service tests (Jest)
 	cd backend/scan && npm test
 
+test-scanner: ## Run nmap scanner security tests
+	cd backend && UV_LINK_MODE=copy uv run python -m unittest discover -s ../docker/scanner -p 'test_*.py'
+
+test-phase1-network: ## Run Phase 1 container network security tests
+	bash scripts/test-phase1-container-network.sh
+
+test-p2-hardening: ## Verify runtime container hardening and port scan smoke
+	bash scripts/test-p2-container-hardening.sh
+
 test-watch: ## Run frontend tests in watch mode
 	pnpm test:watch
 
@@ -58,6 +67,18 @@ check-harness: ## Run all harness CI checks (dependency direction, boundary vali
 
 export-openapi: ## Export static OpenAPI schema to docs/openapi.json
 	cd backend && UV_LINK_MODE=copy uv run python ../scripts/dev/export-openapi.py
+
+docs-generate: ## Regenerate OpenAPI and repository inventory docs
+	cd backend && UV_LINK_MODE=copy uv run python ../scripts/ci/check-docs-drift.py --write
+
+check-docs: ## Check docs inventory, OpenAPI drift, and local links
+	cd backend && UV_LINK_MODE=copy uv run python ../scripts/ci/check-docs-drift.py
+
+check-bundle: ## Enforce per-route frontend bundle budgets after build
+	pnpm check:bundle
+
+backup-restore-drill: ## Backup local PostgreSQL and verify an isolated restore
+	bash scripts/ops/backup-restore-drill.sh
 
 clean-safe: ## Clean build artifacts safely
 	rm -rf node_modules backend/scan/node_modules .next coverage test-results

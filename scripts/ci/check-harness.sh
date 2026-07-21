@@ -17,6 +17,16 @@ echo "║   OrbiCheck Harness CI Checks    ║"
 echo "╚══════════════════════════════════╝"
 echo ""
 
+# 0. Checker fixture self-tests
+echo "=== Harness Checker Self-tests ==="
+if python3 "$SCRIPT_DIR/test-harness-checks.py"; then
+  echo "  ✅ PASS"
+  echo ""
+else
+  FAILURES=$((FAILURES + 1))
+  echo ""
+fi
+
 # 1. Dependency direction
 if bash "$SCRIPT_DIR/check-dependency-direction.sh"; then
   echo ""
@@ -33,7 +43,20 @@ else
   echo ""
 fi
 
-# 3. Test requirement (existing script)
+# 3. Documentation inventory, OpenAPI drift, and local links
+echo "=== Documentation Drift Check ==="
+if (
+  cd "$SCRIPT_DIR/../../backend"
+  UV_LINK_MODE=copy uv run python ../scripts/ci/check-docs-drift.py
+); then
+  echo "  ✅ PASS"
+  echo ""
+else
+  FAILURES=$((FAILURES + 1))
+  echo ""
+fi
+
+# 4. Test requirement (existing script)
 if [ -f "$SCRIPT_DIR/require-tests.sh" ]; then
   echo "=== Test Requirement Check ==="
   if bash "$SCRIPT_DIR/require-tests.sh" "$BASE_SHA" "$HEAD_SHA"; then

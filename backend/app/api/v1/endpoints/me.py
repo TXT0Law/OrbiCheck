@@ -26,6 +26,7 @@ from app.services.notification_channels.registry import (
     dispatch_via_channel,
     get_channel,
 )
+from app.services.notification_test_service import build_synthetic_monitor
 from app.services.user_notification_settings import (
     get_notification_settings,
     set_notification_settings,
@@ -207,7 +208,7 @@ async def send_test_notification(
 
     user_settings = await get_notification_settings(redis, current_user.id)
     synthetic_monitor_id = uuid.uuid4()
-    fake_monitor = _build_synthetic_monitor(synthetic_monitor_id, current_user.id)
+    fake_monitor = build_synthetic_monitor(synthetic_monitor_id, current_user.id)
     payload = build_alert_payload(
         monitor=fake_monitor,
         event=None,
@@ -256,25 +257,4 @@ async def send_test_notification(
             latency_ms=result.latency_ms,
             error=result.error,
         )
-    )
-
-
-def _build_synthetic_monitor(monitor_id: uuid.UUID, user_id: int):
-    """Build a detached Monitor instance for the test endpoint.
-
-    We avoid hitting the DB for the test path so the user does not need an
-    existing monitor before validating their channel wiring. The instance is
-    never added to the session, so SQLAlchemy never tries to flush it.
-    """
-
-    from app.models.monitor import Monitor
-
-    return Monitor(
-        id=monitor_id,
-        user_id=user_id,
-        display_name="OrbiCheck test monitor",
-        url="https://example.com",
-        tags=[],
-        capabilities={},
-        enabled_capabilities=[],
     )

@@ -2,7 +2,7 @@
  * Direct unit tests for `_common/result.js`.
  *
  * The core envelope contract must stay backwards-compatible with five
- * historical handler return shapes (see `prompt_dev/middleReport.md` §P1-1).
+ * historical handler return shapes during the envelope migration.
  * Every branch of `normaliseEnvelope()` is covered here so future agents can
  * change the helper without having to spelunk through 35 module tests to
  * discover what shape they relied on.

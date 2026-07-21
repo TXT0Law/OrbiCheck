@@ -1,6 +1,6 @@
 // Per-host outbound concurrency limiter (Task S-7).
 //
-// Rationale (see prompt_dev/middleReport.md §1.2 D):
+// Rationale:
 //   A single scan batch can fan out 30+ modules at once. Most modules also
 //   issue 1-5 sub-requests of their own. Even with the existing batch
 //   `p-limit` cap (`SCAN_BATCH_CONCURRENCY`) the same hostname can see 50+

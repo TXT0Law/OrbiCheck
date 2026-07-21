@@ -56,6 +56,11 @@ make test-osint              # Jest (backend/scan)
 
 # ── Typecheck ──
 pnpm build                   # Next.js build (includes tsc)
+make check-bundle            # Per-route gzip bundle budgets (after build)
+
+# ── Generated docs ──
+make docs-generate           # Refresh inventory + OpenAPI
+make check-docs              # Inventory/OpenAPI/link drift
 ```
 
 ## Verification
@@ -67,6 +72,7 @@ A task is **done** only when ALL of these are true:
 3. `pnpm build` exits 0 (if frontend files changed).
 4. No new lint/type warnings introduced.
 5. Corresponding test file created or updated for every feature/fix.
+6. `make check-docs` exits 0 when routes, contracts, services, or docs change.
 
 ## References
 
@@ -75,5 +81,5 @@ A task is **done** only when ALL of these are true:
 - [docs/harness/tool-authorization.md](docs/harness/tool-authorization.md) — sandbox levels
 - [docs/harness/done-definition.md](docs/harness/done-definition.md) — full DoD checklist
 - [docs/harness/file-ownership.md](docs/harness/file-ownership.md) — directory boundaries
-- [prompt_dev/projectprompt.md](prompt_dev/projectprompt.md) — project standards
-- [prompt_dev/structure.md](prompt_dev/structure.md) — full repo structure
+- [docs/inventory.json](docs/inventory.json) — generated route/service/module inventory
+- [README.md](README.md) — tracked architecture and development guide

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { downloadJson, pickScanDetailExportSummary } from "@/lib/utils/export-json";
+import { downloadJson } from "@/lib/api/download";
+import { pickScanDetailExportSummary } from "@/lib/utils/export-json";
 import { MOCK_SCAN_DETAIL } from "@/lib/mock-data";
 
 describe("pickScanDetailExportSummary", () => {

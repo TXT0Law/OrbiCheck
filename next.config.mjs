@@ -6,12 +6,14 @@ const internalApiOrigin = (
   "http://localhost:8000"
 ).replace(/\/+$/, "");
 const disableApiRewrite = process.env.DISABLE_API_REWRITE === "1";
+const enableWebpackCache = process.env.NEXT_WEBPACK_CACHE === "1";
 
 const nextConfig = {
   output: "standalone",
-  // Disable webpack cache to avoid ENOENT pack.gz on external drives
-  webpack: (config, { dev }) => {
-    if (dev) config.cache = false;
+  // Persistent webpack cache is opt-in because it is unreliable on external
+  // and network filesystems (missing pack/pages manifests during builds).
+  webpack: (config) => {
+    if (!enableWebpackCache) config.cache = false;
     return config;
   },
   async headers() {

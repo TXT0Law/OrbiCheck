@@ -4,6 +4,7 @@ import httpx
 import structlog
 
 from app.core.config import settings
+from app.core.internal_auth import InternalServiceAuth
 
 SCAN_SERVICE_BASE = settings.SCAN_SERVICE_URL.rstrip("/")
 TIMEOUT = httpx.Timeout(
@@ -27,6 +28,10 @@ SLOW_BATCH_MODULES = frozenset(
         "cookies",
     }
 )
+
+
+def _internal_auth() -> InternalServiceAuth:
+    return InternalServiceAuth(settings.INTERNAL_SERVICE_SECRET)
 
 
 def _module_timeout_budget_s(module_name: str) -> float:
@@ -137,7 +142,11 @@ async def call_screenshot_service(
     if steps:
         body["steps"] = steps
     headers = _build_trace_headers(scan_id, trace_id)
-    async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        headers=headers,
+        auth=_internal_auth(),
+    ) as client:
         response = await client.post(
             f"{SCAN_SERVICE_BASE}/api/scan/screenshot",
             json=body,
@@ -155,7 +164,11 @@ async def call_scan_module(
 ) -> dict:
     """Call a single scan module on the Scan Service."""
     headers = _build_trace_headers(scan_id, trace_id)
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers) as client:
+    async with httpx.AsyncClient(
+        timeout=TIMEOUT,
+        headers=headers,
+        auth=_internal_auth(),
+    ) as client:
         response = await client.get(
             f"{SCAN_SERVICE_BASE}/api/scan/{module_name}",
             params={"url": url},
@@ -186,7 +199,11 @@ async def call_scan_batch(
         call_style="async",
     )
 
-    async with httpx.AsyncClient(timeout=_batch_timeout(requested), headers=headers) as client:
+    async with httpx.AsyncClient(
+        timeout=_batch_timeout(requested),
+        headers=headers,
+        auth=_internal_auth(),
+    ) as client:
         available_modules = set(requested)
 
         try:
@@ -252,7 +269,11 @@ def call_scan_module_sync(
     else:
         client_timeout = TIMEOUT
     try:
-        with httpx.Client(timeout=client_timeout, headers=headers) as client:
+        with httpx.Client(
+            timeout=client_timeout,
+            headers=headers,
+            auth=_internal_auth(),
+        ) as client:
             params: dict[str, str] = {"url": url}
             if scan_options:
                 # Forward the same scanOptions surface the batch endpoint
@@ -309,7 +330,11 @@ def call_scan_batch_sync(
         call_style="sync",
     )
 
-    with httpx.Client(timeout=_batch_timeout(requested), headers=headers) as client:
+    with httpx.Client(
+        timeout=_batch_timeout(requested),
+        headers=headers,
+        auth=_internal_auth(),
+    ) as client:
         available_modules = set(requested)
 
         try:

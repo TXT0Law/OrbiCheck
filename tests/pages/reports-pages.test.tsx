@@ -174,12 +174,12 @@ describe("reports pages", () => {
     expect(screen.getByRole("button", { name: "立即執行" })).toBeInTheDocument();
   });
 
-  it("renders the report detail preview", () => {
+  it("renders the report detail preview", async () => {
     render(<ReportDetailPage params={{ reportId: "report-1" }} />);
 
     expect(screen.getByRole("heading", { name: "Security Report - example.com" })).toBeInTheDocument();
-    expect(screen.getByText("Markdown Preview")).toBeInTheDocument();
-    expect(screen.getByText("Heading")).toBeInTheDocument();
-    expect(screen.getByText("Report body")).toBeInTheDocument();
+    expect(await screen.findByText("Markdown Preview")).toBeInTheDocument();
+    expect(await screen.findByText("Heading")).toBeInTheDocument();
+    expect(await screen.findByText("Report body")).toBeInTheDocument();
   });
 });

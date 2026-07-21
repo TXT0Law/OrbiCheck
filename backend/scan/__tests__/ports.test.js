@@ -233,7 +233,11 @@ describe('ports module', () => {
       'http://scanner:5000/scan/ports',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ target: 'example.com', profile: 'quick' }),
+        body: JSON.stringify({
+          target: 'example.com',
+          profile: 'quick',
+          authorization_acknowledged: true,
+        }),
       })
     );
     const data = response.body.data;

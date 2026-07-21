@@ -20,6 +20,28 @@ type ScanWire = ScanResponse & {
   created_at?: string;
 };
 
+type ScanSchemaName =
+  | "DeletedScansResponseSchema"
+  | "ModuleRetryResponseSchema"
+  | "ScanDetailResponseSchema"
+  | "ScanDiffResponseSchema"
+  | "ScanFullExportSchema"
+  | "ScanListSchema"
+  | "ScanResponseSchema"
+  | "ScanTimelineResponseSchema";
+
+async function validateScanPayload<T>(
+  schemaName: ScanSchemaName,
+  raw: unknown,
+  context: string,
+): Promise<T> {
+  const [{ parseSingle }, schemas] = await Promise.all([
+    import("./_validate"),
+    import("@/shared/schemas/scan"),
+  ]);
+  return parseSingle<T>(schemas[schemaName], raw, context);
+}
+
 export interface CreateScanOptions {
   modules?: string[];
   enablePortScan?: boolean;
@@ -83,8 +105,14 @@ export async function createScan(
   if (typeof options?.acknowledgeScanAuthorization === "boolean") {
     body.acknowledgeScanAuthorization = options.acknowledgeScanAuthorization;
   }
-  const { data } = await apiClient.post<ScanWire>("/scans", body);
-  return normalizeScan(data);
+  const { data } = await apiClient.post<unknown>("/scans", body);
+  return normalizeScan(
+    await validateScanPayload<ScanWire>(
+      "ScanResponseSchema",
+      data,
+      "create scan",
+    ),
+  );
 }
 
 export async function listScans(
@@ -100,7 +128,7 @@ export async function listScans(
   const offset = Math.max(0, (page - 1) * size);
   const search = filters?.search?.trim();
 
-  const { data } = await apiClient.get<{ scans: ScanWire[]; total: number }>("/scans", {
+  const { data } = await apiClient.get<unknown>("/scans", {
     params: {
       limit,
       offset,
@@ -109,25 +137,40 @@ export async function listScans(
       ...(filters?.statusGroup ? { status_group: filters.statusGroup } : {}),
     },
   });
+  const parsed = await validateScanPayload<{ scans: ScanWire[]; total: number }>(
+    "ScanListSchema",
+    data,
+    "scan list",
+  );
   return {
-    total: data.total,
-    scans: data.scans.map(normalizeScan),
+    total: parsed.total,
+    scans: parsed.scans.map(normalizeScan),
   };
 }
 
 export async function getScan(scanId: string): Promise<ScanResponse> {
-  const { data } = await apiClient.get<ScanWire>(`/scans/${scanId}`);
-  return normalizeScan(data);
+  const { data } = await apiClient.get<unknown>(`/scans/${scanId}`);
+  return normalizeScan(
+    await validateScanPayload<ScanWire>("ScanResponseSchema", data, "scan"),
+  );
 }
 
 export async function getScanDetail(scanId: string): Promise<ScanDetail> {
-  const { data } = await apiClient.get<ScanDetail>(`/scans/${scanId}/detail`);
-  return data;
+  const { data } = await apiClient.get<unknown>(`/scans/${scanId}/detail`);
+  return validateScanPayload<ScanDetail>(
+    "ScanDetailResponseSchema",
+    data,
+    "scan detail",
+  );
 }
 
 export async function getScanFullExport(scanId: string): Promise<ScanFullExport> {
-  const { data } = await apiClient.get<ScanFullExport>(`/scans/${scanId}/detail/full`);
-  return data;
+  const { data } = await apiClient.get<unknown>(`/scans/${scanId}/detail/full`);
+  return validateScanPayload<ScanFullExport>(
+    "ScanFullExportSchema",
+    data,
+    "scan full export",
+  );
 }
 
 /**
@@ -152,11 +195,15 @@ export async function getScanDomainTimeline(
   if (typeof options?.limit === "number") {
     params.limit = options.limit;
   }
-  const { data } = await apiClient.get<ScanTimelineResponse>(
+  const { data } = await apiClient.get<unknown>(
     `/scans/by-domain/${encodeURIComponent(trimmed)}/timeline`,
     Object.keys(params).length ? { params } : undefined,
   );
-  return data;
+  return validateScanPayload<ScanTimelineResponse>(
+    "ScanTimelineResponseSchema",
+    data,
+    "scan timeline",
+  );
 }
 
 /**
@@ -169,10 +216,14 @@ export async function getScanDiff(
   baseId: string,
   compareId: string,
 ): Promise<ScanDiffResponse> {
-  const { data } = await apiClient.get<ScanDiffResponse>("/scans/diff", {
+  const { data } = await apiClient.get<unknown>("/scans/diff", {
     params: { baseId, compareId },
   });
-  return data;
+  return validateScanPayload<ScanDiffResponse>(
+    "ScanDiffResponseSchema",
+    data,
+    "scan diff",
+  );
 }
 
 export async function cancelScan(scanId: string): Promise<void> {
@@ -180,8 +231,10 @@ export async function cancelScan(scanId: string): Promise<void> {
 }
 
 export async function rescanScan(scanId: string): Promise<ScanResponse> {
-  const { data } = await apiClient.post<ScanWire>(`/scans/${scanId}/rescan`);
-  return normalizeScan(data);
+  const { data } = await apiClient.post<unknown>(`/scans/${scanId}/rescan`);
+  return normalizeScan(
+    await validateScanPayload<ScanWire>("ScanResponseSchema", data, "rescan"),
+  );
 }
 
 export async function deleteScan(scanId: string): Promise<void> {
@@ -189,10 +242,14 @@ export async function deleteScan(scanId: string): Promise<void> {
 }
 
 export async function retryModule(scanId: string, moduleName: string): Promise<ModuleRetryResponse> {
-  const { data } = await apiClient.post<ModuleRetryResponse>(
+  const { data } = await apiClient.post<unknown>(
     `/scans/${scanId}/modules/${moduleName}/retry`
   );
-  return data;
+  return validateScanPayload<ModuleRetryResponse>(
+    "ModuleRetryResponseSchema",
+    data,
+    "module retry",
+  );
 }
 
 export async function deleteAllScans(filters?: {
@@ -203,14 +260,18 @@ export async function deleteAllScans(filters?: {
   const statusGroup = filters?.statusGroup;
 
   try {
-    const { data } = await apiClient.delete<{ deleted: number }>("/scans", {
+    const { data } = await apiClient.delete<unknown>("/scans", {
       params: {
         ...(search ? { search } : {}),
         ...(statusGroup ? { status_group: statusGroup } : {}),
       },
     });
 
-    return data.deleted;
+    return (await validateScanPayload<{ deleted: number }>(
+      "DeletedScansResponseSchema",
+      data,
+      "delete scans",
+    )).deleted;
   } catch (error) {
     const status =
       typeof error === "object" && error !== null && "response" in error

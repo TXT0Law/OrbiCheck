@@ -560,7 +560,7 @@ MAX_VISUAL_IGNORE_REGIONS = 8
 
 # C-5 / B-7: browser fetch mode spins up Playwright on every check, so the
 # minimum interval is enforced at the API boundary to prevent a 60s monitor
-# from saturating the Chromium pool. middleReport §6.5 fixed this number.
+# from saturating the shared Chromium pool.
 MIN_BROWSER_FETCH_INTERVAL_SECONDS = 300
 
 
@@ -885,9 +885,8 @@ class MonitorCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def browser_fetch_mode_requires_long_interval(self) -> "MonitorCreateRequest":
-        # B-7: implements middleReport §6.5 — browser-mode probes launch
-        # Playwright per check; reject sub-300s intervals at the API boundary
-        # so the monitor service never even sees them.
+        # Browser-mode probes launch Playwright per check; reject sub-300s
+        # intervals at the API boundary so the service never sees them.
         if (
             _content_change_fetch_mode(self.capabilities) == "browser"
             and self.interval_seconds < MIN_BROWSER_FETCH_INTERVAL_SECONDS

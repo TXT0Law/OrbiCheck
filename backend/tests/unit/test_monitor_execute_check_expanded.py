@@ -517,6 +517,7 @@ async def test_ssl_only_monitor_updates_ssl_fields(
 @pytest.mark.unit
 async def test_degraded_when_response_slow(
     public_example_dns,
+    monkeypatch,
 ) -> None:
     """Slow httpx response marks probe degraded when maxResponseTimeMs is low."""
     mid = uuid4()
@@ -534,7 +535,8 @@ async def test_degraded_when_response_slow(
     )
     db, _ = _db_for_execute(mon, prev_snapshot=prev)
 
-    async def delayed_request(self, method, url, **kwargs):
+    async def delayed_request(method, url, **kwargs):
+        _ = (method, url, kwargs)
         await asyncio.sleep(0.05)
         return httpx.Response(
             200,
@@ -542,8 +544,8 @@ async def test_degraded_when_response_slow(
             headers={"content-type": "text/html"},
         )
 
-    with patch.object(httpx.AsyncClient, "request", delayed_request):
-        await execute_check(mid, db, redis=None)
+    monkeypatch.setattr(monitor_service, "request_safely", delayed_request)
+    await execute_check(mid, db, redis=None)
     assert mon.status == MonitorStatus.DEGRADED
 
 
@@ -663,7 +665,8 @@ async def test_uptime_slow_response_dispatches_alert(
     alert_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(monitor_service.alert_service, "evaluate_and_dispatch_alert", alert_mock)
 
-    async def delayed_request(self, method, url, **kwargs):
+    async def delayed_request(method, url, **kwargs):
+        _ = (method, url, kwargs)
         await asyncio.sleep(0.05)
         return httpx.Response(
             200,
@@ -671,8 +674,8 @@ async def test_uptime_slow_response_dispatches_alert(
             headers={"content-type": "text/html"},
         )
 
-    with patch.object(httpx.AsyncClient, "request", delayed_request):
-        await execute_check(mid, db, redis=None)
+    monkeypatch.setattr(monitor_service, "request_safely", delayed_request)
+    await execute_check(mid, db, redis=None)
 
     assert any(call.args[1] == "uptime_only" for call in alert_mock.await_args_list)
 

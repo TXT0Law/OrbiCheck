@@ -40,6 +40,10 @@ make lint-backend         # ruff catches type annotation gaps
 # Run tests that exercise boundary parsing
 make test-backend-unit    # transformers + validators
 make test-frontend        # API client mocks verify schema parse
+
+# Structured boundary checker + fixture self-tests
+bash scripts/ci/check-boundary-validation.sh
+python3 scripts/ci/test-harness-checks.py
 ```
 
 ## Verification
@@ -47,7 +51,8 @@ make test-frontend        # API client mocks verify schema parse
 1. Every new API endpoint has a Pydantic request/response model.
 2. Every new `lib/api/*.ts` function calls `.parse()` or `.safeParse()` on the response.
 3. Every new SSE event type has a corresponding Zod schema in `shared/schemas/`.
-4. `grep -r "as any" lib/ app/ components/` returns no new matches in the diff.
+4. The structured checker rejects `as any`, bare `except`, unparsed API clients,
+   and untyped FastAPI routes.
 5. `pnpm build` and `make lint` exit 0.
 
 ## References

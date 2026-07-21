@@ -1,13 +1,29 @@
 "use client";
 
+import dynamic from "next/dynamic";
+
 import { MonitorCapabilityDisabled } from "@/components/monitor/monitor-capability-disabled";
 import { useMonitorDetail } from "@/components/monitor/monitor-detail-context";
 import { MonitorSslDetail } from "@/components/monitor/monitor-ssl-detail";
-import { MonitorSslExpiryChart } from "@/components/monitor/monitor-ssl-expiry-chart";
 import { MonitorSslSeverityCard } from "@/components/monitor/monitor-ssl-severity-card";
 import { MonitorSslThresholdsBanner } from "@/components/monitor/monitor-ssl-thresholds-banner";
 import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { getMonitorDetailMessages } from "@/lib/i18n/monitor-detail";
+
+const MonitorSslExpiryChart = dynamic(
+  () =>
+    import("@/components/monitor/monitor-ssl-expiry-chart").then(
+      (module) => module.MonitorSslExpiryChart,
+    ),
+  {
+    loading: () => (
+      <p className="text-sm text-muted-foreground" role="status">
+        Loading chart…
+      </p>
+    ),
+    ssr: false,
+  },
+);
 
 export default function MonitorSslPage() {
   const lang = useAppearanceLanguage();

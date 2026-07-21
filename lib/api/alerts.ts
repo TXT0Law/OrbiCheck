@@ -1,5 +1,10 @@
 import type { AlertEvent, MonitorListMeta } from "@/shared/types/monitor";
+import {
+  alertEventSchema,
+  monitorListMetaSchema,
+} from "@/shared/schemas/monitor";
 
+import { parseList, parseSingle } from "./_validate";
 import { apiClient } from "./client";
 
 interface AlertQueryParams {
@@ -14,7 +19,11 @@ interface AlertQueryParams {
 
 function readMeta(res: object): MonitorListMeta | undefined {
   if ("meta" in res && res.meta && typeof res.meta === "object") {
-    return res.meta as MonitorListMeta;
+    return parseSingle<MonitorListMeta>(
+      monitorListMetaSchema,
+      res.meta,
+      "alert list metadata",
+    );
   }
   return undefined;
 }
@@ -38,9 +47,9 @@ export async function getAlerts(
   params?: AlertQueryParams
 ): Promise<{ data: AlertEvent[]; meta?: MonitorListMeta }> {
   const query = buildQuery(params);
-  const res = await apiClient.get<AlertEvent[]>(`/alerts${query ? `?${query}` : ""}`);
+  const res = await apiClient.get<unknown>(`/alerts${query ? `?${query}` : ""}`);
   return {
-    data: res.data,
+    data: parseList<AlertEvent>(alertEventSchema, res.data, "alert list"),
     meta: readMeta(res as object),
   };
 }
@@ -50,16 +59,16 @@ export async function getMonitorAlerts(
   params?: Omit<AlertQueryParams, "monitorId">
 ): Promise<{ data: AlertEvent[]; meta?: MonitorListMeta }> {
   const query = buildQuery(params);
-  const res = await apiClient.get<AlertEvent[]>(
+  const res = await apiClient.get<unknown>(
     `/monitors/${monitorId}/alerts${query ? `?${query}` : ""}`
   );
   return {
-    data: res.data,
+    data: parseList<AlertEvent>(alertEventSchema, res.data, "monitor alert list"),
     meta: readMeta(res as object),
   };
 }
 
 export async function acknowledgeAlert(alertId: string): Promise<AlertEvent> {
-  const { data } = await apiClient.patch<AlertEvent>(`/alerts/${alertId}/acknowledge`);
-  return data;
+  const { data } = await apiClient.patch<unknown>(`/alerts/${alertId}/acknowledge`);
+  return parseSingle<AlertEvent>(alertEventSchema, data, "acknowledged alert");
 }

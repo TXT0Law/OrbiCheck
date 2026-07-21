@@ -70,15 +70,19 @@ No direct import across these boundaries. Communication is REST/SSE only.
 ```bash
 # CI check (see scripts/ci/check-dependency-direction.sh)
 bash scripts/ci/check-dependency-direction.sh
+
+# Positive/negative fixture self-tests
+python3 scripts/ci/test-harness-checks.py
 ```
 
 ## Verification
 
 1. `bash scripts/ci/check-dependency-direction.sh` exits 0.
-2. No circular-dependency warnings from `pnpm build`.
-3. PR diff shows no new imports violating the DAG above.
+2. The Python AST/import checker covers Backend endpoint/model direction and
+   frontend cross-layer imports.
+3. No circular-dependency warnings from `pnpm build`.
 
 ## References
 
 - [AGENTS.md](../../AGENTS.md) — global rules
-- [prompt_dev/structure.md](../../prompt_dev/structure.md) — directory layout
+- [Repository inventory](../inventory.json) — generated route/service/module layout

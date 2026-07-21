@@ -4,7 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0-green.svg)]()
 
-An external-perspective website security assessment platform. Provide a URL, get a full reconnaissance report — covering IP, DNS, SSL/TLS, HTTP headers, tech stack, threat intelligence, and 30+ more modules — all from an outsider's point of view.
+An external-perspective website security assessment platform. Provide a URL and
+get a reconnaissance report from 34 OSINT modules covering IP, DNS, SSL/TLS,
+HTTP headers, tech stack, threat intelligence, and more.
 
 ---
 
@@ -43,7 +45,7 @@ An external-perspective website security assessment platform. Provide a URL, get
 
 ## Features
 
-**OSINT Reconnaissance** — 30+ automated modules that probe a target URL from the outside:
+**OSINT Reconnaissance** — 34 automated modules that probe a target URL from the outside:
 
 | Category | Modules |
 |----------|---------|
@@ -111,6 +113,7 @@ Frontend (Next.js :3000)          ← Project root (monorepo)
     v
 Backend (FastAPI :8000)
     |-- HTTP --> Scan Service (Node.js Express :4000)
+    |                '-- signed HTTP --> nmap Scanner (FastAPI :5000)
     |-- --> Redis (:6379)          Cache + task broker
     |-- --> PostgreSQL (:5432)     Data persistence
     |
@@ -118,9 +121,15 @@ Backend (FastAPI :8000)
     '-- Celery beat                Periodic task scheduler
 ```
 
-The frontend communicates only with the backend. The Scan Service is an internal service that wraps 30+ OSINT modules and is called exclusively by the backend via HTTP.
+The frontend communicates only with the backend. The Scan Service and nmap
+Scanner are internal, HMAC-authenticated services. The current identity model
+is intentionally **single-admin**; multi-user organizations, roles, and session
+revocation are not implemented yet.
 
-All seven services (frontend, backend, scan-service, celery-worker, celery-beat, postgres, redis) can be started with a single command using Docker Compose — see [Docker Deployment](#docker-deployment).
+All eight services (frontend, backend, scan-service, scanner, celery-worker,
+celery-beat, postgres, redis) can be started with Docker Compose. The generated
+[repository inventory](docs/inventory.json) is the source of truth for route,
+module, model, task, and service lists.
 
 ---
 
@@ -240,7 +249,9 @@ Open http://localhost:3000 in your browser. Default login credentials:
 
 ## Docker Deployment
 
-The full stack is containerised via Docker Compose. All seven services (postgres, redis, scan-service, backend, celery-worker, celery-beat, frontend) are orchestrated with health checks and dependency ordering.
+The full stack is containerised via Docker Compose. All eight services
+(postgres, redis, scan-service, scanner, backend, celery-worker, celery-beat,
+frontend) are orchestrated with health checks and dependency ordering.
 
 ### One-Command Start
 
@@ -287,6 +298,7 @@ This starts the app services only (postgres and redis containers are scaled to 0
 | **postgres** | `postgres:16-alpine` | 5432 (internal) | Data persisted via named volume |
 | **redis** | `redis:7-alpine` | 6379 (internal) | AOF persistence |
 | **scan-service** | `docker/scan/Dockerfile` | 4000 (internal) | Alpine + system Chromium (no Playwright download) |
+| **scanner** | `docker/scanner/Dockerfile` | 5000 (internal) | Authorized nmap execution pinned to a validated public IP |
 | **backend** | `docker/backend/Dockerfile` | 8000 (published) | Auto-runs Alembic migration on startup |
 | **celery-worker** | same as backend | — | `CELERY_MODE=worker` |
 | **celery-beat** | same as backend | — | `CELERY_MODE=beat` |
@@ -294,7 +306,8 @@ This starts the app services only (postgres and redis containers are scaled to 0
 
 Key design decisions:
 - **scan-service** uses `node:20-alpine` + system `chromium` package instead of the Playwright base image, avoiding flaky browser downloads during build
-- **backend** entrypoint handles fresh databases (creates tables + `alembic stamp head`) and existing databases (`alembic upgrade head`) automatically
+- **backend** uses Alembic as the only schema authority and always runs `alembic upgrade head`
+- Application images run as non-root; Compose applies capability, PID, CPU, memory, and graceful-stop controls
 - **celery-worker** and **celery-beat** share the backend image and are routed by the `CELERY_MODE` env var
 - **frontend** uses multi-stage build with `output: "standalone"` and rewrites `/api/v1/*` to the internal backend hostname
 
@@ -335,6 +348,7 @@ See `backend/.env.example` for the full list including SMTP settings.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend API URL |
+| `NEXT_WEBPACK_CACHE` | unset | Set `1` to opt into persistent webpack cache on a reliable local filesystem |
 
 Copy the root example file:
 
@@ -366,14 +380,15 @@ POST   /api/v1/scans/{id}/cancel  Cancel a running scan
 GET    /api/v1/scans/{id}/progress  SSE — real-time scan progress
 
 CRUD   /api/v1/url-groups         URL group management
-CRUD   /api/v1/monitors           Continuous monitoring ⚠
-GET    /api/v1/monitors/live      SSE — monitor live updates ⚠
-GET    /api/v1/alerts             Alert events ⚠
-POST   /api/v1/reports            Generate reports ⚠
+CRUD   /api/v1/monitors           Continuous monitoring
+GET    /api/v1/monitors/live      SSE — monitor live updates
+GET    /api/v1/alerts             Alert events
+POST   /api/v1/reports            Generate reports
 GET    /api/v1/health             Health check
 ```
 
-> Scan and URL Group endpoints are stable. Monitor, Alert, and Report endpoints (marked ⚠) are functional but under active development — their API surface may evolve.
+The checked-in OpenAPI document is generated from FastAPI. CI fails when it or
+the generated repository inventory drifts from runtime sources.
 
 All responses follow a unified format:
 
@@ -387,9 +402,11 @@ All responses follow a unified format:
 
 For complete documentation, see:
 - [API Reference](docs/api/README.md) — all endpoints with request/response details
-- [Scan Modules](docs/scan-modules.md) — 30+ OSINT module catalog
+- [Scan Modules](docs/scan-modules.md) — 34-module OSINT catalog
 - [Integration Guide](docs/integration-guide.md) — how to use the API from external applications
 - [Static OpenAPI Schema](docs/openapi.json) — machine-readable API specification
+- [Generated Repository Inventory](docs/inventory.json) — routes, services, modules, models, and tasks
+- [Operations Runbook](docs/operations.md) — runtime hardening, backup/restore, trace correlation, and SLOs
 
 ---
 
@@ -425,9 +442,18 @@ pnpm test:connected
 
 # Harness checks enforced by CI
 make check-harness
+
+# Build and enforce route bundle budgets
+pnpm build
+make check-bundle
+
+# Regenerate/check docs inventory and OpenAPI
+make docs-generate
+make check-docs
 ```
 
-CI requires lint, unit tests, harness checks, and connected E2E to pass before
+CI requires lint, production build and bundle budgets, unit tests, docs/OpenAPI
+drift checks, and connected E2E (including axe accessibility checks) to pass before
 the final quality gate succeeds. Connected E2E uploads `playwright-report` and
 `test-results` artifacts on failure.
 
@@ -469,7 +495,7 @@ OrbiCheck/
 │   │   ├── tasks/          # Celery async tasks
 │   │   ├── core/           # Auth, middleware, exceptions
 │   │   └── db/             # Database session + Alembic migrations
-│   ├── scan/               # Node.js Scan Service (30+ OSINT modules)
+│   ├── scan/               # Node.js Scan Service (34 OSINT modules)
 │   └── tests/              # Backend tests (unit, integration, e2e)
 │
 ├── docker/                 # Docker configurations
@@ -479,7 +505,7 @@ OrbiCheck/
 │   ├── celery/entrypoint.sh  # Worker / beat mode router
 │   ├── scan/Dockerfile     #   Node.js + system Chromium
 │   └── init/init-db.sql    #   PostgreSQL extensions
-├── docker-compose.yml      # Full local stack (7 services)
+├── docker-compose.yml      # Full local stack (8 services)
 ├── docker-compose.prod.yml # Production override (external DB/Redis)
 ├── deploy/deploy.sh        # One-command build + up + healthcheck
 ├── .do/app.yaml            # DigitalOcean App Platform spec

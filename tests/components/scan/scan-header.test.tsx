@@ -37,14 +37,17 @@ vi.mock("@/components/ui/use-toast", () => ({
 }));
 
 vi.mock("@/lib/utils/export-json", () => ({
-  downloadJson: mocks.downloadJson,
   pickScanDetailExportSummary: mocks.pickScanDetailExportSummary,
   pickScanFullExport: mocks.pickScanFullExport,
 }));
 
 vi.mock("@/lib/utils/export-csv", () => ({
-  downloadCsv: mocks.downloadCsv,
   pickScanModuleCsvRows: mocks.pickScanModuleCsvRows,
+}));
+
+vi.mock("@/lib/api/download", () => ({
+  downloadJson: mocks.downloadJson,
+  downloadCsv: mocks.downloadCsv,
 }));
 
 vi.mock("@/lib/api/scans", () => ({

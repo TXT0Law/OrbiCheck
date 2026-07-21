@@ -1,4 +1,3 @@
-import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { randomUUID } from 'crypto';
@@ -9,8 +8,13 @@ import {
   getBatchConcurrency,
   getModuleTimeoutMs,
 } from './_common/config.js';
+import {
+  createInternalAuthMiddleware,
+  validateInternalAuthConfiguration,
+} from './_common/internal-auth.js';
 import { logger } from './_common/logger.js';
 import { metricsRegistry, recordBatchRun } from './_common/metrics.js';
+import { closeSharedBrowser } from './_common/playwright-browser.js';
 import { handler as pageSourceRenderedHandler } from './page-source-rendered.js';
 import { handler as screenshotHandler } from './screenshot.js';
 import { loadModules } from './registry.js';
@@ -18,13 +22,12 @@ import { runModule } from './runner.js';
 
 const PORT = parseInt(process.env.SCAN_SERVICE_PORT || '4000', 10);
 const TIMEOUT_MS = parseInt(process.env.API_TIMEOUT_LIMIT || '60000', 10);
-const CORS_ORIGIN = process.env.API_CORS_ORIGIN || '*';
-const CORS_METHODS = ['GET', 'POST', 'OPTIONS'];
-const CORS_HEADERS = ['Content-Type', 'Accept', 'X-Scan-Id', 'X-Trace-Id'];
+const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS || '25000', 10);
 const SCAN_ID_HEADER = 'x-scan-id';
 const TRACE_ID_HEADER = 'x-trace-id';
 
 let modules = new Map();
+let httpServer = null;
 
 function getAvailableModules() {
   return [...modules.keys()].sort();
@@ -56,14 +59,11 @@ export function createApp() {
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   }));
-  app.use(cors({
-    origin: CORS_ORIGIN,
-    methods: CORS_METHODS,
-    allowedHeaders: CORS_HEADERS,
-    exposedHeaders: ['X-Scan-Id', 'X-Trace-Id'],
-    credentials: true,
+  app.use(express.json({
+    verify: (req, _res, buffer) => {
+      req.rawBody = Buffer.from(buffer);
+    },
   }));
-  app.use(express.json());
 
   // Trace context propagation: ensure every request has a scanId/traceId and
   // echo them back so callers (Python backend / Celery) can correlate logs.
@@ -74,6 +74,7 @@ export function createApp() {
     res.setHeader('X-Trace-Id', ctx.traceId);
     next();
   });
+  app.use(createInternalAuthMiddleware());
 
   app.get('/health', (_req, res) => {
     res.json({
@@ -223,20 +224,63 @@ export function createApp() {
 
 export const app = createApp();
 
-export async function startServer() {
-  modules = await loadModules();
+export async function startServer({
+  port = PORT,
+  loadModulesFn = loadModules,
+  validateConfiguration = true,
+} = {}) {
+  if (httpServer) return httpServer;
+  if (validateConfiguration) validateInternalAuthConfiguration();
+  modules = await loadModulesFn();
 
-  app.listen(PORT, () => {
-    logger.info({
-      port: PORT,
-      modules: modules.size,
-      timeoutMs: TIMEOUT_MS,
-      corsOrigin: CORS_ORIGIN,
-    }, 'scan-service running');
+  httpServer = await new Promise((resolve, reject) => {
+    const server = app.listen(port, () => {
+      logger.info({
+        port: server.address()?.port ?? port,
+        modules: modules.size,
+        timeoutMs: TIMEOUT_MS,
+      }, 'scan-service running');
+      resolve(server);
+    });
+    server.once('error', reject);
   });
+  return httpServer;
+}
+
+export async function stopServer() {
+  const server = httpServer;
+  httpServer = null;
+  if (server) {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
+  await closeSharedBrowser();
+}
+
+async function shutdown(signal) {
+  logger.info({ signal }, 'scan-service shutting down');
+  const forceExitTimer = setTimeout(() => {
+    logger.error({ timeoutMs: SHUTDOWN_TIMEOUT_MS }, 'scan-service shutdown timed out');
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExitTimer.unref();
+  try {
+    await stopServer();
+    clearTimeout(forceExitTimer);
+    process.exit(0);
+  } catch (error) {
+    logger.error({ error: error?.message || String(error) }, 'scan-service shutdown failed');
+    process.exit(1);
+  }
 }
 
 if (process.env.NODE_ENV !== 'test') {
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+  process.once('SIGINT', () => void shutdown('SIGINT'));
   startServer().catch((error) => {
     logger.error({ error: error?.message || String(error) }, 'scan-service failed to start');
     process.exit(1);

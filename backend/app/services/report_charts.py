@@ -3,7 +3,7 @@
 Each public function here takes already-aggregated data and returns PNG bytes
 suitable for ``fpdf.FPDF.image(BytesIO(data), ...)``. Charts mirror the live
 Web summary palette so the offline PDF / HTML and the dashboard look like the
-same product (see ``middleReport.md`` T3.2 / Phase 3).
+same product.
 
 Design rules
 ------------

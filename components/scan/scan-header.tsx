@@ -9,11 +9,11 @@ import { ReportGenerateDialog } from "@/components/report/report-generate-dialog
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
+import { downloadCsv, downloadJson } from "@/lib/api/download";
 import { getScanFullExport } from "@/lib/api/scans";
 import { getPageLabelFromPathname } from "@/lib/constants/scan-module-routes";
-import { downloadCsv, pickScanModuleCsvRows } from "@/lib/utils/export-csv";
+import { pickScanModuleCsvRows } from "@/lib/utils/export-csv";
 import {
-  downloadJson,
   pickScanDetailExportSummary,
   pickScanFullExport,
 } from "@/lib/utils/export-json";
