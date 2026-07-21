@@ -17,7 +17,9 @@ export default function MonitorDetailLayout({ children, params }: MonitorDetailL
           <div className="space-y-6 p-4 md:p-8">
             <MonitorDetailHeader />
             <MonitorActiveMaintenanceBanner monitorId={params.monitorId} />
-            <main>{children}</main>
+            <main id="main-content" tabIndex={-1}>
+              {children}
+            </main>
           </div>
         </div>
       </div>

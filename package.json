@@ -2,7 +2,7 @@
   "name": "orbicheck",
   "version": "0.1.0",
   "private": true,
-  "description": "External-perspective website security assessment platform with 30+ OSINT reconnaissance modules, AI-powered analysis, and continuous monitoring.",
+  "description": "External-perspective website security assessment platform with 34 OSINT reconnaissance modules, risk analysis, and continuous monitoring.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -26,6 +26,7 @@
     "dev": "next dev",
     "dev:turbo": "next dev --turbopack",
     "build": "next build",
+    "check:bundle": "node scripts/ci/check-bundle-budget.mjs",
     "start": "next start -H 0.0.0.0",
     "lint": "next lint",
     "test": "vitest run",
@@ -55,11 +56,13 @@
     "react-markdown": "^10.1.0",
     "recharts": "^3.8.0",
     "remark-gfm": "^4.0.1",
+    "sharp": "^0.35.3",
     "tailwind-merge": "^3.5.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.55.1",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",

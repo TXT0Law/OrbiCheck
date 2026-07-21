@@ -1,6 +1,7 @@
 import tls from 'tls';
 
 import middleware from './_common/middleware.js';
+import { targetAddressFromRequest } from './_common/url-safety.js';
 
 /**
  * Local TLS probe that replaces the retired Mozilla TLS Observatory.
@@ -31,7 +32,7 @@ function defaultPort(parsedUrl) {
   return 443;
 }
 
-function probeProtocol(host, port, version, tlsModule) {
+function probeProtocol(host, servername, port, version, tlsModule) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (payload) => {
@@ -47,7 +48,7 @@ function probeProtocol(host, port, version, tlsModule) {
         {
           host,
           port,
-          servername: host,
+          servername,
           minVersion: version.min,
           maxVersion: version.max,
           ALPNProtocols: ['h2', 'http/1.1'],
@@ -147,15 +148,16 @@ function computeGrade(protocols, ciphers) {
   return 'A';
 }
 
-async function runTlsProbe(rawUrl, tlsModule) {
+async function runTlsProbe(rawUrl, tlsModule, request) {
   const parsedUrl = new URL(rawUrl);
-  const host = parsedUrl.hostname;
+  const hostname = parsedUrl.hostname;
+  const host = targetAddressFromRequest(request, hostname);
   const port = defaultPort(parsedUrl);
 
   const probeResults = await Promise.all(
     TLS_VERSIONS.map(async (version) => ({
       version,
-      result: await probeProtocol(host, port, version, tlsModule),
+      result: await probeProtocol(host, hostname, port, version, tlsModule),
     })),
   );
 
@@ -204,7 +206,7 @@ async function runTlsProbe(rawUrl, tlsModule) {
     forward_secrecy: ciphers.length > 0 && ciphers.every((c) => c.forwardSecrecy),
     alpn: alpnList,
     sni: true,
-    target: { host, port },
+    target: { host: hostname, resolvedAddress: host, port },
   };
 }
 
@@ -220,10 +222,10 @@ async function runTlsProbe(rawUrl, tlsModule) {
  *   error?: string, timedOut?: boolean
  * }>}
  */
-export const buildTlsHandler = (tlsModule) => async (rawUrl) => {
+export const buildTlsHandler = (tlsModule) => async (rawUrl, request) => {
   const startedAt = Date.now();
   try {
-    const data = await runTlsProbe(rawUrl, tlsModule);
+    const data = await runTlsProbe(rawUrl, tlsModule, request);
     return {
       statusCode: 200,
       body: {

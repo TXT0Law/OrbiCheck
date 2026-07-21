@@ -2,6 +2,7 @@ import dns from 'dns/promises';
 import tls from 'tls';
 
 import middleware from './_common/middleware.js';
+import { targetAddressFromRequest } from './_common/url-safety.js';
 
 const TLS_TIMEOUT_MS = 10000;
 
@@ -18,17 +19,16 @@ const TLS_TIMEOUT_MS = 10000;
  * @param {string} url Normalised target URL.
  * @returns {Promise<object>} Domains grouped by discovery source.
  */
-async function associatedHostsHandler(url) {
+async function associatedHostsHandler(url, request) {
   const startTime = Date.now();
 
   try {
     const hostname = new URL(url.startsWith('http') ? url : `https://${url}`).hostname;
 
-    const addresses = await dns.resolve4(hostname);
-    const targetIp = addresses[0];
+    const targetIp = targetAddressFromRequest(request, hostname);
 
     const [certHosts, reverseDnsHosts] = await Promise.allSettled([
-      getCertificateHosts(hostname),
+      getCertificateHosts(hostname, targetIp),
       getReverseDnsHosts(targetIp),
     ]);
 
@@ -61,11 +61,11 @@ async function associatedHostsHandler(url) {
   }
 }
 
-function getCertificateHosts(hostname) {
+function getCertificateHosts(hostname, targetIp) {
   return new Promise((resolve, reject) => {
     const socket = tls.connect(
       {
-        host: hostname,
+        host: targetIp,
         port: 443,
         servername: hostname,
         timeout: TLS_TIMEOUT_MS,

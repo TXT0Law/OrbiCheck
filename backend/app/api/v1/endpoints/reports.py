@@ -104,7 +104,7 @@ async def download_report(
     format: Literal["pdf", "markdown", "html"] = Query(default="pdf"),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> Response:
     body, filename, content_type = await report_service.get_report_download(
         db,
         report_id,

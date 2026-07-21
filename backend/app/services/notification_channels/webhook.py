@@ -19,6 +19,7 @@ from app.services.notification_channels._helpers import (
     NOTIFICATION_USER_AGENT,
     failure_result,
     log_send_error,
+    post_json,
     skipped_result,
     success_result,
     validate_https_url,
@@ -82,28 +83,17 @@ class WebhookChannel:
         try:
             target = validate_https_url(target)
         except ValueError as exc:
-            # Allow http:// for legacy compat? No — historically the field
-            # was a `pydantic.HttpUrl` which permitted http. Keep that
-            # backward compat by retrying with the raw URL when the only
-            # complaint is the scheme.
-            if "HTTPS" in str(exc) and target.startswith("http://"):
-                pass
-            else:
-                log_send_error(self.channel_id, error=exc)
-                return failure_result(error=str(exc), latency_ms=0)
+            log_send_error(self.channel_id, error=exc)
+            return failure_result(error=str(exc), latency_ms=0)
 
         body = _build_body(payload)
         started = time.perf_counter()
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.MONITOR_WEBHOOK_TIMEOUT_S
-            ) as client:
-                response = await client.post(
-                    target,
-                    json=body,
-                    headers={"User-Agent": NOTIFICATION_USER_AGENT},
-                )
-                response.raise_for_status()
+            await post_json(
+                target,
+                body,
+                extra_headers={"User-Agent": NOTIFICATION_USER_AGENT},
+            )
         except httpx.HTTPStatusError as exc:
             elapsed = int((time.perf_counter() - started) * 1000)
             log_send_error(self.channel_id, error=exc)
@@ -116,6 +106,13 @@ class WebhookChannel:
             log_send_error(self.channel_id, error=exc)
             return failure_result(
                 error=f"webhook_http_error:{exc.__class__.__name__}",
+                latency_ms=elapsed,
+            )
+        except ValueError as exc:
+            elapsed = int((time.perf_counter() - started) * 1000)
+            log_send_error(self.channel_id, error=exc)
+            return failure_result(
+                error=f"webhook_blocked:{exc}",
                 latency_ms=elapsed,
             )
         elapsed = int((time.perf_counter() - started) * 1000)

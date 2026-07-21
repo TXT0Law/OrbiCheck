@@ -2,7 +2,6 @@
  * @jest-environment node
  */
 
-import { jest } from '@jest/globals';
 import {
   technologiesFromResponseHeaders,
   detectTechFromHeaders,
@@ -31,14 +30,13 @@ describe('tech-stack-fallback', () => {
 
   it('sends OrbiCheck-Scan User-Agent when fetching headers', async () => {
     let capturedUA;
-    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(async (_url, opts) => {
+    const request = async (_url, opts) => {
       capturedUA = opts?.headers?.['User-Agent'];
-      return new Response('', { headers: { server: 'nginx' } });
-    });
+      return { headers: new Headers({ server: 'nginx' }) };
+    };
 
-    await detectTechFromHeaders('https://example.com');
+    await detectTechFromHeaders('https://example.com', { request });
     expect(capturedUA).toMatch(/OrbiCheck-Scan\/1\.0/);
-    spy.mockRestore();
   });
 
   it('returns empty technologies for blank url', async () => {

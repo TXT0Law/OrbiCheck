@@ -4,8 +4,7 @@ These tests exercise:
 * The new ``fetch_mode`` / ``fetch_options`` fields on ContentThresholds*
   schemas — the legacy frontend that omits both still validates (B-6).
 * The model_validator on MonitorCreateRequest / MonitorUpdateRequest that
-  rejects sub-300s intervals when the operator switches to browser fetch
-  mode (B-7 — see middleReport §6.5).
+  rejects sub-300s intervals when the operator switches to browser fetch.
 """
 
 from __future__ import annotations
@@ -80,7 +79,7 @@ def test_fetch_options_rejects_oversized_wait_ms() -> None:
 
 @pytest.mark.unit
 def test_create_request_rejects_browser_mode_with_short_interval() -> None:
-    """B-7 / §6.5: 60-second monitor + browser fetch must 422."""
+    """A 60-second monitor with browser fetch must fail validation."""
     payload = {
         "displayName": "shopify",
         "url": "https://example.com",

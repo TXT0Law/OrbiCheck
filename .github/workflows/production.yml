@@ -72,7 +72,7 @@ jobs:
       - name: Build osint-engine package
         run: |
           cd backend/scan
-          npm install --no-package-lock --legacy-peer-deps
+          npm ci
 
       - name: Deploy to production
         env:

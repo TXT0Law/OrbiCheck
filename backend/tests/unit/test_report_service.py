@@ -346,7 +346,7 @@ def test_security_score_breakdown_dict_returns_camelcase_payload() -> None:
     """Report payload must mirror the GET /scans/{id}/detail camelCase shape.
 
     Guards against the historical drift where ``dataclasses.asdict`` produced
-    snake_case while the live API emitted camelCase (see middleReport.md G7).
+    snake_case while the live API emitted camelCase.
     """
     breakdown = SecurityScoreResult(
         score=72,

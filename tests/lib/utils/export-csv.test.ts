@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { downloadCsv } from "@/lib/api/download";
 import {
-  downloadCsv,
   pickScanModuleCsvRows,
   rowsToCsv,
 } from "@/lib/utils/export-csv";

@@ -54,14 +54,3 @@ export function pickScanFullExport(detail: ScanDetail, full: ScanFullExport) {
     exportedAt: full.exportedAt,
   };
 }
-
-export function downloadJson(filename: string, data: unknown): void {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.rel = "noopener";
-  anchor.click();
-  URL.revokeObjectURL(url);
-}

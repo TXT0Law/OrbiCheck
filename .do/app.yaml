@@ -1,6 +1,11 @@
 name: orbicheck
 region: nyc
 
+# Before the first deploy, provision these encrypted runtime variables in the
+# App Platform control panel for Backend, workers, Scan Service, and Scanner:
+# AUTH_LOGIN_PASSWORD, AUTH_SESSION_SECRET, MONITOR_SECRET_ENCRYPTION_KEY,
+# INTERNAL_SERVICE_SECRET. They are intentionally absent from this tracked spec.
+
 services:
   - name: frontend
     github:
@@ -12,6 +17,14 @@ services:
     http_port: 3000
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      initial_delay_seconds: 15
+      period_seconds: 15
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+      http_path: /
+      port: 3000
     envs:
       - key: NEXT_PUBLIC_API_URL
         value: http://localhost:8000
@@ -40,6 +53,9 @@ services:
       http_path: /api/v1/health
       port: 8000
     envs:
+      - key: APP_ENV
+        value: production
+        scope: RUN_TIME
       - key: DATABASE_URL
         value: ${postgres-db.DATABASE_URL}
         scope: RUN_TIME
@@ -57,17 +73,12 @@ services:
       - key: CORS_ORIGINS
         value: ${frontend.PUBLIC_URL}
         scope: RUN_TIME
+      - key: PUBLIC_BASE_URL
+        value: ${frontend.PUBLIC_URL}
+        scope: RUN_TIME
       - key: AUTH_LOGIN_EMAIL
         value: admin@orbicheck.app
         scope: RUN_TIME
-      - key: AUTH_LOGIN_PASSWORD
-        value: change-me-before-production
-        scope: RUN_TIME
-        type: secret
-      - key: AUTH_SESSION_SECRET
-        value: replace-with-a-long-random-secret
-        scope: RUN_TIME
-        type: secret
       - key: AUTH_COOKIE_SECURE
         value: "true"
         scope: RUN_TIME
@@ -85,12 +96,23 @@ services:
     internal_ports: [4000]
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      initial_delay_seconds: 15
+      period_seconds: 15
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+      http_path: /health
+      port: 4000
     envs:
       - key: SCAN_SERVICE_PORT
         value: "4000"
         scope: RUN_TIME
       - key: NODE_ENV
         value: production
+        scope: RUN_TIME
+      - key: INTERNAL_SERVICE_AUTH_REQUIRED
+        value: "true"
         scope: RUN_TIME
 
   - name: scanner
@@ -103,6 +125,21 @@ services:
     internal_ports: [5000]
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      initial_delay_seconds: 15
+      period_seconds: 15
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+      http_path: /ready
+      port: 5000
+    envs:
+      - key: APP_ENV
+        value: production
+        scope: RUN_TIME
+      - key: INTERNAL_SERVICE_AUTH_REQUIRED
+        value: "true"
+        scope: RUN_TIME
 
 workers:
   - name: celery-worker
@@ -116,6 +153,9 @@ workers:
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
     envs:
+      - key: APP_ENV
+        value: production
+        scope: RUN_TIME
       - key: DATABASE_URL
         value: ${postgres-db.DATABASE_URL}
         scope: RUN_TIME
@@ -129,6 +169,18 @@ workers:
         scope: RUN_TIME
       - key: NMAP_SCANNER_URL
         value: ${scanner.PRIVATE_URL}
+        scope: RUN_TIME
+      - key: CORS_ORIGINS
+        value: ${frontend.PUBLIC_URL}
+        scope: RUN_TIME
+      - key: PUBLIC_BASE_URL
+        value: ${frontend.PUBLIC_URL}
+        scope: RUN_TIME
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+        scope: RUN_TIME
+      - key: AUTH_DEV_BYPASS_ENABLED
+        value: "false"
         scope: RUN_TIME
       - key: CELERY_MODE
         value: worker
@@ -148,6 +200,9 @@ workers:
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
     envs:
+      - key: APP_ENV
+        value: production
+        scope: RUN_TIME
       - key: DATABASE_URL
         value: ${postgres-db.DATABASE_URL}
         scope: RUN_TIME
@@ -161,6 +216,18 @@ workers:
         scope: RUN_TIME
       - key: NMAP_SCANNER_URL
         value: ${scanner.PRIVATE_URL}
+        scope: RUN_TIME
+      - key: CORS_ORIGINS
+        value: ${frontend.PUBLIC_URL}
+        scope: RUN_TIME
+      - key: PUBLIC_BASE_URL
+        value: ${frontend.PUBLIC_URL}
+        scope: RUN_TIME
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+        scope: RUN_TIME
+      - key: AUTH_DEV_BYPASS_ENABLED
+        value: "false"
         scope: RUN_TIME
       - key: CELERY_MODE
         value: beat

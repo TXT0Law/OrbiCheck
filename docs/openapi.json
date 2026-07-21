@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "OrbiCheck API",
+    "title": "Web OSINT API",
     "version": "0.1.0"
   },
   "paths": {
@@ -59,7 +59,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse_dict_"
+                  "$ref": "#/components/schemas/SuccessResponse_dict_str__bool__"
                 }
               }
             }
@@ -196,6 +196,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessResponse_TestEmailResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/notification-channels/test": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Send Test Notification",
+        "description": "Phase 3.6: trigger a synthetic alert through the channel adapter.\n\nThe dispatch row is recorded in ``osint_notification_dispatch_log`` like\na real alert delivery so the audit trail is consistent.",
+        "operationId": "send_test_notification_api_v1_me_notification_channels_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_NotificationTestResponse_"
                 }
               }
             }
@@ -477,6 +519,131 @@
         }
       }
     },
+    "/api/v1/scans/by-domain/{domain}/timeline": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get Domain Timeline",
+        "description": "Return owner-scoped scan history for a domain ordered oldest → newest.\n\nBacks the Trend page (T5.1): the dashboard plots one line for security\nscore and one for total severity counts, so the chart tooltip must keep\ntrack of both. The endpoint deliberately filters on terminal statuses\nonly so partial / pending scans do not skew the trend.\n\nRegistered BEFORE the ``/{scan_id}`` catch-all so requests like\n``GET /scans/by-domain/example.com/timeline`` do not get matched as a\nscan id and rejected by the UUID validator.",
+        "operationId": "get_domain_timeline_api_v1_scans_by_domain__domain__timeline_get",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Domain"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Range"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/diff": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Diff Two Scans",
+        "description": "Compare two owner-scoped scans (T5.2).\n\nBoth scans are fetched with owner enforcement (``scan_service.get_scan``\nraises ``ScanNotFoundError`` → 404 when the user mismatches), so a user\ncannot diff someone else's scan even by guessing IDs. Registered BEFORE\nthe ``/{scan_id}`` catch-all so the literal ``/scans/diff`` path is not\neaten by the UUID validator.",
+        "operationId": "diff_two_scans_api_v1_scans_diff_get",
+        "parameters": [
+          {
+            "name": "baseId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Baseid"
+            }
+          },
+          {
+            "name": "compareId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Compareid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/scans/{scan_id}": {
       "get": {
         "tags": [
@@ -556,6 +723,62 @@
         }
       }
     },
+    "/api/v1/scans/{scan_id}/events": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get Scan Events",
+        "description": "List recent diagnostics for one scan.",
+        "operationId": "get_scan_events_api_v1_scans__scan_id__events_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_OperationalEventListResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/scans/{scan_id}/modules/{module_name}": {
       "get": {
         "tags": [
@@ -590,7 +813,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_object_"
+                }
               }
             }
           },
@@ -632,7 +857,53 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}/detail/full": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get Scan Full Export",
+        "description": "Return transformed scan detail plus untouched module raw results.\n\nUsed by the dashboard \"Export full (JSON)\" action so users can take a\nportable snapshot of every module's raw output (no transformer\nflattening) alongside the dashboard summary. Owner-scoped via\n``scan_service.get_scan``.",
+        "operationId": "get_scan_full_export_api_v1_scans__scan_id__detail_full_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_dict_"
+                }
               }
             }
           },
@@ -683,7 +954,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_dict_"
+                }
               }
             }
           },
@@ -1171,6 +1444,415 @@
         }
       }
     },
+    "/api/v1/url-groups/{group_id}/runs": {
+      "post": {
+        "tags": [
+          "url-groups"
+        ],
+        "summary": "Create Group Run",
+        "description": "Create and enqueue a URL group batch scan run.",
+        "operationId": "create_group_run_api_v1_url_groups__group_id__runs_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrlGroupRunCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_UrlGroupRunResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "url-groups"
+        ],
+        "summary": "List Group Runs",
+        "description": "List historical group scan runs.",
+        "operationId": "list_group_runs_api_v1_url_groups__group_id__runs_get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_UrlGroupRunListResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/url-groups/{group_id}/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "url-groups"
+        ],
+        "summary": "Get Group Run",
+        "description": "Get group scan run detail with per-member statuses.",
+        "operationId": "get_group_run_api_v1_url_groups__group_id__runs__run_id__get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_UrlGroupRunResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/url-groups/{group_id}/runs/{run_id}/cancel": {
+      "post": {
+        "tags": [
+          "url-groups"
+        ],
+        "summary": "Cancel Group Run",
+        "description": "Cancel a queued or active URL group scan run.",
+        "operationId": "cancel_group_run_api_v1_url_groups__group_id__runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_UrlGroupRunResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/url-groups/{group_id}/runs/{run_id}/events": {
+      "get": {
+        "tags": [
+          "url-groups"
+        ],
+        "summary": "Get Group Run Events",
+        "description": "List recent diagnostics for one URL group scan run.",
+        "operationId": "get_group_run_events_api_v1_url_groups__group_id__runs__run_id__events_get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_OperationalEventListResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/url-groups/{group_id}/runs/{run_id}/retry-failed": {
+      "post": {
+        "tags": [
+          "url-groups"
+        ],
+        "summary": "Retry Failed Group Run",
+        "description": "Create a new group run for failed members from a previous run.",
+        "operationId": "retry_failed_group_run_api_v1_url_groups__group_id__runs__run_id__retry_failed_post",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrlGroupRunCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_UrlGroupRunResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/url-groups/{group_id}/runs/{run_id}/progress": {
+      "get": {
+        "tags": [
+          "url-groups"
+        ],
+        "summary": "Group Run Progress Sse",
+        "description": "Server-Sent Events endpoint for group scan progress.",
+        "operationId": "group_run_progress_sse_api_v1_url_groups__group_id__runs__run_id__progress_get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Group Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/monitors/{monitor_id}/stream": {
       "get": {
         "tags": [
@@ -1274,6 +1956,95 @@
             }
           },
           {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tags"
+            }
+          },
+          {
+            "name": "tag_match",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(any|all)$",
+              "description": "Use 'any' for OR-of-tags (default) or 'all' for AND.",
+              "default": "any",
+              "title": "Tag Match"
+            },
+            "description": "Use 'any' for OR-of-tags (default) or 'all' for AND."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort spec '<field>:<asc|desc>'. Allowed fields: createdAt, updatedAt, displayName, lastCheckAt, lastResponseTimeMs, uptimePercentage. Defaults to createdAt:desc.",
+              "title": "Sort"
+            },
+            "description": "Sort spec '<field>:<asc|desc>'. Allowed fields: createdAt, updatedAt, displayName, lastCheckAt, lastResponseTimeMs, uptimePercentage. Defaults to createdAt:desc."
+          },
+          {
+            "name": "latency_max_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep monitors with last_response_time_ms <= this value.",
+              "title": "Latency Max Ms"
+            },
+            "description": "Keep monitors with last_response_time_ms <= this value."
+          },
+          {
+            "name": "uptime_min_percent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 100,
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep monitors with uptime_percentage >= this value.",
+              "title": "Uptime Min Percent"
+            },
+            "description": "Keep monitors with uptime_percentage >= this value."
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -1343,6 +2114,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessResponse_MonitorResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/monitors/bulk": {
+      "post": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "Apply an action to many monitors in one request",
+        "description": "Bulk pause/resume/enable/disable/delete. Per-row errors are returned in `data.failed` so partial failures don't abort the whole batch.",
+        "operationId": "bulk_act_on_monitors_api_v1_monitors_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonitorBulkActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_MonitorBulkActionResponse_"
                 }
               }
             }
@@ -1478,6 +2291,61 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/events": {
+      "get": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "Get Monitor Events",
+        "operationId": "get_monitor_events_api_v1_monitors__monitor_id__events_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Monitor Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_OperationalEventListResponse_"
                 }
               }
             }
@@ -2282,6 +3150,17 @@
               "format": "uuid",
               "title": "Change Id"
             }
+          },
+          {
+            "name": "diff",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(line|word)$",
+              "default": "line",
+              "title": "Diff"
+            }
           }
         ],
         "responses": {
@@ -2385,6 +3264,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessResponse_list_MonitorVisualCaptureResponse__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/visual/captures/now": {
+      "post": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "Trigger a synchronous visual capture (V-2)",
+        "description": "Forces an immediate screenshot via the scan service so the operator can establish a baseline even when the periodic check has been failing (Cloudflare interstitial, 5xx, TLS handshake error). Rate-limited per monitor — see `MONITOR_VISUAL_CAPTURE_NOW_*` settings.",
+        "operationId": "trigger_visual_capture_now_api_v1_monitors__monitor_id__visual_captures_now_post",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Monitor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_MonitorVisualCaptureResponse_"
                 }
               }
             }
@@ -2583,6 +3506,417 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessResponse_MonitorSslStatusResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/dns/records": {
+      "get": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "List Dns Records",
+        "operationId": "list_dns_records_api_v1_monitors__monitor_id__dns_records_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Monitor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_list_MonitorDnsRecordResponse__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/dns/changes": {
+      "get": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "List Dns Changes",
+        "operationId": "list_dns_changes_api_v1_monitors__monitor_id__dns_changes_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Monitor Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_list_MonitorDnsChangeResponse__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/ct/entries": {
+      "get": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "List Ct Entries",
+        "operationId": "list_ct_entries_api_v1_monitors__monitor_id__ct_entries_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Monitor Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_list_MonitorCtEntryResponse__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/maintenance/active": {
+      "get": {
+        "tags": [
+          "monitors"
+        ],
+        "summary": "List Active Maintenance Windows",
+        "description": "Return maintenance windows currently in effect for this monitor.\n\nThe monitor detail page uses this to render an \"in maintenance\" banner\nand short-circuit alerting expectations.",
+        "operationId": "list_active_maintenance_windows_api_v1_monitors__monitor_id__maintenance_active_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Monitor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_list_MaintenanceWindowResponse__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maintenance-windows": {
+      "get": {
+        "tags": [
+          "maintenance-windows"
+        ],
+        "summary": "List Windows",
+        "operationId": "list_windows_api_v1_maintenance_windows_get",
+        "parameters": [
+          {
+            "name": "monitorId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Monitorid"
+            }
+          },
+          {
+            "name": "includeDisabled",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Includedisabled"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_list_MaintenanceWindowResponse__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "maintenance-windows"
+        ],
+        "summary": "Create Window",
+        "operationId": "create_window_api_v1_maintenance_windows_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaintenanceWindowCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_MaintenanceWindowResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maintenance-windows/{window_id}": {
+      "patch": {
+        "tags": [
+          "maintenance-windows"
+        ],
+        "summary": "Update Window",
+        "operationId": "update_window_api_v1_maintenance_windows__window_id__patch",
+        "parameters": [
+          {
+            "name": "window_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Window Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaintenanceWindowUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_MaintenanceWindowResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "maintenance-windows"
+        ],
+        "summary": "Delete Window",
+        "operationId": "delete_window_api_v1_maintenance_windows__window_id__delete",
+        "parameters": [
+          {
+            "name": "window_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Window Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_dict_"
                 }
               }
             }
@@ -3115,6 +4449,61 @@
         }
       }
     },
+    "/api/v1/reports/{report_id}/events": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Get Report Events",
+        "operationId": "get_report_events_api_v1_reports__report_id__events_get",
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Report Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_OperationalEventListResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/reports/{report_id}/preview": {
       "get": {
         "tags": [
@@ -3183,7 +4572,8 @@
             "schema": {
               "enum": [
                 "pdf",
-                "markdown"
+                "markdown",
+                "html"
               ],
               "type": "string",
               "default": "pdf",
@@ -3197,6 +4587,287 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/report-schedules": {
+      "get": {
+        "tags": [
+          "report-schedules"
+        ],
+        "summary": "List Report Schedules",
+        "operationId": "list_report_schedules_api_v1_report_schedules_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_ReportScheduleListResponse_"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "report-schedules"
+        ],
+        "summary": "Create Report Schedule",
+        "operationId": "create_report_schedule_api_v1_report_schedules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportScheduleCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_ReportScheduleResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/report-schedules/{schedule_id}": {
+      "get": {
+        "tags": [
+          "report-schedules"
+        ],
+        "summary": "Get Report Schedule",
+        "operationId": "get_report_schedule_api_v1_report_schedules__schedule_id__get",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Schedule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_ReportScheduleResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "report-schedules"
+        ],
+        "summary": "Update Report Schedule",
+        "operationId": "update_report_schedule_api_v1_report_schedules__schedule_id__put",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Schedule Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportScheduleUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_ReportScheduleResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "report-schedules"
+        ],
+        "summary": "Delete Report Schedule",
+        "operationId": "delete_report_schedule_api_v1_report_schedules__schedule_id__delete",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Schedule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/report-schedules/{schedule_id}/run-now": {
+      "post": {
+        "tags": [
+          "report-schedules"
+        ],
+        "summary": "Run Report Schedule Now",
+        "operationId": "run_report_schedule_now_api_v1_report_schedules__schedule_id__run_now_post",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Schedule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/report-schedules/{schedule_id}/runs": {
+      "get": {
+        "tags": [
+          "report-schedules"
+        ],
+        "summary": "List Report Schedule Runs",
+        "operationId": "list_report_schedule_runs_api_v1_report_schedules__schedule_id__runs_get",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Schedule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_ReportScheduleRunsResponse_"
+                }
               }
             }
           },
@@ -3481,6 +5152,80 @@
         "type": "object",
         "title": "ChainEntrySummary"
       },
+      "ChannelConfigRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "severityFilter": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "warning",
+                "info"
+              ]
+            },
+            "type": "array",
+            "title": "Severityfilter"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ChannelConfigRequest",
+        "description": "One Slack/Discord/Teams/PagerDuty configuration block."
+      },
+      "ChannelConfigResponse": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "severityFilter": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "warning",
+                "info"
+              ]
+            },
+            "type": "array",
+            "title": "Severityfilter"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "target",
+          "severityFilter"
+        ],
+        "title": "ChannelConfigResponse"
+      },
       "ContentCapabilityConfigUpdateSchema": {
         "properties": {
           "enabled": {
@@ -3531,6 +5276,119 @@
         "additionalProperties": false,
         "type": "object",
         "title": "ContentCapabilityConfigUpdateSchema"
+      },
+      "ContentExtractorSchema": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "css",
+              "xpath",
+              "jsonpath"
+            ],
+            "title": "Type"
+          },
+          "expression": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Expression"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "expression"
+        ],
+        "title": "ContentExtractorSchema"
+      },
+      "ContentFetchOptionsSchema": {
+        "properties": {
+          "waitForSelector": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waitforselector"
+          },
+          "waitMs": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waitms"
+          },
+          "viewportWidth": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3840.0,
+                "minimum": 320.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewportwidth"
+          },
+          "viewportHeight": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2160.0,
+                "minimum": 240.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viewportheight"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ContentFetchOptionsSchema",
+        "description": "C-5: per-monitor knobs forwarded to ``page-source-rendered`` (browser fetch).\n\nAll fields are optional — ``content_rendered_fetch.get_rendered_fetch_options``\ntreats absent values as \"use the scan-service defaults\". Numbers are bounded\nhere so a malicious / mistaken config can never request a 5-minute\n``waitMs`` or a 10000×10000 viewport."
+      },
+      "ContentRestockSchema": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "outOfStockKeywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Outofstockkeywords"
+          },
+          "inStockKeywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Instockkeywords"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ContentRestockSchema"
       },
       "ContentThresholdsUpdateSchema": {
         "properties": {
@@ -3647,6 +5505,30 @@
             ],
             "title": "Selectorextraction"
           },
+          "extractors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContentExtractorSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extractors"
+          },
+          "restock": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentRestockSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "normalizationRules": {
             "anyOf": [
               {
@@ -3689,11 +5571,281 @@
               }
             ],
             "title": "Repeatalertfingerprintwindowminutes"
+          },
+          "triggerWords": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggerwords"
+          },
+          "ignoreWords": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ignorewords"
+          },
+          "triggerRegex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggerregex"
+          },
+          "fetchMode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "http",
+                  "browser"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetchmode"
+          },
+          "fetchOptions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentFetchOptionsSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "ContentThresholdsUpdateSchema"
+      },
+      "CtCapabilityConfigUpdateSchema": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "alert": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CapabilityAlertPolicyUpdateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "thresholds": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CtThresholdsUpdateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "intervalOverrideSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 86400.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intervaloverrideseconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CtCapabilityConfigUpdateSchema"
+      },
+      "CtThresholdsUpdateSchema": {
+        "properties": {
+          "pinnedSerials": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinnedserials"
+          },
+          "lookbackHours": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 720.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookbackhours"
+          },
+          "alertOnNewEntry": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alertonnewentry"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CtThresholdsUpdateSchema"
+      },
+      "DnsCapabilityConfigUpdateSchema": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "alert": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CapabilityAlertPolicyUpdateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "thresholds": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DnsThresholdsUpdateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "intervalOverrideSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 86400.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intervaloverrideseconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DnsCapabilityConfigUpdateSchema"
+      },
+      "DnsThresholdsUpdateSchema": {
+        "properties": {
+          "recordTypes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recordtypes"
+          },
+          "nameservers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nameservers"
+          },
+          "queryTimeoutSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 60.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Querytimeoutseconds"
+          },
+          "alertOnChange": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alertonchange"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DnsThresholdsUpdateSchema"
       },
       "HTTPValidationError": {
         "properties": {
@@ -3707,6 +5859,61 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HttpAuthInputSchema": {
+        "properties": {
+          "scheme": {
+            "type": "string",
+            "enum": [
+              "none",
+              "bearer",
+              "basic"
+            ],
+            "title": "Scheme"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scheme"
+        ],
+        "title": "HttpAuthInputSchema",
+        "description": "Plaintext auth payload accepted on create/update (NEVER stored as-is)."
+      },
+      "HttpAuthSummary": {
+        "properties": {
+          "scheme": {
+            "type": "string",
+            "enum": [
+              "none",
+              "bearer",
+              "basic"
+            ],
+            "title": "Scheme",
+            "default": "none"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "HttpAuthSummary",
+        "description": "Read-side projection that exposes only whether an auth secret exists."
       },
       "LoginRequest": {
         "properties": {
@@ -3726,6 +5933,390 @@
         ],
         "title": "LoginRequest"
       },
+      "MaintenanceRecurrenceSpec": {
+        "properties": {
+          "freq": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly"
+            ],
+            "title": "Freq"
+          },
+          "byWeekday": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array",
+                "maxItems": 7
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byweekday"
+          },
+          "untilAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untilat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "freq"
+        ],
+        "title": "MaintenanceRecurrenceSpec"
+      },
+      "MaintenanceWindowCreateRequest": {
+        "properties": {
+          "monitorId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitorid"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Startsat"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Endsat"
+          },
+          "suppressAlerts": {
+            "type": "boolean",
+            "title": "Suppressalerts",
+            "default": true
+          },
+          "suppressProbes": {
+            "type": "boolean",
+            "title": "Suppressprobes",
+            "default": false
+          },
+          "isEnabled": {
+            "type": "boolean",
+            "title": "Isenabled",
+            "default": true
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MaintenanceRecurrenceSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tagScope": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tagscope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "startsAt",
+          "endsAt"
+        ],
+        "title": "MaintenanceWindowCreateRequest"
+      },
+      "MaintenanceWindowResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "userId": {
+            "type": "integer",
+            "title": "Userid"
+          },
+          "monitorId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitorid"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Startsat"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Endsat"
+          },
+          "suppressAlerts": {
+            "type": "boolean",
+            "title": "Suppressalerts"
+          },
+          "suppressProbes": {
+            "type": "boolean",
+            "title": "Suppressprobes"
+          },
+          "isEnabled": {
+            "type": "boolean",
+            "title": "Isenabled"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MaintenanceRecurrenceSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tagScope": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tagscope"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "userId",
+          "title",
+          "startsAt",
+          "endsAt",
+          "suppressAlerts",
+          "suppressProbes",
+          "isEnabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "MaintenanceWindowResponse"
+      },
+      "MaintenanceWindowUpdateRequest": {
+        "properties": {
+          "monitorId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitorid"
+          },
+          "clearMonitorScope": {
+            "type": "boolean",
+            "title": "Clearmonitorscope",
+            "default": false
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startsat"
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endsat"
+          },
+          "suppressAlerts": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suppressalerts"
+          },
+          "suppressProbes": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suppressprobes"
+          },
+          "isEnabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isenabled"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MaintenanceRecurrenceSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clearRecurrence": {
+            "type": "boolean",
+            "title": "Clearrecurrence",
+            "default": false
+          },
+          "tagScope": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tagscope"
+          },
+          "clearTagScope": {
+            "type": "boolean",
+            "title": "Cleartagscope",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MaintenanceWindowUpdateRequest"
+      },
       "ModuleStatus": {
         "type": "string",
         "enum": [
@@ -3733,7 +6324,8 @@
           "running",
           "success",
           "failed",
-          "timeout"
+          "timeout",
+          "retrying"
         ],
         "title": "ModuleStatus"
       },
@@ -3804,6 +6396,100 @@
         ],
         "title": "MonitorBaselineResponse"
       },
+      "MonitorBulkActionFailure": {
+        "properties": {
+          "monitorId": {
+            "type": "string",
+            "title": "Monitorid"
+          },
+          "errorCode": {
+            "type": "string",
+            "title": "Errorcode"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "monitorId",
+          "errorCode",
+          "message"
+        ],
+        "title": "MonitorBulkActionFailure"
+      },
+      "MonitorBulkActionRequest": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "pause",
+              "resume",
+              "enable",
+              "disable",
+              "delete"
+            ],
+            "title": "Action"
+          },
+          "monitorIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Monitorids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action",
+          "monitorIds"
+        ],
+        "title": "MonitorBulkActionRequest",
+        "description": "Apply ``action`` to up to ``MAX_BULK_MONITOR_IDS`` monitors at once."
+      },
+      "MonitorBulkActionResponse": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "pause",
+              "resume",
+              "enable",
+              "disable",
+              "delete"
+            ],
+            "title": "Action"
+          },
+          "succeeded": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Succeeded"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorBulkActionFailure"
+            },
+            "type": "array",
+            "title": "Failed"
+          },
+          "requested": {
+            "type": "integer",
+            "title": "Requested",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "MonitorBulkActionResponse"
+      },
       "MonitorCapabilitiesPatchSchema": {
         "properties": {
           "uptimeOnly": {
@@ -3840,6 +6526,26 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/VisualCapabilityConfigUpdateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dnsChange": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DnsCapabilityConfigUpdateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ctLog": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CtCapabilityConfigUpdateSchema"
               },
               {
                 "type": "null"
@@ -3889,16 +6595,7 @@
             "title": "Snapshotafterid"
           },
           "diffSummary": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "string"
-                }
-              ]
-            },
+            "additionalProperties": true,
             "type": "object",
             "title": "Diffsummary"
           },
@@ -4129,6 +6826,41 @@
             "title": "Httpmethod",
             "default": "GET"
           },
+          "httpBody": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Httpbody"
+          },
+          "httpHeaders": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Httpheaders"
+          },
+          "httpAuth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HttpAuthInputSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expectedStatusCode": {
             "anyOf": [
               {
@@ -4154,6 +6886,125 @@
           "url"
         ],
         "title": "MonitorCreateRequest"
+      },
+      "MonitorCtEntryResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "monitorId": {
+            "type": "string",
+            "title": "Monitorid"
+          },
+          "hostname": {
+            "type": "string",
+            "title": "Hostname"
+          },
+          "serialNumber": {
+            "type": "string",
+            "title": "Serialnumber"
+          },
+          "leafSha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leafsha256"
+          },
+          "issuerName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuername"
+          },
+          "commonName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commonname"
+          },
+          "notBefore": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notbefore"
+          },
+          "notAfter": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notafter"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observedat"
+          },
+          "crtshId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crtshid"
+          },
+          "pinViolation": {
+            "type": "boolean",
+            "title": "Pinviolation",
+            "default": false
+          },
+          "alertedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alertedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "monitorId",
+          "hostname",
+          "serialNumber",
+          "observedAt"
+        ],
+        "title": "MonitorCtEntryResponse"
       },
       "MonitorCurrentStreak": {
         "properties": {
@@ -4247,18 +7098,21 @@
             "title": "Currentcapturedat"
           },
           "diffSummary": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "string"
-                }
-              ]
-            },
+            "additionalProperties": true,
             "type": "object",
             "title": "Diffsummary"
+          },
+          "wordDiff": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worddiff"
           },
           "originalPreviousLength": {
             "type": "integer",
@@ -4306,6 +7160,116 @@
         ],
         "title": "MonitorDiffResponse"
       },
+      "MonitorDnsChangeResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "monitorId": {
+            "type": "string",
+            "title": "Monitorid"
+          },
+          "recordType": {
+            "type": "string",
+            "title": "Recordtype"
+          },
+          "detectedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Detectedat"
+          },
+          "previousValues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Previousvalues"
+          },
+          "currentValues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Currentvalues"
+          },
+          "addedValues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Addedvalues"
+          },
+          "removedValues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Removedvalues"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "monitorId",
+          "recordType",
+          "detectedAt",
+          "previousValues",
+          "currentValues",
+          "addedValues",
+          "removedValues"
+        ],
+        "title": "MonitorDnsChangeResponse"
+      },
+      "MonitorDnsRecordResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "monitorId": {
+            "type": "string",
+            "title": "Monitorid"
+          },
+          "recordType": {
+            "type": "string",
+            "title": "Recordtype"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Values"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observedat"
+          },
+          "lastChangeAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastchangeat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "monitorId",
+          "recordType",
+          "values",
+          "observedAt"
+        ],
+        "title": "MonitorDnsRecordResponse"
+      },
       "MonitorFailureDistribution": {
         "additionalProperties": {
           "type": "integer"
@@ -4352,6 +7316,34 @@
           "httpMethod": {
             "type": "string",
             "title": "Httpmethod"
+          },
+          "httpBody": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Httpbody"
+          },
+          "httpHeaders": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Httpheaders"
+          },
+          "httpAuth": {
+            "$ref": "#/components/schemas/HttpAuthSummary"
           },
           "expectedStatusCode": {
             "anyOf": [
@@ -4458,6 +7450,39 @@
               }
             ],
             "title": "Avgresponsetimems"
+          },
+          "p50ResponseTimeMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50Responsetimems"
+          },
+          "p95ResponseTimeMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95Responsetimems"
+          },
+          "p99ResponseTimeMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P99Responsetimems"
           },
           "lastSuccess": {
             "anyOf": [
@@ -4689,6 +7714,21 @@
             "type": "number",
             "title": "Maxresponsetime"
           },
+          "p50ResponseTime": {
+            "type": "number",
+            "title": "P50Responsetime",
+            "default": 0.0
+          },
+          "p95ResponseTime": {
+            "type": "number",
+            "title": "P95Responsetime",
+            "default": 0.0
+          },
+          "p99ResponseTime": {
+            "type": "number",
+            "title": "P99Responsetime",
+            "default": 0.0
+          },
           "checkCount": {
             "type": "integer",
             "title": "Checkcount"
@@ -4807,6 +7847,51 @@
             ],
             "title": "Httpmethod"
           },
+          "httpBody": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Httpbody"
+          },
+          "httpHeaders": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Httpheaders"
+          },
+          "httpAuth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HttpAuthInputSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clearHttpBody": {
+            "type": "boolean",
+            "title": "Clearhttpbody",
+            "default": false
+          },
+          "clearHttpHeaders": {
+            "type": "boolean",
+            "title": "Clearhttpheaders",
+            "default": false
+          },
           "expectedStatusCode": {
             "anyOf": [
               {
@@ -4873,9 +7958,19 @@
             "type": "number",
             "title": "Avgresponsetimems"
           },
+          "p50ResponseTimeMs": {
+            "type": "number",
+            "title": "P50Responsetimems",
+            "default": 0.0
+          },
           "p95ResponseTimeMs": {
             "type": "number",
             "title": "P95Responsetimems"
+          },
+          "p99ResponseTimeMs": {
+            "type": "number",
+            "title": "P99Responsetimems",
+            "default": 0.0
           },
           "incidents": {
             "type": "integer",
@@ -4970,6 +8065,11 @@
             "type": "string",
             "title": "Dhashalgo",
             "default": "dhash"
+          },
+          "isDiagnostic": {
+            "type": "boolean",
+            "title": "Isdiagnostic",
+            "default": false
           }
         },
         "type": "object",
@@ -5072,6 +8172,13 @@
           "emailOnInfo": {
             "type": "boolean",
             "title": "Emailoninfo"
+          },
+          "channels": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ChannelConfigResponse"
+            },
+            "type": "object",
+            "title": "Channels"
           }
         },
         "type": "object",
@@ -5143,10 +8250,302 @@
             "type": "boolean",
             "title": "Emailoninfo",
             "default": false
+          },
+          "channels": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ChannelConfigRequest"
+            },
+            "type": "object",
+            "title": "Channels"
           }
         },
         "type": "object",
         "title": "NotificationSettingsUpdate"
+      },
+      "NotificationTestRequest": {
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "enum": [
+              "webhook",
+              "email",
+              "slack",
+              "discord",
+              "teams",
+              "pagerduty"
+            ],
+            "title": "Channel Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "channel_id"
+        ],
+        "title": "NotificationTestRequest",
+        "description": "Request body for ``POST /me/notification-channels/test``."
+      },
+      "NotificationTestResponse": {
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "title": "Channel Id"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "skipped_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel_id",
+          "success",
+          "message"
+        ],
+        "title": "NotificationTestResponse",
+        "description": "Single-channel test result surfaced to the frontend."
+      },
+      "OperationalEventListResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/OperationalEventResponse"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "title": "OperationalEventListResponse"
+      },
+      "OperationalEventResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "userId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Userid"
+          },
+          "eventType": {
+            "type": "string",
+            "title": "Eventtype"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "targetUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targeturl"
+          },
+          "scanId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanid"
+          },
+          "monitorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitorid"
+          },
+          "reportId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reportid"
+          },
+          "groupId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Groupid"
+          },
+          "groupRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grouprunid"
+          },
+          "groupRunMemberId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grouprunmemberid"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
+          },
+          "retryCount": {
+            "type": "integer",
+            "title": "Retrycount",
+            "default": 0
+          },
+          "errorCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errorcode"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "traceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traceid"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "eventType",
+          "status",
+          "createdAt"
+        ],
+        "title": "OperationalEventResponse"
       },
       "ReportCreateRequest": {
         "properties": {
@@ -5183,7 +8582,9 @@
             "enum": [
               "pdf",
               "markdown",
-              "both"
+              "html",
+              "both",
+              "all"
             ],
             "title": "Format",
             "default": "pdf"
@@ -5212,7 +8613,9 @@
         "enum": [
           "pdf",
           "markdown",
-          "both"
+          "html",
+          "both",
+          "all"
         ],
         "title": "ReportFormat"
       },
@@ -5232,6 +8635,18 @@
           },
           "status": {
             "$ref": "#/components/schemas/ReportStatus"
+          },
+          "scanId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanid"
           },
           "scanDomain": {
             "anyOf": [
@@ -5453,6 +8868,642 @@
         ],
         "title": "ReportResponse"
       },
+      "ReportScheduleCadence": {
+        "type": "string",
+        "enum": [
+          "weekly",
+          "monthly"
+        ],
+        "title": "ReportScheduleCadence"
+      },
+      "ReportScheduleCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "scanId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scanid"
+          },
+          "monitorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitorid"
+          },
+          "monitorPeriod": {
+            "type": "string",
+            "enum": [
+              "24h",
+              "7d",
+              "30d",
+              "90d"
+            ],
+            "title": "Monitorperiod",
+            "default": "30d"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "markdown",
+              "html",
+              "both",
+              "all"
+            ],
+            "title": "Format",
+            "default": "pdf"
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "weekly",
+              "monthly"
+            ],
+            "title": "Cadence"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "default": "UTC"
+          },
+          "dayOfWeek": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 6.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dayofweek"
+          },
+          "dayOfMonth": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 31.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dayofmonth"
+          },
+          "hour": {
+            "type": "integer",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Hour"
+          },
+          "minute": {
+            "type": "integer",
+            "maximum": 59.0,
+            "minimum": 0.0,
+            "title": "Minute"
+          },
+          "deliveryChannels": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "email",
+                "slack"
+              ]
+            },
+            "type": "array",
+            "title": "Deliverychannels"
+          },
+          "emailRecipients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Emailrecipients"
+          },
+          "isEnabled": {
+            "type": "boolean",
+            "title": "Isenabled",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "scanId",
+          "cadence",
+          "hour",
+          "minute"
+        ],
+        "title": "ReportScheduleCreateRequest"
+      },
+      "ReportScheduleListResponse": {
+        "properties": {
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/ReportScheduleResponse"
+            },
+            "type": "array",
+            "title": "Schedules"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schedules"
+        ],
+        "title": "ReportScheduleListResponse"
+      },
+      "ReportScheduleResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "userId": {
+            "type": "integer",
+            "title": "Userid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "scanId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanid"
+          },
+          "monitorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitorid"
+          },
+          "monitorPeriod": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitorperiod"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ReportFormat"
+          },
+          "cadence": {
+            "$ref": "#/components/schemas/ReportScheduleCadence"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "dayOfWeek": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dayofweek"
+          },
+          "dayOfMonth": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dayofmonth"
+          },
+          "hour": {
+            "type": "integer",
+            "title": "Hour"
+          },
+          "minute": {
+            "type": "integer",
+            "title": "Minute"
+          },
+          "deliveryChannels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Deliverychannels"
+          },
+          "emailRecipients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Emailrecipients"
+          },
+          "isEnabled": {
+            "type": "boolean",
+            "title": "Isenabled"
+          },
+          "lastRunAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastrunat"
+          },
+          "nextRunAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextrunat"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          },
+          "recentRuns": {
+            "items": {
+              "$ref": "#/components/schemas/ReportScheduleRunResponse"
+            },
+            "type": "array",
+            "title": "Recentruns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "userId",
+          "name",
+          "format",
+          "cadence",
+          "timezone",
+          "hour",
+          "minute",
+          "deliveryChannels",
+          "emailRecipients",
+          "isEnabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ReportScheduleResponse"
+      },
+      "ReportScheduleRunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "scheduleId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scheduleid"
+          },
+          "reportId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reportid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReportScheduleRunStatus"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "deliverySummary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deliverysummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "scheduleId",
+          "status"
+        ],
+        "title": "ReportScheduleRunResponse"
+      },
+      "ReportScheduleRunStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "generating",
+          "delivering",
+          "completed",
+          "failed"
+        ],
+        "title": "ReportScheduleRunStatus"
+      },
+      "ReportScheduleRunsResponse": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ReportScheduleRunResponse"
+            },
+            "type": "array",
+            "title": "Runs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs"
+        ],
+        "title": "ReportScheduleRunsResponse"
+      },
+      "ReportScheduleUpdateRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "scanId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanid"
+          },
+          "monitorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitorid"
+          },
+          "monitorPeriod": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "24h",
+                  "7d",
+                  "30d",
+                  "90d"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monitorperiod"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pdf",
+                  "markdown",
+                  "html",
+                  "both",
+                  "all"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "cadence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "weekly",
+                  "monthly"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cadence"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "dayOfWeek": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 6.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dayofweek"
+          },
+          "dayOfMonth": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 31.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dayofmonth"
+          },
+          "hour": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 23.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hour"
+          },
+          "minute": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 59.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minute"
+          },
+          "deliveryChannels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "email",
+                    "slack"
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deliverychannels"
+          },
+          "emailRecipients": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emailrecipients"
+          },
+          "isEnabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isenabled"
+          }
+        },
+        "type": "object",
+        "title": "ReportScheduleUpdateRequest"
+      },
       "ReportStatus": {
         "type": "string",
         "enum": [
@@ -5482,6 +9533,21 @@
               }
             ],
             "title": "Modules"
+          },
+          "enablePortScan": {
+            "type": "boolean",
+            "title": "Enableportscan",
+            "default": false
+          },
+          "portScanProfile": {
+            "type": "string",
+            "title": "Portscanprofile",
+            "default": "quick"
+          },
+          "acknowledgeScanAuthorization": {
+            "type": "boolean",
+            "title": "Acknowledgescanauthorization",
+            "default": false
           }
         },
         "type": "object",
@@ -5959,6 +10025,64 @@
         ],
         "title": "SuccessResponse[AlertEventResponse]"
       },
+      "SuccessResponse_MaintenanceWindowResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/MaintenanceWindowResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[MaintenanceWindowResponse]"
+      },
+      "SuccessResponse_MonitorBulkActionResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/MonitorBulkActionResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[MonitorBulkActionResponse]"
+      },
       "SuccessResponse_MonitorCheckResponse_": {
         "properties": {
           "status": {
@@ -6133,6 +10257,35 @@
         ],
         "title": "SuccessResponse[MonitorUptimeSummaryResponse]"
       },
+      "SuccessResponse_MonitorVisualCaptureResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/MonitorVisualCaptureResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[MonitorVisualCaptureResponse]"
+      },
       "SuccessResponse_NotificationSettingsResponse_": {
         "properties": {
           "status": {
@@ -6161,6 +10314,64 @@
           "data"
         ],
         "title": "SuccessResponse[NotificationSettingsResponse]"
+      },
+      "SuccessResponse_NotificationTestResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/NotificationTestResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[NotificationTestResponse]"
+      },
+      "SuccessResponse_OperationalEventListResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/OperationalEventListResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[OperationalEventListResponse]"
       },
       "SuccessResponse_ReportListResponse_": {
         "properties": {
@@ -6248,6 +10459,93 @@
           "data"
         ],
         "title": "SuccessResponse[ReportResponse]"
+      },
+      "SuccessResponse_ReportScheduleListResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ReportScheduleListResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[ReportScheduleListResponse]"
+      },
+      "SuccessResponse_ReportScheduleResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ReportScheduleResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[ReportScheduleResponse]"
+      },
+      "SuccessResponse_ReportScheduleRunsResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ReportScheduleRunsResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[ReportScheduleRunsResponse]"
       },
       "SuccessResponse_ScanDetailResponse_": {
         "properties": {
@@ -6546,6 +10844,64 @@
         ],
         "title": "SuccessResponse[UrlGroupResponse]"
       },
+      "SuccessResponse_UrlGroupRunListResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/UrlGroupRunListResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[UrlGroupRunListResponse]"
+      },
+      "SuccessResponse_UrlGroupRunResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/UrlGroupRunResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[UrlGroupRunResponse]"
+      },
       "SuccessResponse_dict_": {
         "properties": {
           "status": {
@@ -6576,6 +10932,39 @@
           "data"
         ],
         "title": "SuccessResponse[dict]"
+      },
+      "SuccessResponse_dict_str__bool__": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Data"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[dict[str, bool]]"
       },
       "SuccessResponse_list_AlertEventResponse__": {
         "properties": {
@@ -6609,6 +10998,39 @@
           "data"
         ],
         "title": "SuccessResponse[list[AlertEventResponse]]"
+      },
+      "SuccessResponse_list_MaintenanceWindowResponse__": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MaintenanceWindowResponse"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[list[MaintenanceWindowResponse]]"
       },
       "SuccessResponse_list_MonitorChangeResponse__": {
         "properties": {
@@ -6675,6 +11097,105 @@
           "data"
         ],
         "title": "SuccessResponse[list[MonitorCheckResponse]]"
+      },
+      "SuccessResponse_list_MonitorCtEntryResponse__": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorCtEntryResponse"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[list[MonitorCtEntryResponse]]"
+      },
+      "SuccessResponse_list_MonitorDnsChangeResponse__": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorDnsChangeResponse"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[list[MonitorDnsChangeResponse]]"
+      },
+      "SuccessResponse_list_MonitorDnsRecordResponse__": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorDnsRecordResponse"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[list[MonitorDnsRecordResponse]]"
       },
       "SuccessResponse_list_MonitorResponse__": {
         "properties": {
@@ -6774,6 +11295,35 @@
           "data"
         ],
         "title": "SuccessResponse[list[MonitorVisualChangeResponse]]"
+      },
+      "SuccessResponse_object_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "title": "Data"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[object]"
       },
       "TestEmailRequest": {
         "properties": {
@@ -7160,6 +11710,320 @@
         ],
         "title": "UrlGroupResponse"
       },
+      "UrlGroupRunCreateRequest": {
+        "properties": {
+          "modules": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modules"
+          },
+          "enablePortScan": {
+            "type": "boolean",
+            "title": "Enableportscan",
+            "default": false
+          },
+          "portScanProfile": {
+            "type": "string",
+            "pattern": "^(quick|standard|deep)$",
+            "title": "Portscanprofile",
+            "default": "quick"
+          },
+          "acknowledgeScanAuthorization": {
+            "type": "boolean",
+            "title": "Acknowledgescanauthorization",
+            "default": false
+          },
+          "concurrencyLimit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrencylimit"
+          },
+          "skipRecentlyScannedWithinSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skiprecentlyscannedwithinseconds"
+          }
+        },
+        "type": "object",
+        "title": "UrlGroupRunCreateRequest"
+      },
+      "UrlGroupRunListResponse": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/UrlGroupRunResponse"
+            },
+            "type": "array",
+            "title": "Runs"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "total"
+        ],
+        "title": "UrlGroupRunListResponse"
+      },
+      "UrlGroupRunMemberResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "groupMemberId": {
+            "type": "string",
+            "title": "Groupmemberid"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "scanId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UrlGroupRunMemberStatus"
+          },
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "groupMemberId",
+          "url",
+          "status",
+          "createdAt"
+        ],
+        "title": "UrlGroupRunMemberResponse"
+      },
+      "UrlGroupRunMemberStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "creating_scan",
+          "running",
+          "completed",
+          "failed",
+          "cancelled",
+          "skipped"
+        ],
+        "title": "UrlGroupRunMemberStatus",
+        "description": "Lifecycle status for one member inside a group run."
+      },
+      "UrlGroupRunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "groupId": {
+            "type": "string",
+            "title": "Groupid"
+          },
+          "userId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Userid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UrlGroupRunStatus"
+          },
+          "progress": {
+            "type": "integer",
+            "title": "Progress"
+          },
+          "totalMembers": {
+            "type": "integer",
+            "title": "Totalmembers"
+          },
+          "queuedMembers": {
+            "type": "integer",
+            "title": "Queuedmembers"
+          },
+          "runningMembers": {
+            "type": "integer",
+            "title": "Runningmembers"
+          },
+          "completedMembers": {
+            "type": "integer",
+            "title": "Completedmembers"
+          },
+          "failedMembers": {
+            "type": "integer",
+            "title": "Failedmembers"
+          },
+          "cancelledMembers": {
+            "type": "integer",
+            "title": "Cancelledmembers"
+          },
+          "skippedMembers": {
+            "type": "integer",
+            "title": "Skippedmembers"
+          },
+          "concurrencyLimit": {
+            "type": "integer",
+            "title": "Concurrencylimit"
+          },
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/UrlGroupRunMemberResponse"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "groupId",
+          "status",
+          "progress",
+          "totalMembers",
+          "queuedMembers",
+          "runningMembers",
+          "completedMembers",
+          "failedMembers",
+          "cancelledMembers",
+          "skippedMembers",
+          "concurrencyLimit",
+          "createdAt"
+        ],
+        "title": "UrlGroupRunResponse"
+      },
+      "UrlGroupRunStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed",
+          "cancelled",
+          "partial"
+        ],
+        "title": "UrlGroupRunStatus",
+        "description": "Lifecycle status for a URL group batch scan."
+      },
       "UrlGroupUpdateRequest": {
         "properties": {
           "name": {
@@ -7230,6 +12094,78 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VisualBrowserStepSchema": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "goto",
+              "wait",
+              "scroll",
+              "click",
+              "type"
+            ],
+            "title": "Action"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ms"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "VisualBrowserStepSchema"
       },
       "VisualCapabilityConfigUpdateSchema": {
         "properties": {
@@ -7346,11 +12282,111 @@
               }
             ],
             "title": "Contentcorrelationwindowseconds"
+          },
+          "captureOnFailure": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captureonfailure"
+          },
+          "hashAlgorithm": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dhash",
+                  "phash",
+                  "ahash",
+                  "whash"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hashalgorithm"
+          },
+          "ignoreRegions": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ignoreregions"
+          },
+          "waitFor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualWaitForSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/VisualBrowserStepSchema"
+                },
+                "type": "array",
+                "maxItems": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "VisualThresholdsUpdateSchema"
+      },
+      "VisualWaitForSchema": {
+        "properties": {
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector"
+          },
+          "timeoutMs": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeoutms"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "VisualWaitForSchema"
       }
     }
   }

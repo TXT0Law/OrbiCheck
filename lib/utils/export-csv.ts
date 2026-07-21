@@ -33,20 +33,6 @@ export function rowsToCsv(rows: readonly CsvRow[], headers: readonly string[]): 
   return [headerLine, ...body].join("\n");
 }
 
-export function downloadCsv(filename: string, rows: readonly CsvRow[]): void {
-  const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
-  const csv = rowsToCsv(rows, headers);
-  // BOM keeps Excel happy with UTF-8 contents.
-  const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.rel = "noopener";
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
 const MODULE_CSV_HEADERS = [
   "module",
   "status",
@@ -57,9 +43,8 @@ const MODULE_CSV_HEADERS = [
 
 /**
  * Produce module-level rows for the scan-detail CSV export. Mirrors the
- * "module, status, duration_ms, severity, key_findings_count" contract
- * spelled out in middleReport.md T4.3 so existing tests / dashboards can
- * snapshot the column set.
+ * "module, status, duration_ms, severity, key_findings_count" contract so
+ * tests and dashboard exports share a stable column set.
  */
 export function pickScanModuleCsvRows(detail: ScanDetail): CsvRow[] {
   const findingsByModule = new Map<string, number>();

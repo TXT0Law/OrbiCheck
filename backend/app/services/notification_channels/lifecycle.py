@@ -24,7 +24,7 @@ import structlog
 from redis.asyncio import Redis
 
 from app.core.config import settings
-from app.services.notification_channels._helpers import NOTIFICATION_USER_AGENT
+from app.services.notification_channels._helpers import post_json
 
 logger = structlog.get_logger(__name__)
 
@@ -78,18 +78,17 @@ async def publish_monitor_lifecycle_webhook(
             "data": payload,
         }
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.MONITOR_WEBHOOK_TIMEOUT_S
-            ) as client:
-                response = await client.post(
-                    target,
-                    json=body,
-                    headers={"User-Agent": NOTIFICATION_USER_AGENT},
-                )
-                response.raise_for_status()
+            await post_json(target, body)
         except httpx.HTTPError as exc:
             logger.warning(
                 "monitor_lifecycle_webhook_http_error",
+                user_id=user_id,
+                event=event_name,
+                error=str(exc)[:200],
+            )
+        except ValueError as exc:
+            logger.warning(
+                "monitor_lifecycle_webhook_blocked",
                 user_id=user_id,
                 event=event_name,
                 error=str(exc)[:200],

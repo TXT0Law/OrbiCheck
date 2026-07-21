@@ -33,6 +33,9 @@ make lint-backend && make test-backend-unit
 # Scan Service changes
 make lint-osint && make test-osint
 
+# Scanner/container changes
+make test-scanner && make test-p2-hardening
+
 # Full repo (when unsure)
 make lint && make test && pnpm build
 
@@ -66,7 +69,9 @@ The GitHub Actions quality gate requires all core jobs to pass:
 - `harness`
 - `frontend`
 - `backend`
+- `migrations`
 - `osint-engine`
+- `scanner`
 - `connected-e2e`
 
 The `harness` job runs `scripts/ci/check-harness.sh` with explicit base/head
@@ -74,6 +79,11 @@ SHAs so dependency direction, boundary validation, and required-test checks are
 enforced in pull requests. The `connected-e2e` job runs the Playwright linked
 suite against scan-service `:4000`, linked backend `:8010`, and Next.js `:3101`,
 and uploads Playwright artifacts when it fails.
+
+Frontend, Backend, and Scan Service coverage commands enforce subsystem floors
+and fail their jobs below threshold. The public-network live scan suite is
+excluded from hermetic Jest discovery and runs from the separate scheduled
+`osint-live.yml` workflow.
 
 ### When to stop
 
@@ -83,4 +93,4 @@ If it fails, fix the code and re-run only the failing command.
 ## References
 
 - [AGENTS.md](../../AGENTS.md) — global rules
-- [prompt_dev/projectprompt.md](../../prompt_dev/projectprompt.md) — project standards
+- [README.md](../../README.md) — tracked architecture and development guide

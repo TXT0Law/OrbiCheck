@@ -67,7 +67,7 @@ jobs:
       - name: Install osint-engine dependencies
         run: |
           cd backend/scan
-          npm install --no-package-lock --legacy-peer-deps
+          npm ci
 
       - name: Lint frontend
         run: pnpm lint
@@ -90,6 +90,21 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          UV_LINK_MODE=copy uv sync --extra dev
 
       - name: Run harness checks
         env:
@@ -117,6 +132,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build frontend and enforce bundle budgets
+        run: |
+          pnpm build
+          pnpm check:bundle
 
       - name: Run frontend tests with coverage
         run: bash scripts/ci/test.sh frontend
@@ -221,6 +241,50 @@ jobs:
             backend/.coverage
             backend/coverage.xml
 
+  migrations:
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: orbicheck_migrations
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d orbicheck_migrations"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/orbicheck_migrations
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          UV_LINK_MODE=copy uv sync --extra dev
+
+      - name: Verify single migration head and upgrade empty database
+        run: |
+          cd backend
+          test "$(UV_LINK_MODE=copy uv run alembic heads | wc -l | tr -d ' ')" = "1"
+          UV_LINK_MODE=copy uv run alembic upgrade head
+
   osint-engine:
     needs: lint
     runs-on: ubuntu-latest
@@ -236,10 +300,10 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: backend/scan/package.json
+          cache-dependency-path: backend/scan/package-lock.json
 
       - name: Install scan service dependencies
-        run: npm install --no-package-lock --legacy-peer-deps
+        run: npm ci
 
       - name: Run osint-engine tests with coverage
         run: bash ../../scripts/ci/test.sh osint
@@ -272,6 +336,34 @@ jobs:
           if-no-files-found: ignore
           path: |
             backend/scan/coverage
+
+  scanner:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          UV_LINK_MODE=copy uv sync --extra dev
+
+      - name: Run scanner security and readiness tests
+        run: |
+          cd backend
+          UV_LINK_MODE=copy uv run python -m unittest discover \
+            -s ../docker/scanner -p 'test_*.py'
 
   connected-e2e:
     needs: lint
@@ -337,7 +429,7 @@ jobs:
       - name: Install scan service dependencies
         run: |
           cd backend/scan
-          npm install --no-package-lock --legacy-peer-deps
+          npm ci
 
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
@@ -453,7 +545,7 @@ jobs:
 
   quality-gate:
     if: ${{ always() }}
-    needs: [test-required, lint, harness, frontend, backend, osint-engine, connected-e2e]
+    needs: [test-required, lint, harness, frontend, backend, migrations, osint-engine, scanner, connected-e2e]
     runs-on: ubuntu-latest
     steps:
       - name: Enforce lint and test gate
@@ -463,9 +555,11 @@ jobs:
              [ "${{ needs.harness.result }}" != "success" ] || \
              [ "${{ needs.frontend.result }}" != "success" ] || \
              [ "${{ needs.backend.result }}" != "success" ] || \
+             [ "${{ needs.migrations.result }}" != "success" ] || \
              [ "${{ needs.osint-engine.result }}" != "success" ] || \
+             [ "${{ needs.scanner.result }}" != "success" ] || \
              [ "${{ needs.connected-e2e.result }}" != "success" ]; then
-            echo "Quality gate failed. lint, tests, harness, and connected E2E must be green."
+            echo "Quality gate failed. lint, Harness, coverage-gated tests, migrations, scanner, and connected E2E must be green."
             exit 1
           fi
           echo "Quality gate passed."

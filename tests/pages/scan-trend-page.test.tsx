@@ -69,11 +69,11 @@ describe("ScanTrendPage", () => {
     });
   });
 
-  it("renders the trend chart with the resolved points", () => {
+  it("renders the trend chart with the resolved points", async () => {
     render(<ScanTrendPage />);
 
     expect(screen.getByText(/Domain trend — example.com/i)).toBeInTheDocument();
-    expect(screen.getByTestId("trend-chart")).toHaveTextContent("points:2");
+    expect(await screen.findByTestId("trend-chart")).toHaveTextContent("points:2");
   });
 
   it("shows the error state when the trend query fails", () => {

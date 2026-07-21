@@ -3,46 +3,27 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.common import SuccessResponse
 from app.api.v1.schemas.monitor import (
-    MaintenanceRecurrenceSpec,
     MaintenanceWindowCreateRequest,
     MaintenanceWindowResponse,
     MaintenanceWindowUpdateRequest,
 )
 from app.core.deps import CurrentUser, get_current_user, get_db
 from app.core.exceptions import NotFoundError, ValidationError
-from app.models.monitor import MaintenanceWindow
 from app.services import maintenance_window_service
 
 router = APIRouter(prefix="/maintenance-windows", tags=["maintenance-windows"])
 
 
-def _to_response(row: MaintenanceWindow) -> MaintenanceWindowResponse:
-    rec = (
-        MaintenanceRecurrenceSpec.model_validate(row.recurrence)
-        if row.recurrence
-        else None
-    )
-    return MaintenanceWindowResponse(
-        id=str(row.id),
-        user_id=row.user_id,
-        monitor_id=str(row.monitor_id) if row.monitor_id else None,
-        title=row.title,
-        starts_at=row.starts_at,
-        ends_at=row.ends_at,
-        suppress_alerts=row.suppress_alerts,
-        suppress_probes=row.suppress_probes,
-        is_enabled=row.is_enabled,
-        notes=row.notes,
-        recurrence=rec,
-        tag_scope=list(row.tag_scope) if row.tag_scope else None,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
+def _to_response(row: Any) -> MaintenanceWindowResponse:
+    return MaintenanceWindowResponse.model_validate(
+        maintenance_window_service.serialize_window(row)
     )
 
 

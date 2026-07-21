@@ -15,8 +15,8 @@
 //   This module owns its own in-memory `Map`. Keys are hostnames (lowercase
 //   from `_common/url.js#extractHostname`). The breaker is per-process —
 //   acceptable because scan-service is usually deployed single-instance and
-//   the cooldown is short (30 s). See `prompt_dev/middleReport.md` §6.1 for
-//   why we chose in-process over Redis-backed for now.
+//   the cooldown is short (30 s). These constraints favor an in-process
+//   breaker over Redis-backed coordination for now.
 
 import { extractHostname } from './url.js';
 

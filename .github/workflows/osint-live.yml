@@ -1,0 +1,37 @@
+name: Scan Service Live Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+concurrency:
+  group: osint-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-scan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/scan/package-lock.json
+
+      - name: Install locked dependencies and Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run live scan suite
+        env:
+          SCAN_LIVE_TARGET: https://example.com
+        run: npm run test:live

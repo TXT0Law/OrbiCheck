@@ -19,6 +19,7 @@ const EXCLUDED_FILES = new Set([
   'config.js',
   'tech-stack-worker.js', // worker subprocess, not a module
   'jest.config.js',
+  'jest.live.config.js',
   'jest.setup.js', // Jest env only, not a scan module
   'caa-format.js', // shared helper for dns CAA strings, not a scan module
   // trace-route is disabled (P1-9): the .js file is kept for the future

@@ -69,7 +69,7 @@ async def rescan(
     background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[ScanResponse]:
     """
     Re-run a scan on the same URL using the existing scan record.
 
@@ -94,7 +94,7 @@ async def create_scan(
     background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[ScanResponse]:
     """Create a new scan and start async execution."""
     scan = await scan_service.create_scan(
         db,
@@ -153,7 +153,7 @@ async def list_scans(
     ] = Query(default="all"),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[ScanListResponse]:
     """List all scans with pagination."""
     scans, total = await scan_service.list_scans(
         db,
@@ -194,7 +194,7 @@ async def delete_all_scans(
     ] = Query(default="all"),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[dict]:
     """Bulk delete scans, optionally constrained by the same list filters."""
     deleted = await scan_service.delete_scans(
         db,
@@ -217,7 +217,7 @@ async def get_domain_timeline(
     ),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[dict]:
     """Return owner-scoped scan history for a domain ordered oldest → newest.
 
     Backs the Trend page (T5.1): the dashboard plots one line for security
@@ -248,7 +248,7 @@ async def diff_two_scans(
     compare_id: uuid.UUID = Query(alias="compareId"),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[dict]:
     """Compare two owner-scoped scans (T5.2).
 
     Both scans are fetched with owner enforcement (``scan_service.get_scan``
@@ -299,7 +299,7 @@ async def get_scan(
     scan_id: uuid.UUID,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[ScanDetailResponse]:
     """Get a scan with all module results."""
     scan = await scan_service.get_scan(db, scan_id, current_user.id)
     return SuccessResponse(data=ScanDetailResponse.model_validate(scan))
@@ -311,7 +311,7 @@ async def get_scan_events(
     limit: int = Query(default=25, ge=1, le=100),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[OperationalEventListResponse]:
     """List recent diagnostics for one scan."""
     events = await operational_event_service.list_events_for_scan(
         db,
@@ -328,7 +328,7 @@ async def get_scan_module(
     module_name: str,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[object]:
     """Get a specific module result, transformed for frontend consumption."""
     scan = await scan_service.get_scan(db, scan_id, current_user.id)
     module_result = next((m for m in scan.module_results if m.module_name == module_name), None)
@@ -433,7 +433,7 @@ async def get_scan_full_detail(
     scan_id: uuid.UUID,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[dict]:
     """Get full scan detail with all modules transformed for frontend."""
     scan = await scan_service.get_scan(db, scan_id, current_user.id)
     return SuccessResponse(
@@ -449,7 +449,7 @@ async def get_scan_full_export(
     scan_id: uuid.UUID,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[dict]:
     """Return transformed scan detail plus untouched module raw results.
 
     Used by the dashboard "Export full (JSON)" action so users can take a
@@ -487,7 +487,7 @@ async def retry_scan_module(
     module_name: str,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SuccessResponse[dict]:
     """Retry a single failed or timed-out module for an existing scan."""
     result = await scan_service.retry_module(
         db,
@@ -503,7 +503,7 @@ async def delete_scan(
     scan_id: uuid.UUID,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> Response:
     """Delete a scan. Only terminal-state scans (completed/failed/cancelled)."""
     await scan_service.delete_scan(db, scan_id, current_user.id)
     await db.commit()
@@ -528,7 +528,7 @@ async def scan_progress_sse(
     scan_id: uuid.UUID,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> StreamingResponse:
     """Server-Sent Events endpoint for scan progress."""
     await scan_service.get_scan(db, scan_id, current_user.id)
 

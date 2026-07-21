@@ -1,9 +1,25 @@
-from pydantic import computed_field, field_validator
+import base64
+import binascii
+from urllib.parse import urlsplit
+
+from pydantic import computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.change_category_defaults import (
     DEFAULT_CHANGE_CATEGORY_MEDIUM_MAX,
     DEFAULT_CHANGE_CATEGORY_SMALL_MAX,
+)
+
+PRODUCTION_ENVIRONMENTS = frozenset({"production", "prod"})
+MIN_PRODUCTION_SECRET_LENGTH = 32
+MIN_PRODUCTION_PASSWORD_LENGTH = 12
+FERNET_KEY_BYTES = 32
+KNOWN_PLACEHOLDER_FRAGMENTS = (
+    "change-me",
+    "replace-with",
+    "changeme",
+    "example-secret",
+    "dev-only",
 )
 
 
@@ -27,6 +43,8 @@ class Settings(BaseSettings):
 
     SCAN_SERVICE_URL: str = "http://localhost:4000"
     NMAP_SCANNER_URL: str | None = None
+    INTERNAL_SERVICE_SECRET: str = ""
+    INTERNAL_SERVICE_AUTH_MAX_SKEW_SECONDS: int = 60
 
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
@@ -137,7 +155,7 @@ class Settings(BaseSettings):
     # significantly lower diagnostic value past the first few examples.
     MONITOR_MAX_DIAGNOSTIC_CAPTURES_PER_MONITOR: int = 10
     # V-2: per-monitor rate limit for the manual "capture now" endpoint.
-    # Default mirrors middleReport §V-2 (5 per minute per monitor).
+    # Bound per-monitor visual captures to protect the shared Chromium pool.
     MONITOR_VISUAL_CAPTURE_NOW_WINDOW_SECONDS: int = 60
     MONITOR_VISUAL_CAPTURE_NOW_MAX_PER_WINDOW: int = 5
     # Nearest visual capture search for content / screenshot linking (fallback to check_id).
@@ -270,6 +288,128 @@ class Settings(BaseSettings):
                     return [str(item).strip() for item in parsed if str(item).strip()]
             return [item.strip() for item in value.split(",") if item.strip()]
         raise ValueError("Invalid list value")
+
+    @model_validator(mode="after")
+    def validate_production_settings(self) -> "Settings":
+        """Fail startup when a production deployment has unsafe defaults."""
+
+        if self.APP_ENV.strip().lower() not in PRODUCTION_ENVIRONMENTS:
+            return self
+
+        errors: list[str] = []
+        required_values = {
+            "DATABASE_URL": self.DATABASE_URL,
+            "REDIS_URL": self.REDIS_URL,
+            "SCAN_SERVICE_URL": self.SCAN_SERVICE_URL,
+            "AUTH_LOGIN_PASSWORD": self.AUTH_LOGIN_PASSWORD,
+            "AUTH_SESSION_SECRET": self.AUTH_SESSION_SECRET,
+            "MONITOR_SECRET_ENCRYPTION_KEY": self.MONITOR_SECRET_ENCRYPTION_KEY,
+            "INTERNAL_SERVICE_SECRET": self.INTERNAL_SERVICE_SECRET,
+            "PUBLIC_BASE_URL": self.PUBLIC_BASE_URL,
+        }
+        for name, value in required_values.items():
+            if not str(value or "").strip():
+                errors.append(f"{name} is required")
+
+        secret_values = {
+            "AUTH_LOGIN_PASSWORD": self.AUTH_LOGIN_PASSWORD,
+            "AUTH_SESSION_SECRET": self.AUTH_SESSION_SECRET,
+            "MONITOR_SECRET_ENCRYPTION_KEY": self.MONITOR_SECRET_ENCRYPTION_KEY,
+            "INTERNAL_SERVICE_SECRET": self.INTERNAL_SERVICE_SECRET,
+        }
+        for name, value in secret_values.items():
+            lowered = value.strip().lower()
+            if any(fragment in lowered for fragment in KNOWN_PLACEHOLDER_FRAGMENTS):
+                errors.append(f"{name} contains a known placeholder")
+
+        if (
+            self.AUTH_SESSION_SECRET
+            and len(self.AUTH_SESSION_SECRET.strip()) < MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            errors.append(
+                f"AUTH_SESSION_SECRET must be at least "
+                f"{MIN_PRODUCTION_SECRET_LENGTH} characters"
+            )
+        if (
+            self.INTERNAL_SERVICE_SECRET
+            and len(self.INTERNAL_SERVICE_SECRET.strip())
+            < MIN_PRODUCTION_SECRET_LENGTH
+        ):
+            errors.append(
+                f"INTERNAL_SERVICE_SECRET must be at least "
+                f"{MIN_PRODUCTION_SECRET_LENGTH} characters"
+            )
+        if (
+            self.AUTH_LOGIN_PASSWORD
+            and len(self.AUTH_LOGIN_PASSWORD) < MIN_PRODUCTION_PASSWORD_LENGTH
+        ):
+            errors.append(
+                f"AUTH_LOGIN_PASSWORD must be at least "
+                f"{MIN_PRODUCTION_PASSWORD_LENGTH} characters"
+            )
+
+        encryption_key = self.MONITOR_SECRET_ENCRYPTION_KEY.strip()
+        if encryption_key:
+            try:
+                decoded_key = base64.urlsafe_b64decode(encryption_key.encode())
+            except (ValueError, binascii.Error):
+                decoded_key = b""
+            if len(decoded_key) != FERNET_KEY_BYTES:
+                errors.append(
+                    "MONITOR_SECRET_ENCRYPTION_KEY must be a valid Fernet key"
+                )
+
+        if not self.AUTH_COOKIE_SECURE:
+            errors.append("AUTH_COOKIE_SECURE must be true")
+        if self.AUTH_DEV_BYPASS_ENABLED:
+            errors.append("AUTH_DEV_BYPASS_ENABLED must be false")
+        if self.AUTH_COOKIE_SAMESITE.lower() not in {"strict", "lax", "none"}:
+            errors.append("AUTH_COOKIE_SAMESITE must be strict, lax, or none")
+
+        public_url = urlsplit(self.PUBLIC_BASE_URL)
+        if self.PUBLIC_BASE_URL and (
+            public_url.scheme != "https" or not public_url.hostname
+        ):
+            errors.append("PUBLIC_BASE_URL must be an absolute HTTPS URL")
+        if public_url.username is not None or public_url.password is not None:
+            errors.append("PUBLIC_BASE_URL must not contain credentials")
+        for origin in self.CORS_ORIGINS:
+            parsed_origin = urlsplit(origin)
+            if (
+                parsed_origin.scheme != "https"
+                or not parsed_origin.hostname
+                or parsed_origin.username is not None
+                or parsed_origin.password is not None
+            ):
+                errors.append("CORS_ORIGINS must contain only absolute HTTPS origins")
+                break
+
+        database_url = urlsplit(self.DATABASE_URL)
+        if self.DATABASE_URL and not database_url.scheme.startswith("postgres"):
+            errors.append("DATABASE_URL must use a PostgreSQL scheme")
+        redis_url = urlsplit(self.REDIS_URL)
+        if self.REDIS_URL and redis_url.scheme not in {"redis", "rediss"}:
+            errors.append("REDIS_URL must use redis:// or rediss://")
+        for name, value in (
+            ("SCAN_SERVICE_URL", self.SCAN_SERVICE_URL),
+            ("NMAP_SCANNER_URL", self.NMAP_SCANNER_URL or ""),
+        ):
+            if not value:
+                continue
+            parsed_service_url = urlsplit(value)
+            if (
+                parsed_service_url.scheme not in {"http", "https"}
+                or not parsed_service_url.hostname
+            ):
+                errors.append(f"{name} must be an absolute HTTP(S) URL")
+        if self.INTERNAL_SERVICE_AUTH_MAX_SKEW_SECONDS <= 0:
+            errors.append("INTERNAL_SERVICE_AUTH_MAX_SKEW_SECONDS must be positive")
+
+        if errors:
+            raise ValueError(
+                "Invalid production configuration: " + "; ".join(dict.fromkeys(errors))
+            )
+        return self
 
 
 settings = Settings()

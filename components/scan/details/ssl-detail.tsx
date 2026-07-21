@@ -1,10 +1,11 @@
 "use client";
 
+import dynamic from "next/dynamic";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { SslCheckResult } from "@/shared/types/scan";
 
 import { SslCertificateChainSection } from "./ssl/ssl-certificate-chain-section";
-import { SslChartsSection } from "./ssl/ssl-charts-section";
 import { SslCipherSummaryCard, SslProtocolSummaryCard } from "./ssl/ssl-protocol-cipher-cards";
 import {
   SslDnsCaaSection,
@@ -20,6 +21,21 @@ import {
 } from "./ssl/ssl-vulnerability-revocation";
 
 export { formatDate } from "./ssl/ssl-shared";
+
+const SslChartsSection = dynamic(
+  () =>
+    import("./ssl/ssl-charts-section").then(
+      (module) => module.SslChartsSection,
+    ),
+  {
+    loading: () => (
+      <p className="text-sm text-muted-foreground" role="status">
+        Loading SSL charts…
+      </p>
+    ),
+    ssr: false,
+  },
+);
 
 interface SslDetailProps {
   data: SslCheckResult | null;

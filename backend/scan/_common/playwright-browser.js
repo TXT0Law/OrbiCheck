@@ -17,7 +17,9 @@ import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 import { createAbortError, throwIfAborted } from './abort.js';
+import { httpWith } from './http.js';
 import { logger } from './logger.js';
+import { isRuntimeUrlSafetyEnabled } from './url-safety.js';
 
 const CHROMIUM_CANDIDATES = [
   '/usr/bin/chromium-browser',
@@ -34,6 +36,13 @@ const MAX_BROWSER_CONTEXTS = parseInt(
   process.env.MAX_BROWSER_CONTEXTS || '3',
   10,
 );
+const MAX_BROWSER_RESOURCE_BYTES = 16 * 1024 * 1024;
+const safeBrowserHttp = httpWith({
+  responseType: 'arraybuffer',
+  maxContentLength: MAX_BROWSER_RESOURCE_BYTES,
+  maxBodyLength: MAX_BROWSER_RESOURCE_BYTES,
+  orbicheckRejectUnauthorized: false,
+});
 
 let sharedBrowser = null;
 let sharedBrowserPromise = null;
@@ -126,6 +135,47 @@ function releaseSlot() {
   if (next) next.resolve();
 }
 
+async function installSafeBrowserRouting(context) {
+  if (!isRuntimeUrlSafetyEnabled()) return;
+  await context.route('**/*', async (route) => {
+    const browserRequest = route.request();
+    const requestUrl = browserRequest.url();
+    const protocol = new URL(requestUrl).protocol;
+    if (!['http:', 'https:'].includes(protocol)) {
+      await route.continue();
+      return;
+    }
+    try {
+      const headers = { ...browserRequest.headers() };
+      delete headers.host;
+      delete headers.connection;
+      delete headers['content-length'];
+      headers['accept-encoding'] = 'identity';
+      const response = await safeBrowserHttp.request({
+        url: requestUrl,
+        method: browserRequest.method(),
+        headers,
+        data: browserRequest.postDataBuffer() || undefined,
+        orbicheckMaxRedirects: 0,
+      });
+      const responseHeaders = response.headers.toJSON(true);
+      delete responseHeaders['content-encoding'];
+      delete responseHeaders['content-length'];
+      await route.fulfill({
+        status: response.status,
+        headers: responseHeaders,
+        body: Buffer.from(response.data),
+      });
+    } catch (error) {
+      logger.warn(
+        { url: requestUrl, reason: error?.message || String(error) },
+        'playwright blocked unsafe request destination',
+      );
+      await route.abort('blockedbyclient');
+    }
+  });
+}
+
 /**
  * Run `fn(context, page)` against a fresh Playwright BrowserContext on the
  * shared browser. The context is always closed afterwards. Errors thrown by
@@ -147,6 +197,7 @@ export async function withBrowserContext(fn, options = {}) {
     const browser = await ensureSharedBrowser(options.launchOverrides || {});
     throwIfAborted(signal);
     context = await browser.newContext(options.contextOptions || {});
+    await installSafeBrowserRouting(context);
     page = await context.newPage();
     if (signal) {
       const onAbort = () => {

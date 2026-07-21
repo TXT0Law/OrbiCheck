@@ -68,7 +68,9 @@ export default function DashboardLayout({
       </Sheet>
       <div className="flex min-h-screen flex-col pt-[var(--demo-bar-height,0px)] md:ml-[240px]">
         <Header onMenuClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 p-6 md:p-8">{children}</main>
+        <main id="main-content" tabIndex={-1} className="flex-1 p-6 md:p-8">
+          {children}
+        </main>
       </div>
     </div>
   );

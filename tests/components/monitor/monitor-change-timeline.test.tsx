@@ -83,7 +83,7 @@ describe("MonitorChangeTimeline", () => {
       hasNextPage: true,
     });
 
-    render(
+    const { container } = render(
       <MonitorChangeTimeline
         monitorId="mon"
         selectedChangeId="missing-in-first-page"
@@ -94,5 +94,8 @@ describe("MonitorChangeTimeline", () => {
     expect(
       screen.getByText(/This change is not in the loaded list yet/)
     ).toBeInTheDocument();
+    expect(
+      container.querySelector('li[class*="content-visibility:auto"]')
+    ).not.toBeNull();
   });
 });

@@ -1,12 +1,12 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
 import { OperationalEventsCard } from "@/components/common/operational-events-card";
-import { ReportPreview } from "@/components/report/report-preview";
 import { ReportStatusBadge } from "@/components/report/report-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,21 @@ import { useToast } from "@/components/ui/use-toast";
 import { downloadReport } from "@/lib/api/reports";
 import { useDeleteReport, useReport, useReportPreview } from "@/lib/hooks/use-reports";
 import { useReportOperationalEvents } from "@/lib/hooks/use-operational-events";
+
+const ReportPreview = dynamic(
+  () =>
+    import("@/components/report/report-preview").then(
+      (module) => module.ReportPreview,
+    ),
+  {
+    loading: () => (
+      <p className="text-sm text-muted-foreground" role="status">
+        Loading Markdown preview…
+      </p>
+    ),
+    ssr: false,
+  },
+);
 
 interface ReportDetailPageProps {
   params: {

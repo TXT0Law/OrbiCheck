@@ -19,10 +19,12 @@ import httpx
 import structlog
 
 from app.core.config import settings
+from app.services.outbound_http import request_safely
 from app.services.notification_channels.types import (
     AlertPayload,
     ChannelDispatchResult,
 )
+from app.utils.url_safety import resolve_public_url
 
 logger = structlog.get_logger(__name__)
 
@@ -102,6 +104,7 @@ def validate_https_url(value: str) -> str:
         raise ValueError("URL has no hostname")
     if not _HOSTNAME_ALLOWED_CHARS.match(parsed.hostname):
         raise ValueError("URL hostname contains invalid characters")
+    resolve_public_url(candidate, require_https=True)
     return candidate
 
 
@@ -138,17 +141,21 @@ async def post_json(
     headers = {"User-Agent": NOTIFICATION_USER_AGENT}
     if extra_headers:
         headers.update(extra_headers)
-    async with httpx.AsyncClient(
-        timeout=settings.NOTIFICATION_CHANNEL_TIMEOUT_S
-    ) as client:
-        response = await client.post(url, json=body, headers=headers)
-        if response.status_code not in expected_status:
-            raise httpx.HTTPStatusError(
-                f"Unexpected status {response.status_code}",
-                request=response.request,
-                response=response,
-            )
-        return response.status_code, response.text
+    response = await request_safely(
+        "POST",
+        url,
+        json_body=body,
+        headers=headers,
+        timeout=settings.NOTIFICATION_CHANNEL_TIMEOUT_S,
+        require_https=True,
+    )
+    if response.status_code not in expected_status:
+        raise httpx.HTTPStatusError(
+            f"Unexpected status {response.status_code}",
+            request=response.request,
+            response=response,
+        )
+    return response.status_code, response.text
 
 
 def failure_result(

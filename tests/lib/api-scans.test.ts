@@ -8,9 +8,13 @@ const apiClientMock = vi.hoisted(() => ({
   delete: vi.fn(),
 }));
 
-vi.mock("@/lib/api/client", () => ({
-  apiClient: apiClientMock,
-}));
+vi.mock("@/lib/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/client")>();
+  return {
+    ...actual,
+    apiClient: apiClientMock,
+  };
+});
 
 import { cancelScan, createScan, deleteAllScans, deleteScan, getScan, getScanDetail, listScans } from "@/lib/api/scans";
 
@@ -161,13 +165,22 @@ describe("scan API wrappers", () => {
     const detail = {
       id: "scan-4",
       domain: "detail.test",
+      url: "https://detail.test",
+      status: "completed",
+      scannedAt: null,
+      duration: null,
+      securityScore: null,
+      severity: { critical: 0, high: 0, medium: 0, low: 0 },
+      categorySummary: [],
+      keyFindings: [],
+      moduleErrors: {},
     } as unknown as ScanDetail;
     apiClientMock.get.mockResolvedValueOnce({ data: detail });
 
     const result = await getScanDetail("scan-4");
 
     expect(apiClientMock.get).toHaveBeenCalledWith("/scans/scan-4/detail");
-    expect(result).toBe(detail);
+    expect(result).toEqual(detail);
   });
 
   it("cancels scan", async () => {

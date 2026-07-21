@@ -7,6 +7,7 @@ import axiosRetry from 'axios-retry';
 
 import { circuitBreaker } from './circuit-breaker.js';
 import { getHttpRetryPolicy } from './config.js';
+import { createSafeHttpAdapter } from './url-safety.js';
 
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.MODULE_HTTP_TIMEOUT_MS || '15000', 10);
 const DEFAULT_USER_AGENT = process.env.MODULE_HTTP_USER_AGENT || 'OrbiCheck/1.0 (+https://github.com/orbicheck)';
@@ -24,6 +25,7 @@ const SERVER_ERROR_CEILING = 600;
 const STATUS_TOO_MANY_REQUESTS = 429;
 const FAST_FAIL_STATUS = 503;
 const FAST_FAIL_DURATION_MS = 0;
+const SAFE_HTTP_ADAPTER = createSafeHttpAdapter();
 
 function isRetriable5xx() {
   // S-2: by default, do NOT retry 5xx (caller is much better placed to
@@ -157,6 +159,7 @@ function attachCircuitBreaker(instance) {
 }
 
 export const http = axios.create({
+  adapter: SAFE_HTTP_ADAPTER,
   timeout: DEFAULT_TIMEOUT_MS,
   validateStatus: () => true,
   headers: { ...SHARED_HEADERS },
@@ -169,6 +172,7 @@ applyRetry(http);
 // stricter timeout for whois) doesn't leak globally.
 export function httpWith(config = {}) {
   const instance = axios.create({
+    adapter: SAFE_HTTP_ADAPTER,
     timeout: DEFAULT_TIMEOUT_MS,
     validateStatus: () => true,
     headers: { ...SHARED_HEADERS },

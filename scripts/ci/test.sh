@@ -17,7 +17,11 @@ run_backend() {
   echo "[ci-test] Running backend tests with coverage"
   (
     cd "${REPO_ROOT}/backend"
-    UV_LINK_MODE=copy uv run pytest --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml
+    UV_LINK_MODE=copy uv run pytest \
+      --cov=app \
+      --cov-report=term-missing \
+      --cov-report=xml:coverage.xml \
+      --cov-fail-under=70
   )
 }
 

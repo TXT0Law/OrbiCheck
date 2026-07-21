@@ -26,13 +26,14 @@ import httpx
 import structlog
 
 from app.core.config import settings
+from app.core.internal_auth import InternalServiceAuth
 
 logger = structlog.get_logger(__name__)
 
 # Path on the scan-service that returns a Playwright-rendered HTML body.
 RENDERED_PATH = "/api/scan/page-source-rendered"
 
-# B-7 / middleReport §6.5: minimum check interval when ``fetchMode == "browser"``.
+# Minimum check interval when ``fetchMode == "browser"`` to bound Chromium load.
 # Per-check Playwright launches are heavy (≥ 200 MB RSS, ~700 ms cold) so a
 # 60 s monitor would saturate the chromium pool and starve the rest of the
 # scan-service. Both the API schema (MonitorCreateRequest /
@@ -159,7 +160,11 @@ async def fetch_rendered_dom(
         headers["X-Trace-Id"] = f"monitor-{monitor_id}"
 
     try:
-        async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            headers=headers,
+            auth=InternalServiceAuth(settings.INTERNAL_SERVICE_SECRET),
+        ) as client:
             response = await client.get(f"{base}{RENDERED_PATH}", params=params)
     except httpx.HTTPError as exc:
         raise RenderedFetchError(f"Rendered DOM fetch transport failed: {exc}") from exc

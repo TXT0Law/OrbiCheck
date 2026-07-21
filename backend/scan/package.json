@@ -8,15 +8,16 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "lint": "eslint . --ext .js",
-    "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
+    "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand --detectOpenHandles",
+    "test:handles": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand --detectOpenHandles",
+    "test:live": "cross-env NODE_ENV=test SCAN_LIVE_TEST=1 NODE_OPTIONS=--experimental-vm-modules jest --config jest.live.config.js --runInBand",
     "test:watch": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --watch",
-    "test:cov": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --coverage --runInBand"
+    "test:cov": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --coverage --runInBand --detectOpenHandles"
   },
   "dependencies": {
     "axios": "^1.6.0",
     "axios-retry": "^4.5.0",
     "cheerio": "^1.2.0",
-    "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "express": "^4.21.0",
     "follow-redirects": "^1.15.11",

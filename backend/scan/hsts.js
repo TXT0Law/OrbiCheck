@@ -1,6 +1,7 @@
 import https from 'https';
 
 import middleware from './_common/middleware.js';
+import { targetAddressFromRequest } from './_common/url-safety.js';
 
 const HSTS_PRELOAD_MIN_MAX_AGE = 10886400; // 18 weeks in seconds (per hstspreload.org)
 const REQUEST_TIMEOUT_MS = parseInt(process.env.HSTS_TIMEOUT_MS || '10000', 10);
@@ -73,7 +74,7 @@ const parseHstsHeader = (rawHeader) => {
   };
 };
 
-const requestOnce = (url, method) => new Promise((resolve) => {
+const requestOnce = (url, method, pinnedAddress) => new Promise((resolve) => {
   let settled = false;
   const finish = (payload) => {
     if (!settled) {
@@ -88,6 +89,13 @@ const requestOnce = (url, method) => new Promise((resolve) => {
       method,
       headers: { 'User-Agent': USER_AGENT },
       timeout: REQUEST_TIMEOUT_MS,
+      lookup: pinnedAddress
+        ? (_hostname, _options, callback) => callback(
+          null,
+          pinnedAddress,
+          pinnedAddress.includes(':') ? 6 : 4,
+        )
+        : undefined,
     },
     (res) => {
       const hstsHeader = res.headers['strict-transport-security'] || null;
@@ -117,14 +125,16 @@ const requestOnce = (url, method) => new Promise((resolve) => {
  * @returns {Promise<{enabled?: boolean, preloadReady?: boolean,
  *   maxAge?: number, includeSubDomains?: boolean, error?: string}>}
  */
-const hstsHandler = async (rawUrl) => {
+const hstsHandler = async (rawUrl, request) => {
   const url = ensureHttps(rawUrl);
-  let outcome = await requestOnce(url, 'HEAD');
+  const hostname = new URL(url).hostname;
+  const pinnedAddress = targetAddressFromRequest(request, hostname);
+  let outcome = await requestOnce(url, 'HEAD', pinnedAddress);
 
   // Some origins reject HEAD with 405/501; retry with GET so that we can still
   // inspect response headers without breaking the module on those edge cases.
   if (outcome.kind === 'response' && (outcome.statusCode === 405 || outcome.statusCode === 501)) {
-    outcome = await requestOnce(url, 'GET');
+    outcome = await requestOnce(url, 'GET', pinnedAddress);
   }
 
   if (outcome.kind === 'timeout') {

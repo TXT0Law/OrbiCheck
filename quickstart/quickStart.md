@@ -87,7 +87,7 @@ This means the backend returned a 500 error when creating a scan. Check the foll
    ```
    If you encounter peer dependency conflicts:
    ```bash
-   cd backend/scan && npm install --legacy-peer-deps
+   cd backend/scan && npm ci
    ```
 
 ---
@@ -140,7 +140,8 @@ If the issue persists, try: `rm -rf .next && pnpm dev`
 
 If you prefer containers over native processes, the full stack can be started via Docker Compose. This requires only Docker — no local PostgreSQL, Redis, or Node.js needed.
 
-**Start all 7 services** (postgres, redis, scan-service, backend, celery-worker, celery-beat, frontend):
+**Start all 8 services** (postgres, redis, scan-service, scanner, backend,
+celery-worker, celery-beat, frontend):
 
 ```bash
 bash deploy/deploy.sh
@@ -179,4 +180,5 @@ docker compose logs --no-color -f scan-service # Follow scan-service logs
 docker compose exec backend bash               # Shell into backend
 ```
 
-> **Note**: The backend container automatically handles database migration on startup. For fresh databases it creates tables and stamps Alembic; for existing databases it runs `alembic upgrade head`.
+> **Note**: The backend container uses Alembic as the only schema authority and
+> runs `alembic upgrade head` on startup for both fresh and existing databases.

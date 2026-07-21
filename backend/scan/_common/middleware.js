@@ -20,6 +20,11 @@ import {
 } from './abort.js';
 import { err, normaliseEnvelope } from './result.js';
 import { normalizeUrl } from './url.js';
+import {
+  isRuntimeUrlSafetyEnabled,
+  resolvePublicUrl,
+  UnsafeUrlError,
+} from './url-safety.js';
 
 const TIMEOUT = process.env.API_TIMEOUT_LIMIT
   ? parseInt(process.env.API_TIMEOUT_LIMIT, 10)
@@ -104,6 +109,26 @@ const commonMiddleware = (handler) => {
     const normalisedUrl = normalizeUrl(rawUrl);
     if (!normalisedUrl) {
       return err('No URL specified', Date.now() - startedAt, { statusCode: 400 });
+    }
+    if (isRuntimeUrlSafetyEnabled()) {
+      try {
+        const resolvedTarget = await resolvePublicUrl(normalisedUrl, {
+          allowPrivate: false,
+        });
+        request.context = {
+          ...(request.context || {}),
+          resolvedTarget,
+        };
+      } catch (error) {
+        if (error instanceof UnsafeUrlError) {
+          log.warn(
+            { reason: error.message },
+            'module middleware blocked unsafe target',
+          );
+          return err(error.message, Date.now() - startedAt, { statusCode: 400 });
+        }
+        throw error;
+      }
     }
 
     const timeoutMs = resolveTimeoutMs(_options);

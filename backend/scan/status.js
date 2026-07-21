@@ -3,7 +3,7 @@
 // `Server` header.
 //
 // History:
-//   - Pre S-3 (middleReport.md): hand-rolled `https.get` only.  Could not
+//   - Legacy implementation: hand-rolled `https.get` only. Could not
 //     probe http://, had no User-Agent, would `throw` on 4xx/5xx which
 //     cost the entire module timeout (~30 s) via middleware bubbling.
 //   - S-3: switch to the shared `_common/http.js` axios instance so we

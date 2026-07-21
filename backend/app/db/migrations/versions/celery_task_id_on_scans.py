@@ -1,7 +1,7 @@
 """Add celery_task_id column to scans table.
 
 Revision ID: celery_task_id_on_scans
-Revises:
+Revises: initial_scan_schema
 Create Date: 2026-03-16 11:23:36.123592
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "celery_task_id_on_scans"
-down_revision: Union[str, None] = None
+down_revision: Union[str, None] = "initial_scan_schema"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { downloadJson } from "@/lib/api/download";
 import {
-  downloadJson,
   pickScanDetailExportSummary,
   pickScanFullExport,
   type ScanFullExport,

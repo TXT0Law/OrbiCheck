@@ -108,7 +108,7 @@ _jinja_env = Environment(
 _HTML_TEMPLATE_NAME = "report.html.j2"
 
 # Maximum certificate-chain entries inlined into MD/PDF (full chain stays in
-# raw JSON export). Mirrors the reasoning in middleReport.md T3.1.
+# raw JSON export) so exported evidence remains deterministic and reviewable.
 SSL_CHAIN_PREVIEW_LIMIT = 3
 
 # Maximum technologies enumerated per category in the MD/PDF tech-stack section.

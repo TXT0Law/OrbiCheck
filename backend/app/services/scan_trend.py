@@ -1,6 +1,6 @@
 """Same-domain timeline + scan-to-scan diff helpers.
 
-Phase 5 (T5.1 / T5.2) of ``prompt_dev/middleReport.md``: lets the dashboard
+Provides domain timeline and scan-to-scan diff data so the dashboard can
 draw historical trends for a domain and show what changed between two scans
 without inventing new persistence — the timeline is derived from the
 existing ``scans`` table and the diff is computed at request time from the

@@ -9,6 +9,7 @@ import uvicorn
 
 
 LINKED_TEST_AUTH_RATE_LIMIT = "100"
+LINKED_TEST_DATABASE_NAME = "orbicheck_linked"
 
 
 # Linked test backend defaults. Override via environment when needed.
@@ -29,19 +30,11 @@ os.environ.setdefault("AUTH_SESSION_SECRET", "linked-test-session-secret")
 os.environ.setdefault("AUTH_COOKIE_SECURE", "false")
 os.environ.setdefault("RATE_LIMIT_AUTH_REQUESTS", LINKED_TEST_AUTH_RATE_LIMIT)
 
-from app.db.base import Base
-from app.db.session import get_engine
-from app.models import monitor, report, scan, url_group  # noqa: F401
-
-
 def ensure_db_and_migrate() -> None:
-    """Prepare the linked-test database and align Alembic state."""
+    """Prepare the linked-test database exclusively through Alembic."""
     db_url = os.environ.get("DATABASE_URL", "")
-    if "orbicheck_linked" in db_url:
-        _create_db_if_missing(db_url)
-        asyncio.run(_rebuild_linked_schema())
-        _stamp_alembic_head()
-        return
+    if LINKED_TEST_DATABASE_NAME in db_url:
+        asyncio.run(_reset_linked_database(db_url))
 
     _run_alembic_upgrade()
 
@@ -59,57 +52,32 @@ def _run_alembic_upgrade() -> None:
             env=os.environ,
         )
         if result.returncode != 0:
-            sys.stderr.write(f"Migration warning: {result.stderr or result.stdout}\n")
+            detail = result.stderr or result.stdout
+            raise RuntimeError(f"Alembic migration failed: {detail}")
     finally:
         os.chdir(orig_cwd)
 
 
-def _stamp_alembic_head() -> None:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    backend_dir = os.path.join(os.path.dirname(os.path.dirname(script_dir)), "backend")
-    orig_cwd = os.getcwd()
-    try:
-        os.chdir(backend_dir)
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "stamp", "head"],
-            capture_output=True,
-            text=True,
-            env=os.environ,
-        )
-        if result.returncode != 0:
-            sys.stderr.write(f"Migration warning: {result.stderr or result.stdout}\n")
-    finally:
-        os.chdir(orig_cwd)
+async def _reset_linked_database(db_url: str) -> None:
+    """Recreate the isolated linked-test database before Alembic upgrade."""
 
-
-def _create_db_if_missing(db_url: str) -> None:
-    """Create orbicheck_linked database if it does not exist."""
-    try:
-        url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-        base = url.rsplit("/", 1)[0]
-        postgres_url = f"{base}/postgres"
-        asyncio.run(_do_create_db(postgres_url))
-    except Exception:
-        pass
-
-
-async def _do_create_db(postgres_url: str) -> None:
+    url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+    base = url.rsplit("/", 1)[0]
+    postgres_url = f"{base}/postgres"
     conn = await asyncpg.connect(postgres_url)
     try:
-        await conn.execute("CREATE DATABASE orbicheck_linked")
-    except asyncpg.DuplicateDatabaseError:
-        pass
+        await conn.execute(
+            """
+            SELECT pg_terminate_backend(pid)
+            FROM pg_stat_activity
+            WHERE datname = $1 AND pid <> pg_backend_pid()
+            """,
+            LINKED_TEST_DATABASE_NAME,
+        )
+        await conn.execute(f'DROP DATABASE IF EXISTS "{LINKED_TEST_DATABASE_NAME}"')
+        await conn.execute(f'CREATE DATABASE "{LINKED_TEST_DATABASE_NAME}"')
     finally:
         await conn.close()
-
-
-async def _rebuild_linked_schema() -> None:
-    """Reset the dedicated linked-test schema to the current ORM metadata."""
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-    await engine.dispose()
 
 
 if __name__ == "__main__":

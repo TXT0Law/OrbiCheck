@@ -24,7 +24,6 @@ from app.api.v1.schemas.url_group import (
 from app.core.config import settings
 from app.core.deps import CurrentUser, get_current_user, get_db
 from app.core.redis import get_redis_async
-from app.models.url_group import UrlGroupRunStatus
 from app.services import operational_event_service, url_group_run_service, url_group_service
 from app.tasks.url_group_run_tasks import process_url_group_run
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,12 +55,7 @@ def _run_to_response(run) -> UrlGroupRunResponse:
 
 
 def _run_is_terminal(run) -> bool:
-    return run.status in (
-        UrlGroupRunStatus.COMPLETED,
-        UrlGroupRunStatus.FAILED,
-        UrlGroupRunStatus.CANCELLED,
-        UrlGroupRunStatus.PARTIAL,
-    )
+    return url_group_run_service.is_run_terminal(run)
 
 
 def _should_run_group_scan_inline() -> bool:
@@ -407,7 +401,7 @@ async def group_run_progress_sse(
     run_id: uuid.UUID,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> StreamingResponse:
     """Server-Sent Events endpoint for group scan progress."""
     initial_run = await url_group_run_service.get_group_run(
         group_id,

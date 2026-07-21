@@ -1,14 +1,29 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 
-import { ScanTrendChart } from "@/components/scan/charts/scan-trend-chart";
 import { useScanDetailContext } from "@/components/scan/scan-detail-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useScanDomainTimeline } from "@/lib/hooks/use-scan-trend";
 import type { ScanTimelineRange } from "@/shared/types/scan";
+
+const ScanTrendChart = dynamic(
+  () =>
+    import("@/components/scan/charts/scan-trend-chart").then(
+      (module) => module.ScanTrendChart,
+    ),
+  {
+    loading: () => (
+      <p className="text-sm text-muted-foreground" role="status">
+        Loading trend chart…
+      </p>
+    ),
+    ssr: false,
+  },
+);
 
 /** Whitelist of accepted ``range`` values, mirrors backend ``TIMELINE_RANGE_DAYS``. */
 const RANGE_OPTIONS: { id: ScanTimelineRange; label: string }[] = [

@@ -25,8 +25,7 @@ import { getMonitorContentMessages } from "@/lib/i18n/monitor-content";
 import { isMonitorChangesPdfExportEnabledInUi } from "@/lib/i18n/monitor-detail";
 import { cn } from "@/lib/utils";
 import { monitorVisualCapturePngUrl } from "@/lib/api/monitors";
-import { downloadFromApiGet } from "@/lib/utils/export-download";
-import { downloadJson } from "@/lib/utils/export-json";
+import { downloadFromApiGet, downloadJson } from "@/lib/api/download";
 import { inferChangeCategoryForMonitorChange } from "@/shared/constants/monitor-change-categories";
 import type { MonitorChange } from "@/shared/types/monitor";
 
@@ -385,7 +384,10 @@ export function MonitorChangeTimeline({
               );
             }
             return (
-              <li key={`grp-${row.fingerprint}`} className="space-y-1">
+              <li
+                key={`grp-${row.fingerprint}`}
+                className="space-y-1 [contain-intrinsic-size:auto_160px] [content-visibility:auto]"
+              >
                 <span className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full bg-zinc-400 dark:bg-zinc-600" />
                 <details className="group rounded-md border border-zinc-200 bg-zinc-50/80 p-2 dark:border-zinc-700 dark:bg-zinc-900/40">
                   <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-zinc-900 dark:text-white">
@@ -401,7 +403,7 @@ export function MonitorChangeTimeline({
                             ? (firstLargeRef as Ref<HTMLLIElement>)
                             : undefined
                         }
-                        className="space-y-1 pl-2"
+                        className="space-y-1 pl-2 [contain-intrinsic-size:auto_120px] [content-visibility:auto]"
                       >
                         <ChangeRowBody
                           monitorId={monitorId}
@@ -461,7 +463,7 @@ function ChangeListItem({
           ? (firstLargeRef as Ref<HTMLLIElement>)
           : undefined
       }
-      className="space-y-1"
+      className="space-y-1 [contain-intrinsic-size:auto_160px] [content-visibility:auto]"
     >
       <span className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full bg-zinc-400 dark:bg-zinc-600" />
       <ChangeRowBody

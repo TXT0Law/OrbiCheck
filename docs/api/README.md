@@ -10,6 +10,8 @@ Interactive docs (when backend is running):
 ## Authentication
 
 All endpoints (except `/health` and `/auth/login`) require cookie-based authentication.
+The current deployment model is single-admin: credentials come from environment
+configuration and there is no User/Organization/Role model or session revocation.
 
 ```bash
 # Login to get session cookie
@@ -62,6 +64,8 @@ All paths below are relative to the Base URL (`/api/v1`).
 - [User Settings](./user-settings.md)
 - [Alerts](./alerts.md)
 - [Reports](./reports.md)
+- [Report Schedules](./report-schedules.md)
+- [Maintenance Windows](./maintenance-windows.md)
 - [Health](./health.md)
 
 ## HTTP Status Codes

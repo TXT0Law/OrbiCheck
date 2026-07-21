@@ -154,13 +154,13 @@ describe("scan detail routes", () => {
     useScanDetailMock.mockReturnValue(queryState());
   });
 
-  it("renders scan summary with the new T1.2 sections", () => {
+  it("renders scan summary with the new T1.2 sections", async () => {
     render(<ScanSummaryPage />);
 
     expect(screen.getByText("Scan Info")).toBeInTheDocument();
     expect(screen.getByText("Verdict")).toBeInTheDocument();
-    expect(screen.getByText("Severity Distribution")).toBeInTheDocument();
-    expect(screen.getByText("Score Breakdown")).toBeInTheDocument();
+    expect(await screen.findByText("Severity Distribution")).toBeInTheDocument();
+    expect(await screen.findByText("Score Breakdown")).toBeInTheDocument();
     expect(screen.getByText("Recommendations")).toBeInTheDocument();
     expect(screen.getByText("Module Execution Timeline")).toBeInTheDocument();
     expect(screen.getByText("Key Findings")).toBeInTheDocument();

@@ -9,6 +9,8 @@ import {
 } from './_common/abort.js';
 import { logger } from './_common/logger.js';
 import middleware from './_common/middleware.js';
+import { buildInternalAuthHeaders } from './_common/internal-auth.js';
+import { targetAddressFromRequest } from './_common/url-safety.js';
 
 const QUICK_PORTS = [
   21, 22, 25, 53, 80, 110, 143, 443, 993, 995,
@@ -505,12 +507,25 @@ async function scanPortsWithNmap(domain, profile, signal = null) {
     NMAP_SCANNER_TIMEOUT_MS,
   );
   try {
-    const response = await fetch(`${scannerBaseUrl.replace(/\/$/, '')}/scan/ports`, {
+    const scannerUrl = `${scannerBaseUrl.replace(/\/$/, '')}/scan/ports`;
+    const body = JSON.stringify({
+      target: domain,
+      profile,
+      authorization_acknowledged: true,
+    });
+    const authHeaders = buildInternalAuthHeaders({
+      secret: process.env.INTERNAL_SERVICE_SECRET || '',
+      method: 'POST',
+      target: new URL(scannerUrl).pathname,
+      body: Buffer.from(body),
+    });
+    const response = await fetch(scannerUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders,
       },
-      body: JSON.stringify({ target: domain, profile }),
+      body,
       signal: nmapSignal,
     });
 
@@ -574,6 +589,7 @@ async function scanPortsWithNmap(domain, profile, signal = null) {
  */
 const portsHandler = async (url, request) => {
   const domain = new URL(url).hostname;
+  const targetAddress = targetAddressFromRequest(request, domain);
   const signal = getRequestSignal(request);
   const profile = normalizeProfile(
     request?.body?.scanOptions?.portScanProfile
@@ -605,7 +621,7 @@ const portsHandler = async (url, request) => {
             );
           }
         }
-        return scanPortsWithNative(domain, profile, signal);
+        return scanPortsWithNative(targetAddress, profile, signal);
       })(),
       delay(GLOBAL_TIMEOUT_MS, signal).then(() => {
         const error = new Error(

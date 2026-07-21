@@ -171,8 +171,42 @@ PY
   )
 }
 
+scenario_invalid_base_fails_in_ci() {
+  local repo_dir="${TMP_DIR}/invalid-base"
+  create_repo "${repo_dir}"
+  (
+    cd "${repo_dir}"
+    printf 'base\n' > README.md
+    commit_all "base"
+    if CI=true bash "${REQUIRE_TESTS_SCRIPT}" "" "HEAD"; then
+      echo "[require-tests-self-test] Invalid CI base unexpectedly passed"
+      exit 1
+    fi
+  )
+}
+
+scenario_scanner_change_without_scanner_test_fails() {
+  local repo_dir="${TMP_DIR}/scanner-no-test"
+  create_repo "${repo_dir}"
+  mkdir -p "${repo_dir}/docker/scanner"
+  printf 'print("old")\n' > "${repo_dir}/docker/scanner/app.py"
+  (
+    cd "${repo_dir}"
+    commit_all "base"
+    local base_sha
+    base_sha="$(git rev-parse HEAD)"
+    printf 'print("new")\n' > docker/scanner/app.py
+    commit_all "scanner change"
+    local head_sha
+    head_sha="$(git rev-parse HEAD)"
+    assert_fail "${repo_dir}" "${base_sha}" "${head_sha}"
+  )
+}
+
 scenario_lint_only_backend_change_passes
 scenario_backend_code_without_tests_fails
 scenario_backend_code_with_tests_passes
+scenario_invalid_base_fails_in_ci
+scenario_scanner_change_without_scanner_test_fails
 
 echo "[require-tests-self-test] All scenarios passed."
