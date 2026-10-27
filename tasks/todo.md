@@ -18,7 +18,7 @@
 
 本批次证据见 [fixes-2026-10-27.md](fixes-2026-10-27.md)。修复分支推送和远端 CI 验收单独记录；不将本地 Windows standalone 打包阻塞计为通过。
 
-- [ ] 推送修复分支并验证对应提交的远端 CI。
+- [x] 修复提交 `5e610d2` 已推送；[PR #31](https://github.com/TXT0Law/OrbiCheck/pull/31) 的 [CI Pipeline](https://github.com/TXT0Law/OrbiCheck/actions/runs/40470415172) 全部 11 个 jobs（含 quality-gate）通过。后续验收文档提交继续验证最终 HEAD。
 
 ## 扫描可靠性
 
