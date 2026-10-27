@@ -21,7 +21,7 @@ test.describe("Connected URL groups workflow", () => {
     await expect(groupButton).toBeVisible({ timeout: 30_000 });
     await groupButton.click();
 
-    await page.getByRole("button", { name: /^Add URL$/ }).first().click();
+    await groupButton.getByRole("button", { name: /^Add URL$/ }).click();
     await page.getByLabel("URLs to add").fill("https://example.com\nhttps://iana.org");
     await page.getByRole("button", { name: "Add" }).click();
 
@@ -32,7 +32,7 @@ test.describe("Connected URL groups workflow", () => {
       timeout: 30_000,
     });
 
-    await page.getByRole("button", { name: "Scan Group", exact: true }).click();
+    await groupButton.getByRole("button", { name: "Scan Group", exact: true }).click();
     await expect(page.getByText("Group scan progress")).toBeVisible({
       timeout: 30_000,
     });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +10,7 @@ import type { ReportSchedule } from "@/shared/types/report";
 const schedulesMock = vi.hoisted(() => ({
   data: [] as ReportSchedule[],
 }));
+const previewMock = vi.hoisted(() => ({ content: "# Heading\n\nReport body" }));
 
 vi.mock("next/navigation", () => ({
   useRouter: vi.fn(() => ({ push: vi.fn() })),
@@ -85,7 +86,7 @@ vi.mock("@/lib/hooks/use-reports", () => ({
       id: "report-1",
       title: "Security Report - example.com",
       status: "completed",
-      contentMd: "# Heading\n\nReport body",
+      contentMd: previewMock.content,
       reportMeta: null,
     },
   })),
@@ -116,6 +117,7 @@ describe("reports pages", () => {
   beforeEach(() => {
     localStorage.clear();
     schedulesMock.data = [];
+    previewMock.content = "# Heading\n\nReport body";
   });
 
   it("renders the reports list", () => {
@@ -178,8 +180,24 @@ describe("reports pages", () => {
     render(<ReportDetailPage params={{ reportId: "report-1" }} />);
 
     expect(screen.getByRole("heading", { name: "Security Report - example.com" })).toBeInTheDocument();
+    // Wait for the real lazy module (including its Markdown dependencies) to load.
+    // A cold transform can take longer than findByText's default DOM wait.
+    await act(() => vi.dynamicImportSettled());
     expect(await screen.findByText("Markdown Preview")).toBeInTheDocument();
     expect(await screen.findByText("Heading")).toBeInTheDocument();
     expect(await screen.findByText("Report body")).toBeInTheDocument();
+  });
+
+  it("updates the loaded Markdown preview and renders GFM tables", async () => {
+    const { rerender } = render(<ReportDetailPage params={{ reportId: "report-1" }} />);
+    await act(() => vi.dynamicImportSettled());
+    expect(await screen.findByRole("heading", { name: "Heading" })).toBeInTheDocument();
+
+    previewMock.content = "# Updated report\n\n| Check | Result |\n| --- | --- |\n| TLS | Passed |";
+    rerender(<ReportDetailPage params={{ reportId: "report-1" }} />);
+
+    expect(screen.getByRole("heading", { name: "Updated report" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Passed" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Heading" })).not.toBeInTheDocument();
   });
 });

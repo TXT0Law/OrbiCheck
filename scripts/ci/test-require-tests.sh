@@ -203,10 +203,34 @@ scenario_scanner_change_without_scanner_test_fails() {
   )
 }
 
+scenario_ci_change_with_script_test() {
+  local test_path="$1"
+  local expected="$2"
+  local repo_dir="${TMP_DIR}/ci-${expected}"
+  create_repo "${repo_dir}"
+  mkdir -p "${repo_dir}/scripts/ci" "${repo_dir}/$(dirname "${test_path}")"
+  printf 'export const budget = 200;\n' > "${repo_dir}/scripts/ci/example.mjs"
+  printf '// existing test\n' > "${repo_dir}/${test_path}"
+  (
+    cd "${repo_dir}"
+    commit_all "base"
+    local base_sha
+    base_sha="$(git rev-parse HEAD)"
+    printf 'export const budget = 220;\n' > scripts/ci/example.mjs
+    printf '// changed test\n' >> "${test_path}"
+    commit_all "CI script and test"
+    local head_sha
+    head_sha="$(git rev-parse HEAD)"
+    "assert_${expected}" "${repo_dir}" "${base_sha}" "${head_sha}"
+  )
+}
+
 scenario_lint_only_backend_change_passes
 scenario_backend_code_without_tests_fails
 scenario_backend_code_with_tests_passes
 scenario_invalid_base_fails_in_ci
 scenario_scanner_change_without_scanner_test_fails
+scenario_ci_change_with_script_test "tests/scripts/example.test.ts" "pass"
+scenario_ci_change_with_script_test "tests/pages/example.test.ts" "fail"
 
 echo "[require-tests-self-test] All scenarios passed."
