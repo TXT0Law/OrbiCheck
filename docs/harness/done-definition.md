@@ -94,3 +94,23 @@ If it fails, fix the code and re-run only the failing command.
 
 - [AGENTS.md](../../AGENTS.md) — global rules
 - [README.md](../../README.md) — tracked architecture and development guide
+
+## Validation evidence and runner cleanup
+
+Playwright output directories are disposable. Every configuration must explicitly
+use a distinct child of `test-results/`, and each HTML reporter must use a distinct
+child of `playwright-report/`. Neither parent directory may be a suite's cleanup
+target. The artifact regression test launches a minimal real Playwright run and
+checks that sibling evidence survives its startup cleanup.
+
+Keep validation logs, toolchains, package caches, and temporary environment
+metadata under `quickstart/logs/<run-id>/`, outside all runner output/report
+directories. Invoke tools using their verified executable paths. Stop a validation
+launch when environment preparation or isolated database checks fail; do not
+continue with a default package manager or database. This execution requirement
+does not authorize resetting an existing database.
+
+Copy reports that must survive another invocation into the evidence directory
+before launching another suite. Record exact commands, exit codes and the tested
+commit. A missing or overwritten log must be disclosed, never reconstructed and
+presented as an original complete log.
