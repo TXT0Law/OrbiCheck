@@ -11,8 +11,11 @@ from __future__ import annotations
 import importlib
 import sys
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -145,3 +148,65 @@ def test_cleanup_returns_zero_counts_when_no_monitors() -> None:
     assert result["changes_deleted"] == 0
     assert result["visual_captures_deleted"] == 0
     assert result["visual_changes_deleted"] == 0
+
+
+@pytest.mark.unit
+def test_cleanup_discovers_history_after_capability_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _fresh_module()
+    monitor_id = uuid4()
+    fake_session = _FakeSession()
+    original_execute = fake_session.execute
+    history_queries: list[str] = []
+    old_timestamp = datetime.now(timezone.utc) - timedelta(
+        days=max(
+            module.settings.MONITOR_MAX_SNAPSHOT_AGE_DAYS,
+            module.settings.MONITOR_MAX_VISUAL_CAPTURE_AGE_DAYS,
+        ) + 1
+    )
+    snapshots = [
+        SimpleNamespace(id=uuid4(), captured_at=old_timestamp, is_baseline=False)
+        for _ in range(module.settings.MONITOR_MIN_RETAINED_SNAPSHOTS + 1)
+    ]
+    visual_captures = [
+        SimpleNamespace(id=uuid4(), captured_at=old_timestamp, is_diagnostic=False)
+        for _ in range(module.settings.MONITOR_MIN_RETAINED_VISUAL_CAPTURES + 1)
+    ]
+
+    def execute_with_history(statement: Any) -> Any:
+        query = str(statement)
+        if "EXISTS" in query:
+            history_queries.append(query)
+            result = MagicMock()
+            result.all.return_value = [(monitor_id,)]
+            return result
+        return original_execute(statement)
+
+    def scalars_with_history(statement: Any) -> Any:
+        result = MagicMock()
+        query = str(statement)
+        if f"FROM {module.MonitorSnapshot.__tablename__}" in query:
+            result.all.return_value = snapshots
+        elif f"FROM {module.MonitorVisualCapture.__tablename__}" in query:
+            result.all.return_value = visual_captures
+        else:
+            result.all.return_value = []
+        return result
+
+    monkeypatch.setattr(fake_session, "execute", execute_with_history)
+    monkeypatch.setattr(fake_session, "scalars", scalars_with_history)
+    with patch.object(module, "_get_dispatch_engine", return_value=MagicMock()):
+        with _patched_session(module, fake_session):
+            result = module.cleanup_monitor_snapshots()
+
+    assert result["monitors_processed"] == 1
+    assert result["monitors_with_visual"] == 1
+    assert result["snapshots_deleted"] == 1
+    assert result["visual_captures_deleted"] == 1
+    assert len(history_queries) == 2
+    assert "monitor_snapshots" in history_queries[0]
+    assert "monitor_changes" in history_queries[0]
+    assert "monitor_visual_captures" in history_queries[1]
+    assert "monitor_visual_changes" in history_queries[1]
+    assert all("enabled_capabilities" not in query for query in history_queries)

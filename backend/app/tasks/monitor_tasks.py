@@ -7,7 +7,7 @@ import uuid
 
 import redis as redis_sync
 import structlog
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, delete, or_, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
@@ -215,12 +215,38 @@ def cleanup_monitor_snapshots() -> dict:
     monitors_with_content = 0
     monitors_with_visual = 0
     with Session(_get_dispatch_engine()) as db:
-        rows = db.execute(select(Monitor.id, Monitor.enabled_capabilities)).all()
+        # Retention follows stored history, including history from capabilities
+        # that a user has since disabled. Indexed EXISTS checks avoid grouping
+        # every history row just to discover the affected monitors.
         monitor_ids = [
-            r[0] for r in rows if r[1] and "content_change" in list(r[1])
+            row[0]
+            for row in db.execute(
+                select(Monitor.id).where(
+                    or_(
+                        select(MonitorSnapshot.id)
+                        .where(MonitorSnapshot.monitor_id == Monitor.id)
+                        .exists(),
+                        select(MonitorChange.id)
+                        .where(MonitorChange.monitor_id == Monitor.id)
+                        .exists(),
+                    )
+                )
+            ).all()
         ]
         visual_monitor_ids = [
-            r[0] for r in rows if r[1] and "visual_change" in list(r[1])
+            row[0]
+            for row in db.execute(
+                select(Monitor.id).where(
+                    or_(
+                        select(MonitorVisualCapture.id)
+                        .where(MonitorVisualCapture.monitor_id == Monitor.id)
+                        .exists(),
+                        select(MonitorVisualChange.id)
+                        .where(MonitorVisualChange.monitor_id == Monitor.id)
+                        .exists(),
+                    )
+                )
+            ).all()
         ]
         monitors_with_content = len(monitor_ids)
         monitors_with_visual = len(visual_monitor_ids)
