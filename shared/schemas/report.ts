@@ -80,6 +80,7 @@ export const reportScheduleRunSchema = z.object({
   id: z.string(),
   scheduleId: z.string(),
   reportId: z.string().nullable(),
+  scanId: z.string().nullable(),
   status: reportScheduleRunStatusSchema,
   startedAt: isoStringSchema.nullable(),
   completedAt: isoStringSchema.nullable(),
@@ -104,6 +105,7 @@ export const reportScheduleSchema = z.object({
   deliveryChannels: z.array(reportScheduleDeliveryChannelSchema),
   emailRecipients: z.array(z.string()),
   isEnabled: z.boolean(),
+  rescanBeforeReport: z.boolean(),
   lastRunAt: isoStringSchema.nullable(),
   nextRunAt: isoStringSchema.nullable(),
   createdAt: isoStringSchema,
@@ -126,6 +128,7 @@ const reportScheduleInputBaseSchema = z.object({
   deliveryChannels: z.array(reportScheduleDeliveryChannelSchema),
   emailRecipients: z.array(z.string().trim().email()).max(20),
   isEnabled: z.boolean().optional(),
+  rescanBeforeReport: z.boolean().optional(),
 });
 
 export const reportScheduleCreateSchema = reportScheduleInputBaseSchema.superRefine(

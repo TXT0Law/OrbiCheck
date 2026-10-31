@@ -53,6 +53,7 @@ class ReportSchedule(Base):
     minute: Mapped[int] = mapped_column(Integer, nullable=False)
     delivery_channels: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     email_recipients: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    rescan_before_report: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
@@ -84,6 +85,9 @@ class ReportScheduleRun(Base):
     )
     report_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("reports.id", ondelete="SET NULL"), nullable=True
+    )
+    scan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("scans.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[ReportScheduleRunStatus] = mapped_column(
         Enum(ReportScheduleRunStatus, native_enum=False, length=16),

@@ -29,6 +29,7 @@ const schedule = {
   deliveryChannels: ["email"],
   emailRecipients: ["security@example.com"],
   isEnabled: true,
+  rescanBeforeReport: false,
   lastRunAt: null,
   nextRunAt: "2026-06-01T09:00:00Z",
   createdAt: "2026-06-01T00:00:00Z",
@@ -75,5 +76,53 @@ describe("report schedules api", () => {
       "/report-schedules/schedule-1/run-now",
       {},
     );
+  });
+
+  it("preserves the opt-in fresh scan setting", async () => {
+    const freshSchedule = { ...schedule, rescanBeforeReport: true };
+    apiClientMock.post.mockResolvedValue({ data: freshSchedule });
+    const mod = await import("@/lib/api/report-schedules");
+
+    const created = await mod.createReportSchedule({
+      name: "Weekly report",
+      scanId: "scan-1",
+      cadence: "weekly",
+      timezone: "UTC",
+      dayOfWeek: 0,
+      hour: 9,
+      minute: 0,
+      deliveryChannels: [],
+      emailRecipients: [],
+      rescanBeforeReport: true,
+    });
+
+    expect(created.rescanBeforeReport).toBe(true);
+    expect(apiClientMock.post).toHaveBeenCalledWith(
+      "/report-schedules",
+      expect.objectContaining({ rescanBeforeReport: true }),
+    );
+  });
+
+  it("returns the scan created for a scheduled run", async () => {
+    apiClientMock.get.mockResolvedValue({
+      data: {
+        runs: [{
+          id: "run-1",
+          scheduleId: "schedule-1",
+          reportId: "report-1",
+          scanId: "fresh-scan-1",
+          status: "completed",
+          startedAt: null,
+          completedAt: null,
+          errorMessage: null,
+          deliverySummary: null,
+        }],
+      },
+    });
+    const mod = await import("@/lib/api/report-schedules");
+
+    const result = await mod.listReportScheduleRuns("schedule-1");
+
+    expect(result.runs[0].scanId).toBe("fresh-scan-1");
   });
 });

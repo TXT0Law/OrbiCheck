@@ -209,6 +209,7 @@ async def create_schedule(
         minute=request.minute,
         delivery_channels=request.delivery_channels,
         email_recipients=request.email_recipients,
+        rescan_before_report=request.rescan_before_report,
         is_enabled=request.is_enabled,
         next_run_at=next_run_at,
     )

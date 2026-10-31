@@ -8998,6 +8998,11 @@
             "type": "boolean",
             "title": "Isenabled",
             "default": true
+          },
+          "rescanBeforeReport": {
+            "type": "boolean",
+            "title": "Rescanbeforereport",
+            "default": false
           }
         },
         "type": "object",
@@ -9134,6 +9139,11 @@
             "type": "boolean",
             "title": "Isenabled"
           },
+          "rescanBeforeReport": {
+            "type": "boolean",
+            "title": "Rescanbeforereport",
+            "default": false
+          },
           "lastRunAt": {
             "anyOf": [
               {
@@ -9217,6 +9227,18 @@
               }
             ],
             "title": "Reportid"
+          },
+          "scanId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanid"
           },
           "status": {
             "$ref": "#/components/schemas/ReportScheduleRunStatus"
@@ -9499,6 +9521,11 @@
               }
             ],
             "title": "Isenabled"
+          },
+          "rescanBeforeReport": {
+            "type": "boolean",
+            "title": "Rescanbeforereport",
+            "default": false
           }
         },
         "type": "object",

@@ -54,6 +54,7 @@ interface FormState {
   deliverSlack: boolean;
   emailRecipients: string;
   isEnabled: boolean;
+  rescanBeforeReport: boolean;
 }
 
 const FORMAT_OPTIONS: ReportFormat[] = ["pdf", "markdown", "html", "both", "all"];
@@ -83,6 +84,7 @@ function buildState(schedule?: ReportSchedule | null): FormState {
     deliverSlack: schedule?.deliveryChannels.includes("slack") ?? false,
     emailRecipients: (schedule?.emailRecipients ?? []).join(", "),
     isEnabled: schedule?.isEnabled ?? true,
+    rescanBeforeReport: schedule?.rescanBeforeReport ?? false,
   };
 }
 
@@ -155,6 +157,7 @@ export function ReportScheduleDialog({
       deliveryChannels,
       emailRecipients: splitRecipients(state.emailRecipients),
       isEnabled: state.isEnabled,
+      rescanBeforeReport: state.rescanBeforeReport,
     };
 
     try {
@@ -285,6 +288,15 @@ export function ReportScheduleDialog({
               </div>
             ) : null}
           </fieldset>
+
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={state.rescanBeforeReport}
+              onChange={(event) => patch("rescanBeforeReport", event.target.checked)}
+            />
+            <span>{messages.rescanBeforeReportLabel}</span>
+          </label>
 
           <div className="grid gap-4 md:grid-cols-4">
             <label className="space-y-2 text-sm">

@@ -32,6 +32,7 @@ class ReportScheduleBase(BaseModel):
     delivery_channels: list[Literal["email", "slack"]] = Field(default_factory=list)
     email_recipients: list[str] = Field(default_factory=list, max_length=20)
     is_enabled: bool = True
+    rescan_before_report: bool = False
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -91,6 +92,7 @@ class ReportScheduleUpdateRequest(BaseModel):
     delivery_channels: list[Literal["email", "slack"]] | None = None
     email_recipients: list[str] | None = Field(default=None, max_length=20)
     is_enabled: bool | None = None
+    rescan_before_report: bool = False
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -113,6 +115,7 @@ class ReportScheduleRunResponse(BaseModel):
     id: uuid.UUID
     schedule_id: uuid.UUID
     report_id: uuid.UUID | None = None
+    scan_id: uuid.UUID | None = None
     status: ReportScheduleRunStatus
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -143,6 +146,7 @@ class ReportScheduleResponse(BaseModel):
     delivery_channels: list[str]
     email_recipients: list[str]
     is_enabled: bool
+    rescan_before_report: bool = False
     last_run_at: datetime | None = None
     next_run_at: datetime | None = None
     created_at: datetime

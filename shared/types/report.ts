@@ -75,6 +75,7 @@ export interface ReportScheduleRun {
   id: string;
   scheduleId: string;
   reportId: string | null;
+  scanId: string | null;
   status: ReportScheduleRunStatus;
   startedAt: string | null;
   completedAt: string | null;
@@ -99,6 +100,7 @@ export interface ReportSchedule {
   deliveryChannels: ReportScheduleDeliveryChannel[];
   emailRecipients: string[];
   isEnabled: boolean;
+  rescanBeforeReport: boolean;
   lastRunAt: string | null;
   nextRunAt: string | null;
   createdAt: string;
@@ -121,6 +123,7 @@ export interface ReportScheduleCreateParams {
   deliveryChannels: ReportScheduleDeliveryChannel[];
   emailRecipients: string[];
   isEnabled?: boolean;
+  rescanBeforeReport?: boolean;
 }
 
 export type ReportScheduleUpdateParams = Partial<ReportScheduleCreateParams>;

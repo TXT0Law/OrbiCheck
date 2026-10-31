@@ -211,6 +211,7 @@ export type DashboardMessages = {
     scanLabel: string;
     selectCompletedScan: string;
     includeMonitorSummary: string;
+    rescanBeforeReportLabel: string;
     monitorLabel: string;
     selectMonitor: string;
     periodLabel: string;
@@ -541,6 +542,7 @@ const en: DashboardMessages = {
     scanLabel: "Scan",
     selectCompletedScan: "Select a completed scan",
     includeMonitorSummary: "Include monitor summary",
+    rescanBeforeReportLabel: "Run a fresh scan before each report. This sends new requests to the target site and may delay delivery.",
     monitorLabel: "Monitor",
     selectMonitor: "Select a monitor",
     periodLabel: "Period",
@@ -871,6 +873,7 @@ const zh: DashboardMessages = {
     scanLabel: "掃描",
     selectCompletedScan: "選擇已完成掃描",
     includeMonitorSummary: "包含監控摘要",
+    rescanBeforeReportLabel: "每次產生報告前先重新掃描。這會向目標網站發送新請求，並可能延遲派送。",
     monitorLabel: "監控",
     selectMonitor: "選擇監控",
     periodLabel: "期間",

@@ -29,6 +29,7 @@ def _schedule_response(**overrides):
         "delivery_channels": ["email"],
         "email_recipients": ["security@example.com"],
         "is_enabled": True,
+        "rescan_before_report": True,
         "last_run_at": None,
         "next_run_at": now,
         "created_at": now,
@@ -44,7 +45,8 @@ def _schedule_response(**overrides):
 async def test_create_report_schedule_endpoint(async_client, monkeypatch) -> None:
     payload = _schedule_response()
 
-    async def fake_create(*_args, **_kwargs):
+    async def fake_create(_db, _user_id, request):
+        assert request.rescan_before_report is True
         return SimpleNamespace(id=payload["id"])
 
     async def fake_get_response(*_args, **_kwargs):
@@ -66,6 +68,7 @@ async def test_create_report_schedule_endpoint(async_client, monkeypatch) -> Non
             "minute": 0,
             "deliveryChannels": ["email"],
             "emailRecipients": ["security@example.com"],
+            "rescanBeforeReport": True,
         },
     )
 
@@ -73,6 +76,7 @@ async def test_create_report_schedule_endpoint(async_client, monkeypatch) -> Non
     body = response.json()
     assert body["data"]["name"] == "Weekly security report"
     assert body["data"]["deliveryChannels"] == ["email"]
+    assert body["data"]["rescanBeforeReport"] is True
 
 
 @pytest.mark.asyncio
@@ -94,3 +98,14 @@ async def test_run_report_schedule_now_endpoint(async_client, monkeypatch) -> No
 
     assert response.status_code == 200
     assert response.json()["data"]["runId"] == str(run_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_update_report_schedule_rejects_null_rescan_flag(async_client) -> None:
+    response = await async_client.put(
+        f"/api/v1/report-schedules/{uuid4()}",
+        json={"rescanBeforeReport": None},
+    )
+
+    assert response.status_code == 422

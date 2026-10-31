@@ -5,21 +5,77 @@ import uuid
 from datetime import datetime, timezone
 
 import structlog
+from redis.exceptions import RedisError
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.celery_app import celery_app
 from app.models.report import Report, ReportStatus
 from app.models.report_schedule import ReportScheduleRun, ReportScheduleRunStatus
-from app.models.scan import Scan, ScanStatus
+from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.services.report_schedule_service import (
     deliver_scheduled_report,
     dispatch_due_schedules_sync,
 )
 from app.services.report_service import generate_report_artifacts_sync
-from app.tasks.scan_tasks import _get_sync_session
+from app.services.transformers import ALL_MODULES
+from app.tasks.scan_tasks import _get_sync_session, execute_scan
+from app.utils.url_safety import validate_url_safety
 
 logger = structlog.get_logger(__name__)
+
+FRESH_SCAN_OPTION_KEYS = (
+    "enablePortScan",
+    "portScanProfile",
+    "acknowledgeScanAuthorization",
+)
+
+
+def _create_fresh_scan(db: Session, source: Scan) -> tuple[Scan, list[str]]:
+    """Preserve the source scan's module selection without overwriting its history."""
+    validate_url_safety(source.url)
+    options = {
+        key: source.scan_options[key]
+        for key in FRESH_SCAN_OPTION_KEYS
+        if isinstance(source.scan_options, dict) and key in source.scan_options
+    }
+    selected = [
+        result.module_name
+        for result in source.module_results
+        if result.module_name in ALL_MODULES
+        and not (isinstance(result.raw_result, dict) and result.raw_result.get("skipped") is True)
+    ]
+    selected_set = set(selected)
+    if not selected_set:
+        raise ValueError("Source scan has no selected modules")
+    scan = Scan(
+        id=uuid.uuid4(),
+        url=source.url,
+        domain=source.domain,
+        user_id=source.user_id,
+        status=ScanStatus.PENDING,
+        total_modules=len(selected_set),
+        scan_options=options,
+    )
+    db.add(scan)
+    db.flush()
+    for module_name in ALL_MODULES:
+        if module_name in selected_set:
+            db.add(ScanModuleResult(
+                scan_id=scan.id,
+                module_name=module_name,
+                status=ModuleStatus.PENDING,
+            ))
+        else:
+            db.add(ScanModuleResult(
+                scan_id=scan.id,
+                module_name=module_name,
+                status=ModuleStatus.SUCCESS,
+                raw_result={"skipped": True, "data": {"note": "Skipped by schedule"}},
+            ))
+    db.flush()
+    return scan, [module for module in ALL_MODULES if module in selected_set]
 
 
 @celery_app.task(name="app.tasks.report_schedule_tasks.dispatch_due_report_schedules")
@@ -47,13 +103,48 @@ def generate_scheduled_report_run(run_id: str) -> dict:
         if run is None:
             return {"run_id": run_id, "status": "not_found"}
         schedule = run.schedule
-        scan = db.get(Scan, schedule.scan_id) if schedule.scan_id else None
+        if schedule.scan_id and schedule.rescan_before_report:
+            scan = db.execute(
+                select(Scan)
+                .options(selectinload(Scan.module_results))
+                .where(Scan.id == schedule.scan_id)
+            ).scalar_one_or_none()
+        else:
+            scan = db.get(Scan, schedule.scan_id) if schedule.scan_id else None
         if scan is None or scan.user_id != schedule.user_id:
             _fail_run(db, run, "Scheduled report scan is missing")
             return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}
         if scan.status != ScanStatus.COMPLETED:
             _fail_run(db, run, "Scheduled report scan is not completed")
             return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}
+
+        if schedule.rescan_before_report:
+            try:
+                if run.scan_id is None:
+                    fresh_scan, modules = _create_fresh_scan(db, scan)
+                    run.scan_id = fresh_scan.id
+                    run.started_at = datetime.now(timezone.utc)
+                    db.commit()
+                else:
+                    fresh_scan = db.get(Scan, run.scan_id)
+                    if fresh_scan is None:
+                        _fail_run(db, run, "Scheduled fresh scan is missing")
+                        return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}
+                    modules = [
+                        result.module_name for result in scan.module_results
+                        if not (isinstance(result.raw_result, dict) and result.raw_result.get("skipped") is True)
+                    ]
+                if fresh_scan.status != ScanStatus.COMPLETED:
+                    execute_scan.run(str(fresh_scan.id), modules, fresh_scan.scan_options)
+                    db.refresh(fresh_scan)
+                if fresh_scan.status != ScanStatus.COMPLETED:
+                    _fail_run(db, run, "Scheduled fresh scan did not complete")
+                    return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}
+                scan = fresh_scan
+            except (ValueError, RuntimeError, RedisError, SQLAlchemyError) as exc:
+                db.rollback()
+                _fail_run(db, run, f"Scheduled fresh scan could not start: {exc}")
+                return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}
 
         now = datetime.now(timezone.utc)
         run.status = ReportScheduleRunStatus.GENERATING
