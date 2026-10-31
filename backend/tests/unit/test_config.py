@@ -50,6 +50,12 @@ def test_settings_default_scan_service_url(
 
 
 @pytest.mark.unit
+def test_settings_reject_nonpositive_scan_recovery_budget() -> None:
+    with pytest.raises(ValidationError, match="SCAN_BATCH_RECOVERY_BUDGET_S"):
+        Settings(_env_file=None, SCAN_BATCH_RECOVERY_BUDGET_S=0)
+
+
+@pytest.mark.unit
 def test_settings_parse_boolean_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

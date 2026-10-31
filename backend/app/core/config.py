@@ -2,7 +2,7 @@ import base64
 import binascii
 from urllib.parse import urlsplit
 
-from pydantic import computed_field, field_validator, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.change_category_defaults import (
@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     SCAN_BATCH_CONCURRENCY: int = 10
     SCAN_HOST_CONCURRENCY: int = 6
     SCAN_BATCH_TIMEOUT_MAX_S: float = 300.0
+    SCAN_BATCH_RECOVERY_BUDGET_S: float = Field(
+        default=120.0,
+        gt=0,
+        description="Maximum seconds spent starting individual retries after a batch fails",
+    )
     MODULE_TIMEOUT_MS: int = 30000
     EXTENDED_MODULE_TIMEOUT_MS: int = 60000
 

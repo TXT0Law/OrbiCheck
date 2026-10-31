@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -24,15 +25,15 @@ from app.utils.url_safety import validate_url_safety
 # S-10: when a single batch HTTP call to the scan-service fails wholesale
 # (connection error, 5xx, MODULE_TIMEOUT_MS), every module that did not yet
 # return a result was previously marked FAILED in one go. We now flag those
-# modules as RETRYING and re-run them one-by-one. The per-module sync call
-# uses the same SCAN_TIMEOUT_MS budget the batch call did, so the worst-case
-# extra wall-clock time is bounded.
+# modules as RETRYING and re-run them one-by-one. Each call is capped by the
+# remaining batch recovery budget; unattempted modules become TIMEOUT.
 SCAN_PER_MODULE_RETRY_TIMEOUT_S = float(settings.SCAN_TIMEOUT_MS) / 1000.0
 # S-11: a target is treated as "degraded" when at least this many modules
 # in the current batch have failed; the SSE payload exposes this so the
 # frontend can show "target may be slow / unhealthy" UX hints.
 SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD = 3
 SECONDS_TO_MILLISECONDS = 1000
+RETRY_BUDGET_EXHAUSTED_MESSAGE = "Batch recovery time budget exhausted"
 
 logger = logging.getLogger(__name__)
 sync_engine = None
@@ -375,20 +376,30 @@ def execute_scan(
                         )
                         retry_success_count = 0
                         retry_failure_count = 0
-                        for module_name in pending_modules:
+                        attempted_modules: list[str] = []
+                        timed_out_modules: list[str] = []
+                        recovery_deadline = (
+                            time.monotonic() + settings.SCAN_BATCH_RECOVERY_BUDGET_S
+                        )
+                        for index, module_name in enumerate(pending_modules):
                             if _is_scan_aborted(db, scan_id, redis):
                                 _record_scan_cancelled("Scan was cancelled during per-module retry")
                                 return {
                                     "scan_id": scan_id,
                                     "status": ScanStatus.CANCELLED.value,
                                 }
+                            remaining_s = recovery_deadline - time.monotonic()
+                            if remaining_s <= 0:
+                                timed_out_modules = pending_modules[index:]
+                                break
+                            attempted_modules.append(module_name)
                             envelope = call_scan_module_sync(
                                 module_name,
                                 url,
                                 effective_scan_options,
                                 scan_id=scan_id,
                                 trace_id=scan_id,
-                                timeout_s=SCAN_PER_MODULE_RETRY_TIMEOUT_S,
+                                timeout_s=min(SCAN_PER_MODULE_RETRY_TIMEOUT_S, remaining_s),
                             )
                             raw_data = envelope.get("data") or {}
                             success = bool(envelope.get("success"))
@@ -429,6 +440,26 @@ def execute_scan(
                             )
                             completed += 1
                             db.commit()
+                        if timed_out_modules:
+                            db.execute(
+                                update(ScanModuleResult)
+                                .where(
+                                    ScanModuleResult.scan_id == uuid.UUID(scan_id),
+                                    ScanModuleResult.module_name.in_(timed_out_modules),
+                                )
+                                .values(
+                                    status=ModuleStatus.TIMEOUT,
+                                    raw_result={"error": RETRY_BUDGET_EXHAUSTED_MESSAGE},
+                                    error_message=RETRY_BUDGET_EXHAUSTED_MESSAGE,
+                                    completed_at=datetime.now(timezone.utc),
+                                )
+                            )
+                            for module_name in timed_out_modules:
+                                all_raw_results[module_name] = None
+                            completed += len(timed_out_modules)
+                            retry_failure_count += len(timed_out_modules)
+                            target_failure_count += len(timed_out_modules)
+                            db.commit()
                         record_event_sync(
                             db,
                             event_type="scan_service.per_module_retry_completed",
@@ -438,7 +469,7 @@ def execute_scan(
                             scan_id=scan.id,
                             group_id=group_id,
                             group_run_id=group_run_id,
-                            retry_count=len(pending_modules),
+                            retry_count=len(attempted_modules),
                             error_code=(
                                 "MODULE_RETRY_FAILED"
                                 if retry_failure_count
@@ -447,7 +478,9 @@ def execute_scan(
                             trace_id=scan_id,
                             details={
                                 "batch": batch_name,
-                                "retriedModules": pending_modules,
+                                "retriedModules": attempted_modules,
+                                "timedOutModules": timed_out_modules,
+                                "recoveryBudgetSeconds": settings.SCAN_BATCH_RECOVERY_BUDGET_S,
                                 "succeeded": retry_success_count,
                                 "failed": retry_failure_count,
                             },

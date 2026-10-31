@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Iterable
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -339,3 +340,50 @@ def test_progress_payload_exposes_current_modules_and_degraded_target(
 def test_module_status_retrying_enum_value_exposed() -> None:
     """B-9: defensive guard so future refactors don't silently rename the enum."""
     assert ModuleStatus.RETRYING.value == "retrying"
+
+
+@pytest.mark.unit
+def test_batch_recovery_budget_marks_unattempted_modules_timed_out(
+    monkeypatch: pytest.MonkeyPatch, patched_environment, stub_scan
+) -> None:
+    modules = ["status", "headers", "dns"]
+    monkeypatch.setattr(
+        scan_tasks,
+        "MODULE_BATCHES",
+        {"quick": modules, "medium": [], "heavy": []},
+    )
+    monkeypatch.setattr(scan_tasks, "ALL_MODULES", modules)
+    monkeypatch.setattr(scan_tasks.settings, "SCAN_BATCH_RECOVERY_BUDGET_S", 2.0)
+    clock = iter([0.0, 0.0, 3.0])
+    monkeypatch.setattr(scan_tasks, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+
+    def fail_batch(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("batch unavailable")
+
+    calls: list[tuple[str, float]] = []
+
+    def retry_module(name: str, _url: str, _options: dict, **kwargs: object) -> dict:
+        calls.append((name, float(kwargs["timeout_s"])))
+        return {"success": True, "data": {"ok": True}, "durationMs": 1}
+
+    monkeypatch.setattr(scan_tasks, "call_scan_batch_sync", fail_batch)
+    monkeypatch.setattr(scan_tasks, "call_scan_module_sync", retry_module)
+    scan_tasks.execute_scan.request.id = "task-budget-1"
+
+    result = scan_tasks.execute_scan.run(str(stub_scan.id))
+
+    assert result["status"] == ScanStatus.COMPLETED.value
+    assert calls == [("status", 2.0)]
+    updates = patched_environment["session"]._captured_update_values()
+    assert any(
+        getattr(value, "value", value) == ModuleStatus.TIMEOUT
+        for update_values in updates
+        for key, value in update_values.items()
+        if key.endswith(".status")
+    )
+    assert any(
+        getattr(value, "value", value) == len(modules)
+        for update_values in updates
+        for key, value in update_values.items()
+        if key.endswith(".completed_modules")
+    )

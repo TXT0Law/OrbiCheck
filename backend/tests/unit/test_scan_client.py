@@ -71,6 +71,38 @@ def test_build_missing_module_result_returns_expected_shape() -> None:
 
 
 @pytest.mark.unit
+def test_sync_module_retry_caps_connect_timeout_to_remaining_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, httpx.Timeout] = {}
+
+    class _ClientStub:
+        def __init__(self, **kwargs: object) -> None:
+            timeout = kwargs["timeout"]
+            assert isinstance(timeout, httpx.Timeout)
+            captured["timeout"] = timeout
+
+        def __enter__(self) -> "_ClientStub":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def get(self, *_args: object, **_kwargs: object) -> httpx.Response:
+            raise httpx.ConnectTimeout("deadline reached")
+
+    monkeypatch.setattr(scan_client.httpx, "Client", _ClientStub)
+    monkeypatch.setattr(scan_client, "_internal_auth", lambda: None)
+
+    result = scan_client.call_scan_module_sync(
+        "status", "https://example.com", timeout_s=0.5
+    )
+
+    assert result["success"] is False
+    assert captured["timeout"].connect == 0.5
+
+
+@pytest.mark.unit
 def test_resolve_batch_timeout_scales_with_batch_complexity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

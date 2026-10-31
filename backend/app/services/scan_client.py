@@ -265,7 +265,10 @@ def call_scan_module_sync(
     """
     headers = _build_trace_headers(scan_id, trace_id)
     if timeout_s is not None:
-        client_timeout = httpx.Timeout(timeout_s, connect=10.0)
+        client_timeout = httpx.Timeout(
+            timeout_s,
+            connect=min(MIN_CONNECT_TIMEOUT_S, timeout_s),
+        )
     else:
         client_timeout = TIMEOUT
     try:
