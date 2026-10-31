@@ -1,5 +1,7 @@
 import asyncio
+import csv
 import inspect
+import io
 import json
 import logging
 import uuid
@@ -42,6 +44,22 @@ TERMINAL_STATUSES = (ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELL
 CANCELLABLE_STATUSES = (ScanStatus.PENDING, ScanStatus.RUNNING)
 PORTS_MODULE = "ports"
 DEFAULT_PORT_SCAN_PROFILE = "quick"
+SCAN_EXPORT_MAX_ROWS = 5_000
+SCAN_EXPORT_COLUMNS = (
+    "id",
+    "domain",
+    "url",
+    "status",
+    "createdAt",
+    "completedAt",
+    "securityScore",
+)
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def _safe_csv_value(value: str) -> str:
+    """Keep user-controlled text from being interpreted as a spreadsheet formula."""
+    return f"'{value}" if value.lstrip().startswith(CSV_FORMULA_PREFIXES) else value
 
 
 async def _get_scan_for_user(
@@ -256,6 +274,44 @@ async def list_scans(
     result = await db.execute(stmt)
     scans = list(result.scalars().all())
     return scans, total
+
+
+async def export_scan_history_csv(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    limit: int = SCAN_EXPORT_MAX_ROWS,
+    offset: int = 0,
+    search: str | None = None,
+    sort_by: str = "created_at_desc",
+    status_group: str = "all",
+) -> tuple[str, int]:
+    """Export an owner-scoped page of scan metadata using the list filters."""
+    scans, total = await list_scans(
+        db,
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
+        search=search,
+        sort_by=sort_by,
+        status_group=status_group,
+    )
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(SCAN_EXPORT_COLUMNS)
+    for scan in scans:
+        writer.writerow(
+            (
+                str(scan.id),
+                _safe_csv_value(scan.domain),
+                _safe_csv_value(scan.url),
+                scan.status.value,
+                scan.created_at.isoformat(),
+                scan.completed_at.isoformat() if scan.completed_at else "",
+                scan.security_score if scan.security_score is not None else "",
+            )
+        )
+    return "\ufeff" + output.getvalue(), total
 
 
 async def cancel_scan(db: AsyncSession, scan_id: uuid.UUID, user_id: int | None = None) -> Scan:

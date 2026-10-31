@@ -519,6 +519,111 @@
         }
       }
     },
+    "/api/v1/scans/export.csv": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Export scan history metadata as CSV",
+        "description": "Exports the same owner-scoped filters and stable sorting as the scan list. Each request returns at most 5,000 rows; use offset to export later pages. For full module results, use GET /scans/{scan_id}/detail/full.",
+        "operationId": "export_scan_history_csv_api_v1_scans_export_csv_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "default": 5000,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "created_at_desc",
+                "created_at_asc",
+                "security_score_desc",
+                "security_score_asc",
+                "domain_asc",
+                "domain_desc",
+                "progress_desc"
+              ],
+              "type": "string",
+              "default": "created_at_desc",
+              "title": "Sort By"
+            }
+          },
+          {
+            "name": "status_group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "pending",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "active",
+                "terminal"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Status Group"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/scans/by-domain/{domain}/timeline": {
       "get": {
         "tags": [

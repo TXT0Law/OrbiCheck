@@ -179,6 +179,64 @@ async def list_scans(
     )
 
 
+@router.get(
+    "/export.csv",
+    summary="Export scan history metadata as CSV",
+    description=(
+        "Exports the same owner-scoped filters and stable sorting as the scan list. "
+        "Each request returns at most 5,000 rows; use offset to export later pages. "
+        "For full module results, use GET /scans/{scan_id}/detail/full."
+    ),
+    response_class=Response,
+)
+async def export_scan_history_csv(
+    limit: int = Query(default=scan_service.SCAN_EXPORT_MAX_ROWS, ge=1, le=scan_service.SCAN_EXPORT_MAX_ROWS),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None),
+    sort_by: Literal[
+        "created_at_desc",
+        "created_at_asc",
+        "security_score_desc",
+        "security_score_asc",
+        "domain_asc",
+        "domain_desc",
+        "progress_desc",
+    ] = Query(default="created_at_desc"),
+    status_group: Literal[
+        "all",
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "active",
+        "terminal",
+    ] = Query(default="all"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    body, total = await scan_service.export_scan_history_csv(
+        db,
+        user_id=current_user.id,
+        limit=limit,
+        offset=offset,
+        search=search,
+        sort_by=sort_by,
+        status_group=status_group,
+    )
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="scan-history.csv"',
+            "Cache-Control": "no-store",
+            "X-Export-Total": str(total),
+            "X-Export-Offset": str(offset),
+            "X-Export-Limit": str(limit),
+        },
+    )
+
+
 @router.delete("", response_model=SuccessResponse[dict])
 async def delete_all_scans(
     search: str | None = Query(default=None),
