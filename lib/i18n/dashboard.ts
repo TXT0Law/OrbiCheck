@@ -71,6 +71,11 @@ export type DashboardMessages = {
     resultsSummary: (total: number, refreshing: boolean) => string;
     refreshing: string;
     deleteAll: string;
+    exportCsv: string;
+    exportFirstCsv: string;
+    exportingCsv: string;
+    exportFailed: string;
+    exportFailedFallback: string;
     deleteConfirm: string;
     deleteAllConfirm: string;
     deleteFailed: (message: string) => string;
@@ -395,6 +400,11 @@ const en: DashboardMessages = {
     resultsSummary: (total, refreshing) => `${total} results ${refreshing ? "(refreshing...)" : ""}`,
     refreshing: "(refreshing...)",
     deleteAll: "Delete All",
+    exportCsv: "Export CSV",
+    exportFirstCsv: "Export first 5,000 (CSV)",
+    exportingCsv: "Exporting...",
+    exportFailed: "Export failed",
+    exportFailedFallback: "Could not export scan history.",
     deleteConfirm: "Delete this scan? This cannot be undone.",
     deleteAllConfirm: "Delete all scans in current filter results?",
     deleteFailed: (message) => `Delete failed: ${message}`,
@@ -726,6 +736,11 @@ const zh: DashboardMessages = {
     resultsSummary: (total, refreshing) => `${total} 筆結果 ${refreshing ? "（更新中...）" : ""}`,
     refreshing: "（更新中...）",
     deleteAll: "全部刪除",
+    exportCsv: "匯出 CSV",
+    exportFirstCsv: "匯出前 5,000 筆（CSV）",
+    exportingCsv: "匯出中...",
+    exportFailed: "匯出失敗",
+    exportFailedFallback: "無法匯出掃描歷史。",
     deleteConfirm: "要刪除此掃描嗎？此操作無法復原。",
     deleteAllConfirm: "要刪除目前篩選結果中的所有掃描嗎？",
     deleteFailed: (message) => `刪除失敗：${message}`,

@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Globe } from "lucide-react";
 
 import { RescanAllButton } from "@/components/scan/rescan-all-button";
+import { ScanHistoryExportButton } from "@/components/scan/scan-history-export-button";
 import { ScanGroupView } from "@/components/scan/scan-group-view";
 import {
   ScanViewToggle,
@@ -532,6 +533,13 @@ function ScanPageContent() {
                 onComplete={() =>
                   queryClient.invalidateQueries({ queryKey: ["scans"] })
                 }
+                disabled={isFetching}
+              />
+              <ScanHistoryExportButton
+                search={searchTerm}
+                sortBy={sortBy}
+                statusGroup={statusGroup}
+                total={totalResults}
                 disabled={isFetching}
               />
               <Button
