@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,13 +19,14 @@ class ScanStatus(str, enum.Enum):
 
 class Scan(Base):
     __tablename__ = "scans"
+    __table_args__ = (Index("ix_scans_user_created_id", "user_id", "created_at", "id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
     domain: Mapped[str] = mapped_column(String(255), nullable=False)
-    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True, default=1)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[ScanStatus] = mapped_column(
         Enum(ScanStatus), default=ScanStatus.PENDING, nullable=False
     )
