@@ -17,10 +17,8 @@ import copy
 import csv
 import io
 import json
-import math
 import re
 import ssl
-import statistics
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -40,9 +38,7 @@ from app.api.v1.schemas.monitor import (
     MonitorChangeResponse,
     MonitorCheckResponse,
     MonitorCreateRequest,
-    MonitorCurrentStreak,
     MonitorDiffResponse,
-    MonitorFailureDistribution,
     MonitorResponse,
     MonitorSslStatusResponse,
     MonitorTimeSeriesBucket,
@@ -85,6 +81,14 @@ from app.models.monitor import (
     MonitorVisualChange,
 )
 from app.services import alert_service
+from app.services.monitor_aggregation import (
+    _compute_latency_percentiles,
+    _count_incidents_from_successes,
+    _current_streak_from_rows,
+    _error_type_to_api_label,
+    _failure_distribution_counts,
+    _percentile,
+)
 from app.services.ssl_probe import (
     extract_host_port,
     probe_ssl_async,
@@ -527,74 +531,6 @@ def _determine_status(
     if is_degraded:
         return MonitorStatus.DEGRADED
     return MonitorStatus.UP
-
-
-def _count_incidents_from_successes(successes: list[bool]) -> int:
-    incidents = 0
-    prev_ok = True
-    for s in successes:
-        if not s and prev_ok:
-            incidents += 1
-        prev_ok = s
-    return incidents
-
-
-def _error_type_to_api_label(err: CheckErrorType | None) -> str | None:
-    if err is None:
-        return None
-    mapping = {
-        CheckErrorType.TIMEOUT: "TIMEOUT",
-        CheckErrorType.DNS_RESOLUTION: "DNS",
-        CheckErrorType.CONNECTION_REFUSED: "CONNECTION",
-        CheckErrorType.SSL_ERROR: "SSL",
-        CheckErrorType.HTTP_ERROR: "HTTP_ERROR",
-        CheckErrorType.CONTENT_TOO_LARGE: "HTTP_ERROR",
-        CheckErrorType.UNKNOWN: "UNKNOWN",
-    }
-    return mapping.get(err, "UNKNOWN")
-
-
-def _failure_distribution_counts(rows: list[MonitorCheck]) -> MonitorFailureDistribution:
-    counts = {
-        "TIMEOUT": 0,
-        "DNS": 0,
-        "CONNECTION": 0,
-        "SSL": 0,
-        "HTTP_ERROR": 0,
-        "UNKNOWN": 0,
-    }
-    for r in rows:
-        if r.success:
-            continue
-        label = _error_type_to_api_label(r.error_type) or "UNKNOWN"
-        if label not in counts:
-            label = "UNKNOWN"
-        counts[label] += 1
-    return MonitorFailureDistribution(**counts)
-
-
-def _current_streak_from_rows(rows: list[MonitorCheck]) -> MonitorCurrentStreak | None:
-    if not rows:
-        return None
-    newest = rows[-1]
-    up = bool(newest.success)
-    since_idx = len(rows) - 1
-    for i in range(len(rows) - 2, -1, -1):
-        if bool(rows[i].success) != up:
-            break
-        since_idx = i
-    since = rows[since_idx].checked_at
-    if since.tzinfo is None:
-        since = since.replace(tzinfo=timezone.utc)
-    end = newest.checked_at
-    if end.tzinfo is None:
-        end = end.replace(tzinfo=timezone.utc)
-    duration = max(0, int((end - since).total_seconds()))
-    return MonitorCurrentStreak(
-        status="up" if up else "down",
-        since=since,
-        duration_seconds=duration,
-    )
 
 
 def _user_live_channel(user_id: int) -> str:
@@ -2738,26 +2674,6 @@ async def _recompute_rolling_stats(monitor: Monitor, db: AsyncSession) -> None:
         monitor.p99_response_time_ms = None
 
 
-def _compute_latency_percentiles(
-    samples: list[float],
-) -> tuple[float | None, float | None, float | None]:
-    """Return (p50, p95, p99) over ``samples``.
-
-    Uses ``statistics.quantiles`` with ``n=100`` so we get integer percentile
-    cut points without needing ``numpy``. For very small sample sizes
-    (``len < 2``) ``quantiles`` raises, so we fall back to the single sample.
-    """
-    if not samples:
-        return (None, None, None)
-    if len(samples) == 1:
-        single = float(samples[0])
-        return (single, single, single)
-    sorted_samples = sorted(float(s) for s in samples)
-    cut_points = statistics.quantiles(sorted_samples, n=100, method="inclusive")
-    # quantiles returns 99 cut points: index i is the (i+1)-th percentile.
-    return (cut_points[49], cut_points[94], cut_points[98])
-
-
 async def pause_monitor(
     monitor_id: uuid.UUID,
     user_id: int,
@@ -2925,19 +2841,6 @@ async def get_time_series(
             )
         )
     return MonitorTimeSeriesData(period=period, resolution=resolution, points=points)
-
-
-def _percentile(values: list[float], pct: float) -> float:
-    """Nearest-rank percentile in [0, 1]. Returns 0.0 for empty inputs."""
-    if not values:
-        return 0.0
-    s = sorted(values)
-    idx = min(len(s) - 1, max(0, math.ceil(pct * len(s)) - 1))
-    return float(s[idx])
-
-
-def _p95(values: list[float]) -> float:
-    return _percentile(values, 0.95)
 
 
 async def get_uptime_summary(

@@ -9,7 +9,7 @@ import pytest
 
 from app.api.v1.schemas.monitor import MonitorFailureDistribution
 from app.models.monitor import CheckErrorType, MonitorCheck
-from app.services.monitor_service import (
+from app.services.monitor_aggregation import (
     _count_incidents_from_successes,
     _current_streak_from_rows,
     _failure_distribution_counts,

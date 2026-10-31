@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.monitor_service import (
+from app.services.monitor_aggregation import (
     _compute_latency_percentiles,
     _percentile,
 )

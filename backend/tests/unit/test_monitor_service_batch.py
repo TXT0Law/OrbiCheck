@@ -12,7 +12,7 @@ from app.api.v1.schemas.monitor import MonitorCreateRequest, MonitorUpdateReques
 from app.core.monitor_defaults import capabilities_from_enabled_list
 from app.core.exceptions import AppException, NotFoundError, ValidationError
 from app.models.monitor import CheckErrorType, Monitor, MonitorStatus
-from app.services import monitor_service
+from app.services import monitor_aggregation, monitor_service
 
 
 def _mon(mid=None, **kwargs):
@@ -42,8 +42,8 @@ def _mon(mid=None, **kwargs):
 @pytest.mark.unit
 def test_error_type_to_api_label_all() -> None:
     for et in CheckErrorType:
-        assert monitor_service._error_type_to_api_label(et) is not None
-    assert monitor_service._error_type_to_api_label(None) is None
+        assert monitor_aggregation._error_type_to_api_label(et) is not None
+    assert monitor_aggregation._error_type_to_api_label(None) is None
 
 
 @pytest.mark.unit
@@ -55,14 +55,14 @@ def test_normalize_capability_tokens() -> None:
 
 @pytest.mark.unit
 def test_count_incidents_edges() -> None:
-    assert monitor_service._count_incidents_from_successes([False, False, True]) == 1
-    assert monitor_service._count_incidents_from_successes([True, False, True, False]) == 2
+    assert monitor_aggregation._count_incidents_from_successes([False, False, True]) == 1
+    assert monitor_aggregation._count_incidents_from_successes([True, False, True, False]) == 2
 
 
 @pytest.mark.unit
 def test_p95_empty_and_single() -> None:
-    assert monitor_service._p95([]) == 0.0
-    assert monitor_service._p95([10.0]) == 10.0
+    assert monitor_aggregation._p95([]) == 0.0
+    assert monitor_aggregation._p95([10.0]) == 10.0
 
 
 @pytest.mark.asyncio
