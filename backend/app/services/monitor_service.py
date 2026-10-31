@@ -32,8 +32,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.schemas.monitor import (
     CapabilityStatusSummary,
     ChainEntrySummary,
-    HttpAuthInputSchema,
-    HttpAuthSummary,
     MonitorBaselineResponse,
     MonitorChangeResponse,
     MonitorCheckResponse,
@@ -49,11 +47,6 @@ from app.api.v1.schemas.monitor import (
     MonitorVisualChangeResponse,
     dump_capabilities_patch,
     validate_capabilities_config,
-)
-from app.core.secrets import (
-    MonitorSecretConfigurationError,
-    decrypt_secret,
-    encrypt_secret,
 )
 from app.core.config import settings
 from app.db.session import async_session_factory
@@ -88,6 +81,11 @@ from app.services.monitor_aggregation import (
     _error_type_to_api_label,
     _failure_distribution_counts,
     _percentile,
+)
+from app.services.monitor_http_auth import (
+    _build_probe_request_headers,
+    _encrypt_http_auth_envelope,
+    _http_auth_summary_from_envelope,
 )
 from app.services.ssl_probe import (
     extract_host_port,
@@ -187,107 +185,6 @@ SECONDS_TO_MILLISECONDS = 1000
 # payload as-is (size capped at the API boundary in monitor schema).
 _BODY_BEARING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH"})
 
-
-def _encrypt_http_auth_envelope(
-    auth_input: HttpAuthInputSchema | None,
-    existing: dict | None,
-) -> dict | None:
-    """Build the persisted JSONB envelope for ``Monitor.http_auth``.
-
-    Semantics:
-        * ``auth_input`` is ``None``: leave the existing envelope untouched.
-        * ``auth_input.scheme == 'none'``: clear the envelope (returns ``None``).
-        * ``auth_input.token is None`` with bearer/basic scheme: keep the
-          existing ciphertext but allow updating the scheme. Raises if no
-          existing ciphertext is configured.
-        * Otherwise: encrypt ``auth_input.token`` with Fernet.
-    """
-    if auth_input is None:
-        return existing
-    if auth_input.scheme == "none":
-        return None
-    if auth_input.token is None:
-        if not existing or not existing.get("token_ciphertext"):
-            raise ValidationError(
-                code="MONITOR_HTTP_AUTH_TOKEN_REQUIRED",
-                message="httpAuth.token is required when no token is configured",
-            )
-        return {
-            "scheme": auth_input.scheme,
-            "token_ciphertext": existing["token_ciphertext"],
-        }
-    try:
-        ciphertext = encrypt_secret(auth_input.token)
-    except MonitorSecretConfigurationError as exc:
-        raise ValidationError(
-            code="MONITOR_SECRET_KEY_MISSING",
-            message=str(exc),
-        ) from exc
-    return {"scheme": auth_input.scheme, "token_ciphertext": ciphertext}
-
-
-def _http_auth_summary_from_envelope(envelope: dict | None) -> HttpAuthSummary:
-    if not envelope or not isinstance(envelope, dict):
-        return HttpAuthSummary()
-    scheme = str(envelope.get("scheme", "none"))
-    if scheme not in ("none", "bearer", "basic"):
-        scheme = "none"
-    return HttpAuthSummary(
-        scheme=scheme,
-        configured=bool(envelope.get("token_ciphertext")),
-    )
-
-
-def _resolve_http_auth_envelope(envelope: dict | None) -> tuple[str, str | None]:
-    """Decrypt the auth envelope into ``(scheme, plaintext_token | None)``.
-
-    Plaintext is returned only to the caller (probe runner) and MUST NOT be
-    logged, persisted, or returned to the API client.
-    """
-    if not envelope or not isinstance(envelope, dict):
-        return "none", None
-    scheme = str(envelope.get("scheme", "none"))
-    if scheme not in ("bearer", "basic"):
-        return "none", None
-    cipher = envelope.get("token_ciphertext")
-    if not isinstance(cipher, str) or not cipher:
-        return "none", None
-    try:
-        return scheme, decrypt_secret(cipher)
-    except MonitorSecretConfigurationError:
-        logger.error(
-            "monitor_http_auth_decrypt_failed",
-            scheme=scheme,
-            reason="invalid_or_missing_key",
-        )
-        return "none", None
-
-
-def _build_probe_request_headers(monitor: Monitor) -> dict[str, str]:
-    """Compose probe request headers: defaults + custom + Authorization.
-
-    Custom headers are merged last (after default UA) but cannot override
-    forbidden / hop-by-hop headers (validated upstream by Pydantic). The
-    Authorization header (if configured) wins last so the user cannot
-    accidentally shadow it via httpHeaders.
-    """
-    headers: dict[str, str] = {"User-Agent": settings.MONITOR_PROBE_USER_AGENT}
-    custom = monitor.http_headers or {}
-    if isinstance(custom, dict):
-        for name, value in custom.items():
-            if not isinstance(name, str) or not isinstance(value, str):
-                continue
-            headers[name] = value
-    scheme, token = _resolve_http_auth_envelope(monitor.http_auth)
-    if token is not None:
-        if scheme == "bearer":
-            headers["Authorization"] = f"Bearer {token}"
-        elif scheme == "basic":
-            import base64 as _b64
-
-            encoded = _b64.b64encode(token.encode("utf-8")).decode("ascii")
-            headers["Authorization"] = f"Basic {encoded}"
-    return headers
 
 PERIOD_TO_DELTA = {
     "24h": timedelta(hours=24),
