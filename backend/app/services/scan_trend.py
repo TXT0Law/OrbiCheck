@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.scan import ModuleStatus, Scan, ScanStatus
-from app.services.finding_identity import finding_rule_identity
+from app.services.finding_identity import finding_evidence_modules, finding_rule_identity
 from app.services.security_analyzer import (
     compute_security_score_v2,
     compute_severity_counts,
@@ -75,15 +75,6 @@ _CATEGORY_SNAKE_TO_CAMEL: dict[str, str] = {
     "infrastructure": "infrastructure",
     "best_practices": "bestPractices",
 }
-
-# Some findings are derived from either of two scan modules. A finding is
-# conclusive only when at least one of its evidence modules succeeded in both
-# scans; absent or failed modules cannot prove a regression or a fix.
-_FINDING_EVIDENCE_MODULES: dict[str, frozenset[str]] = {
-    "headers": frozenset({"headers", "http-security"}),
-    "threats": frozenset({"threats", "block-lists"}),
-}
-
 
 # ─── Public types ───────────────────────────────────────────────────────
 
@@ -192,13 +183,6 @@ def _to_finding_delta(finding: dict) -> FindingDelta:
     }
 
 
-def _finding_has_evidence(finding: dict, shared_modules: set[str]) -> bool:
-    module = finding.get("module")
-    if not isinstance(module, str):
-        return False
-    return bool(_FINDING_EVIDENCE_MODULES.get(module, frozenset({module})) & shared_modules)
-
-
 # ─── Public service helpers ─────────────────────────────────────────────
 
 
@@ -296,12 +280,12 @@ def compute_scan_diff(
     base_findings = [
         finding
         for finding in extract_key_findings(base_shared_raw, max_findings=None)
-        if _finding_has_evidence(finding, shared_modules)
+        if finding_evidence_modules(finding, shared_modules)
     ]
     compare_findings = [
         finding
         for finding in extract_key_findings(compare_shared_raw, max_findings=None)
-        if _finding_has_evidence(finding, shared_modules)
+        if finding_evidence_modules(finding, shared_modules)
     ]
     base_keys = {_finding_key(f) for f in base_findings}
     compare_keys = {_finding_key(f) for f in compare_findings}

@@ -30,6 +30,11 @@ _RULE_IDS: dict[tuple[str, str], str] = {
     ("robots-txt", "No robots.txt"): "robots_txt.missing",
 }
 
+_EVIDENCE_MODULES: dict[str, frozenset[str]] = {
+    "headers": frozenset({"headers", "http-security"}),
+    "threats": frozenset({"threats", "block-lists"}),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class FindingRuleIdentity:
@@ -48,3 +53,14 @@ def finding_rule_identity(finding: Mapping[str, object]) -> FindingRuleIdentity:
     except KeyError as exc:
         raise ValueError(f"Unmapped finding rule: {module} / {title}") from exc
     return FindingRuleIdentity(rule_id=rule_id, ruleset_version=FINDING_RULESET_VERSION)
+
+
+def finding_evidence_modules(
+    finding: Mapping[str, object], successful_modules: set[str]
+) -> frozenset[str]:
+    """Return successful source modules that can support this finding."""
+    module = finding.get("module")
+    if not isinstance(module, str):
+        return frozenset()
+    sources = _EVIDENCE_MODULES.get(module, frozenset({module}))
+    return sources & successful_modules
