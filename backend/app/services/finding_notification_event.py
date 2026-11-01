@@ -18,10 +18,41 @@ from app.models.scan_risk_notification_event import (
 )
 from app.services.finding_transition import (
     HighRiskTransition,
+    RiskHistoryPage,
     classify_high_risk_transitions,
     load_recent_risk_history,
     load_recent_risk_history_sync,
 )
+
+
+def risk_event_is_dispatchable(
+    event: ScanRiskNotificationEvent, scan: Scan, history: RiskHistoryPage
+) -> bool:
+    """Revalidate a queued episode against current, evidence-backed history.
+
+    A caller must load fresh scan observations, module results, and bounded
+    history before any external delivery. Rescans, retries, baseline changes,
+    and missing evidence all fail closed instead of sending a stale alert.
+    """
+    if (
+        event.status != RISK_EVENT_PENDING
+        or event.scan_id != scan.id
+        or event.scan_completed_at != scan.completed_at
+        or event.ruleset_version != scan.finding_ruleset_version
+    ):
+        return False
+    event_key = (
+        event.baseline_scan_id,
+        event.baseline_completed_at,
+        event.rule_id,
+        event.ruleset_version,
+    )
+    return any(
+        transition.scan_id == event.scan_id
+        and transition.kind == event.kind
+        and transition.dedup_key == event_key
+        for transition in classify_high_risk_transitions(scan, history)
+    )
 
 
 def _scan_query(scan_id: uuid.UUID) -> Select[tuple[Scan]]:

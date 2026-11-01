@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -11,13 +11,119 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.dml import Insert, Update
 
-from app.models.scan import Scan, ScanStatus
+from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult, ScanStatus
+from app.models.scan_risk_notification_event import (
+    RISK_EVENT_PENDING,
+    RISK_EVENT_SENT,
+    ScanRiskNotificationEvent,
+)
 from app.services import finding_notification_event
 from app.services.finding_identity import FINDING_RULESET_VERSION
 from app.services.finding_transition import HighRiskTransition, RiskHistoryPage
 
 COMPLETED_AT = datetime(2026, 11, 1, tzinfo=timezone.utc)
 RULE_ID = "ssl.certificate_expiry"
+NEXT_COMPLETION = COMPLETED_AT + timedelta(minutes=1)
+
+
+def _evidence_scan(*, risk: bool, completed_at: datetime = COMPLETED_AT) -> Scan:
+    scan = Scan(
+        id=uuid4(),
+        user_id=7,
+        domain="example.com",
+        url="https://example.com",
+        status=ScanStatus.COMPLETED,
+        completed_at=completed_at,
+        finding_observations_projected_at=completed_at,
+        finding_ruleset_version=FINDING_RULESET_VERSION,
+    )
+    scan.module_results = [
+        ScanModuleResult(module_name="ssl", status=ModuleStatus.SUCCESS, raw_result={})
+    ]
+    scan.finding_observations = (
+        [
+            ScanFindingObservation(
+                rule_id=RULE_ID,
+                ruleset_version=FINDING_RULESET_VERSION,
+                severity="high",
+                title="SSL risk",
+                description="Evidence-backed SSL risk",
+                evidence_modules=["ssl"],
+                observed_at=completed_at,
+            )
+        ]
+        if risk
+        else []
+    )
+    return scan
+
+
+@pytest.mark.unit
+def test_dispatch_guard_requires_same_live_episode_and_successful_evidence() -> None:
+    baseline = _evidence_scan(risk=False)
+    current = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    event = ScanRiskNotificationEvent(
+        scan_id=current.id,
+        scan_completed_at=current.completed_at,
+        baseline_scan_id=baseline.id,
+        baseline_completed_at=baseline.completed_at,
+        rule_id=RULE_ID,
+        ruleset_version=FINDING_RULESET_VERSION,
+        kind="new",
+        status=RISK_EVENT_PENDING,
+    )
+    history = RiskHistoryPage(scans=[baseline], complete=True)
+
+    assert finding_notification_event.risk_event_is_dispatchable(event, current, history)
+
+    event.status = RISK_EVENT_SENT
+    assert not finding_notification_event.risk_event_is_dispatchable(event, current, history)
+    event.status = RISK_EVENT_PENDING
+    event.kind = "regressed"
+    assert not finding_notification_event.risk_event_is_dispatchable(event, current, history)
+    event.kind = "new"
+
+    current.completed_at = NEXT_COMPLETION + timedelta(minutes=1)
+    assert not finding_notification_event.risk_event_is_dispatchable(event, current, history)
+
+
+@pytest.mark.unit
+def test_dispatch_guard_rejects_changed_baseline_or_missing_module_evidence() -> None:
+    baseline = _evidence_scan(risk=False)
+    current = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    event = ScanRiskNotificationEvent(
+        scan_id=current.id,
+        scan_completed_at=current.completed_at,
+        baseline_scan_id=baseline.id,
+        baseline_completed_at=baseline.completed_at,
+        rule_id=RULE_ID,
+        ruleset_version=FINDING_RULESET_VERSION,
+        kind="new",
+        status=RISK_EVENT_PENDING,
+    )
+
+    assert not finding_notification_event.risk_event_is_dispatchable(
+        event, current, RiskHistoryPage(scans=[], complete=True)
+    )
+    baseline.completed_at = baseline.completed_at + timedelta(seconds=1)
+    assert not finding_notification_event.risk_event_is_dispatchable(
+        event, current, RiskHistoryPage(scans=[baseline], complete=True)
+    )
+    baseline.completed_at = COMPLETED_AT
+    current.module_results[0].status = ModuleStatus.FAILED
+    assert not finding_notification_event.risk_event_is_dispatchable(
+        event, current, RiskHistoryPage(scans=[baseline], complete=True)
+    )
+    current.module_results[0].status = ModuleStatus.SUCCESS
+    current.module_results[0].raw_result = {"skipped": True}
+    assert not finding_notification_event.risk_event_is_dispatchable(
+        event, current, RiskHistoryPage(scans=[baseline], complete=True)
+    )
+    current.module_results[0].raw_result = {}
+    event.ruleset_version += 1
+    assert not finding_notification_event.risk_event_is_dispatchable(
+        event, current, RiskHistoryPage(scans=[baseline], complete=True)
+    )
 
 
 @pytest.mark.unit
