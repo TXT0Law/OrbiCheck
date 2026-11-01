@@ -9,6 +9,8 @@ import { getModuleDetailHref } from "@/lib/constants/scan-module-routes";
 import { useScanFindings } from "@/lib/hooks/use-scan-findings";
 import type { ScanDetail, ScanSeverity } from "@/shared/types/scan";
 
+import { RiskEvidencePanel } from "./risk-evidence-panel";
+
 export interface RiskObservationsCardProps {
   detail: ScanDetail;
 }
@@ -71,6 +73,7 @@ export function RiskObservationsCard({ detail }: RiskObservationsCardProps) {
                 );
               })}
             </div>
+            <RiskEvidencePanel scanId={detail.id} ruleId={observation.ruleId} scanStartedAt={detail.scannedAt} />
           </li>
         ))}
       </ul>

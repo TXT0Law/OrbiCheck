@@ -10,6 +10,10 @@ vi.mock("@/lib/hooks/use-scan-findings", () => ({
   useScanFindings: (...args: unknown[]) => useScanFindingsMock(...args),
 }));
 
+vi.mock("@/components/scan/summary/risk-evidence-panel", () => ({
+  RiskEvidencePanel: () => <button type="button">Show raw evidence</button>,
+}));
+
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
     <a href={href}>{children}</a>

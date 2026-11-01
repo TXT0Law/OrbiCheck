@@ -78,6 +78,17 @@ export const ScanFindingListSchema = z.object({
   })),
 });
 
+export const ScanFindingEvidenceSchema = z.object({
+  scanId: z.string().uuid(),
+  ruleId: z.string().min(1),
+  observedAt: z.string(),
+  sources: z.array(z.object({
+    moduleName: z.string().min(1),
+    status: z.enum(["available", "missing", "too_large"]),
+    rawResult: z.record(z.string(), z.unknown()).nullable(),
+  })),
+});
+
 export const ScanProgressEventSchema = z.object({
   progress: z.number(),
   phase: z.string(),

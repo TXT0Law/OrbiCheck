@@ -33,6 +33,17 @@ export interface ScanFindingList {
   observations: ScanFindingObservation[];
 }
 
+export interface ScanFindingEvidence {
+  scanId: string;
+  ruleId: string;
+  observedAt: string;
+  sources: {
+    moduleName: string;
+    status: "available" | "missing" | "too_large";
+    rawResult: Record<string, unknown> | null;
+  }[];
+}
+
 export interface CategorySummary {
   category: "security" | "network" | "content";
   label: string;

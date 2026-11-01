@@ -64,6 +64,38 @@ async def test_finding_evidence_endpoint_hides_unowned_finding(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_finding_evidence_endpoint_preserves_missing_and_large_source_states(
+    async_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan_id = uuid4()
+
+    async def _get_evidence(_db, requested_scan_id, rule_id, user_id):
+        assert requested_scan_id == scan_id
+        assert user_id == 1
+        return ScanFindingEvidence(
+            scan_id=scan_id,
+            rule_id=rule_id,
+            observed_at=datetime.now(timezone.utc),
+            sources=[
+                FindingEvidenceSource("headers", "missing", None),
+                FindingEvidenceSource("ports", "too_large", None),
+            ],
+        )
+
+    monkeypatch.setattr(finding_observation, "get_scan_finding_evidence", _get_evidence)
+    response = await async_client.get(
+        f"/api/v1/scans/{scan_id}/findings/headers.missing_csp/evidence"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["sources"] == [
+        {"moduleName": "headers", "status": "missing", "rawResult": None},
+        {"moduleName": "ports", "status": "too_large", "rawResult": None},
+    ]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_finding_evidence_endpoint_rejects_invalid_rule_id(async_client) -> None:
     response = await async_client.get(f"/api/v1/scans/{uuid4()}/findings/Invalid!Rule/evidence")
 

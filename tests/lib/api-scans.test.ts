@@ -16,7 +16,7 @@ vi.mock("@/lib/api/client", async (importOriginal) => {
   };
 });
 
-import { cancelScan, createScan, deleteAllScans, deleteScan, getScan, getScanDetail, getScanFindings, listScans } from "@/lib/api/scans";
+import { cancelScan, createScan, deleteAllScans, deleteScan, getScan, getScanDetail, getScanFindingEvidence, getScanFindings, listScans } from "@/lib/api/scans";
 
 describe("scan API wrappers", () => {
   beforeEach(() => {
@@ -69,6 +69,40 @@ describe("scan API wrappers", () => {
 
     expect(result.projectionStatus).toBe("pending");
     expect(result.observations).toEqual([]);
+  });
+
+  it("validates bounded raw evidence and encodes the finding path", async () => {
+    const scanId = "4e8ee7cb-3936-4892-89bf-4bc18c5053f9";
+    apiClientMock.get.mockResolvedValueOnce({
+      data: {
+        scanId,
+        ruleId: "ssl.certificate_expiry",
+        observedAt: "2026-11-01T00:00:00Z",
+        sources: [{ moduleName: "ssl", status: "available", rawResult: { valid: false } }],
+      },
+    });
+
+    const result = await getScanFindingEvidence(scanId, "ssl.certificate_expiry");
+
+    expect(apiClientMock.get).toHaveBeenCalledWith(
+      `/scans/${scanId}/findings/ssl.certificate_expiry/evidence`,
+    );
+    expect(result.sources[0].rawResult).toEqual({ valid: false });
+  });
+
+  it("rejects malformed raw evidence before display", async () => {
+    apiClientMock.get.mockResolvedValueOnce({
+      data: {
+        scanId: "invalid",
+        ruleId: "ssl.certificate_expiry",
+        observedAt: "2026-11-01T00:00:00Z",
+        sources: [{ moduleName: "ssl", status: "available", rawResult: "not an object" }],
+      },
+    });
+
+    await expect(getScanFindingEvidence("invalid", "ssl.certificate_expiry")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE_SHAPE",
+    });
   });
 
   it("normalizes createScan snake_case payload", async () => {

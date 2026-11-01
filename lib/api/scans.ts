@@ -3,6 +3,7 @@ import type {
   ModuleRetryResponse,
   ScanDetail,
   ScanDiffResponse,
+  ScanFindingEvidence,
   ScanFindingList,
   ScanTimelineRange,
   ScanTimelineResponse,
@@ -26,6 +27,7 @@ type ScanSchemaName =
   | "ModuleRetryResponseSchema"
   | "ScanDetailResponseSchema"
   | "ScanDiffResponseSchema"
+  | "ScanFindingEvidenceSchema"
   | "ScanFindingListSchema"
   | "ScanFullExportSchema"
   | "ScanListSchema"
@@ -172,6 +174,20 @@ export async function getScanFindings(scanId: string): Promise<ScanFindingList> 
     "ScanFindingListSchema",
     data,
     "scan findings",
+  );
+}
+
+export async function getScanFindingEvidence(
+  scanId: string,
+  ruleId: string,
+): Promise<ScanFindingEvidence> {
+  const { data } = await apiClient.get<unknown>(
+    `/scans/${encodeURIComponent(scanId)}/findings/${encodeURIComponent(ruleId)}/evidence`,
+  );
+  return validateScanPayload<ScanFindingEvidence>(
+    "ScanFindingEvidenceSchema",
+    data,
+    "scan finding evidence",
   );
 }
 
