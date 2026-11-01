@@ -26,6 +26,11 @@ from app.core.exceptions import (
     ScanServiceError,
 )
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult, ScanStatus
+from app.models.scan_risk_notification_event import (
+    RISK_EVENT_CANCELLED,
+    RISK_EVENT_PENDING,
+    ScanRiskNotificationEvent,
+)
 from app.services.finding_observation import refresh_finding_observations_after_retry
 from app.tasks.scan_tasks import execute_scan
 from app.services.security_analyzer import compute_security_score_v2
@@ -424,6 +429,18 @@ async def rescan(
 
     if existing.status not in TERMINAL_STATUSES:
         raise ScanNotRescannableError(str(scan_id), existing.status.value)
+
+    # A rescan reuses the source scan ID. Pending events describe its previous
+    # evidence and cannot remain dispatchable while that evidence is reset.
+    # Sent events retain their audit state; only unsent candidates are cancelled.
+    await db.execute(
+        update(ScanRiskNotificationEvent)
+        .where(
+            ScanRiskNotificationEvent.scan_id == existing.id,
+            ScanRiskNotificationEvent.status == RISK_EVENT_PENDING,
+        )
+        .values(status=RISK_EVENT_CANCELLED)
+    )
 
     # Rescan reuses the scan ID. Its old findings must not survive into the
     # next run or block the (scan_id, rule_id) insert for new evidence.

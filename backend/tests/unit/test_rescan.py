@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.sql.dml import Delete
+from sqlalchemy.sql.dml import Delete, Update
 
 from app.core.exceptions import ScanNotRescannableError, ScanNotFoundError
 from app.models.scan import ScanStatus
@@ -158,10 +158,17 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
     assert result.finding_observations_projected_at is None
     assert result.finding_ruleset_version is None
     assert result.finding_observations_projection_failed_at is None
-    assert len(db.statements) == 1
-    assert isinstance(db.statements[0], Delete)
-    assert db.statements[0].table.name == "scan_finding_observations"
-    assert completed_scan.id in db.statements[0].compile().params.values()
+    assert len(db.statements) == 2
+    event_update, finding_delete = db.statements
+    assert isinstance(event_update, Update)
+    assert event_update.table.name == "scan_risk_notification_events"
+    assert "scan_risk_notification_events.status =" in str(event_update)
+    assert completed_scan.id in event_update.compile().params.values()
+    assert "cancelled" in event_update.compile().params.values()
+    assert "pending" in event_update.compile().params.values()
+    assert isinstance(finding_delete, Delete)
+    assert finding_delete.table.name == "scan_finding_observations"
+    assert completed_scan.id in finding_delete.compile().params.values()
 
 
 @pytest.mark.unit
