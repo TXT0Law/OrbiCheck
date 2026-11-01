@@ -2,8 +2,8 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -49,6 +49,10 @@ class Scan(Base):
     )
 
     module_results: Mapped[list["ScanModuleResult"]] = relationship(
+        back_populates="scan",
+        cascade="all, delete-orphan",
+    )
+    finding_observations: Mapped[list["ScanFindingObservation"]] = relationship(
         back_populates="scan",
         cascade="all, delete-orphan",
     )
@@ -99,3 +103,34 @@ class ScanModuleResult(Base):
     )
 
     scan: Mapped["Scan"] = relationship(back_populates="module_results")
+
+
+class ScanFindingObservation(Base):
+    """One active, evidence-backed rule finding from a completed scan.
+
+    Ownership and domain come from the parent Scan. Deleting the scan also
+    deletes its observations, so retention and user deletion remain aligned.
+    """
+
+    __tablename__ = "scan_finding_observations"
+    __table_args__ = (
+        UniqueConstraint("scan_id", "rule_id", name="uq_scan_finding_observation_scan_rule"),
+        CheckConstraint("ruleset_version > 0", name="ck_scan_finding_observation_ruleset_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False
+    )
+    rule_id: Mapped[str] = mapped_column(String(96), nullable=False)
+    ruleset_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_modules: Mapped[list[str]] = mapped_column(ARRAY(String(50)), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    scan: Mapped["Scan"] = relationship(back_populates="finding_observations")
