@@ -28,6 +28,7 @@ from app.core.exceptions import (
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult, ScanStatus
 from app.models.scan_risk_notification_event import (
     RISK_EVENT_CANCELLED,
+    RISK_EVENT_CLAIMED,
     RISK_EVENT_PENDING,
     ScanRiskNotificationEvent,
 )
@@ -232,12 +233,16 @@ async def get_scan(
     db: AsyncSession,
     scan_id: uuid.UUID,
     user_id: int | None = None,
+    *,
+    for_update: bool = False,
 ) -> Scan:
     """Get a scan with all module results."""
     stmt = select(Scan).where(Scan.id == scan_id)
     if user_id is not None:
         stmt = stmt.where(Scan.user_id == user_id)
     stmt = stmt.options(selectinload(Scan.module_results))
+    if for_update:
+        stmt = stmt.execution_options(populate_existing=True).with_for_update(of=Scan)
     result = await db.execute(stmt)
     scan = result.scalar_one_or_none()
     if not scan:
@@ -426,21 +431,24 @@ async def rescan(
     Same scan record is reused to avoid duplicate URLs in the list.
     Only allowed on terminal-state scans.
     """
-    existing = await _get_scan_for_user(db, scan_id, user_id)
+    existing = await get_scan(db, scan_id, user_id, for_update=True)
 
     if existing.status not in TERMINAL_STATUSES:
         raise ScanNotRescannableError(str(scan_id), existing.status.value)
 
-    # A rescan reuses the source scan ID. Pending events describe its previous
-    # evidence and cannot remain dispatchable while that evidence is reset.
-    # Sent events retain their audit state; only unsent candidates are cancelled.
+    # Scan is locked before its event rows, matching the delivery recheck lock
+    # order. Unsent claims describe old evidence and must be invalidated.
     await db.execute(
         update(ScanRiskNotificationEvent)
         .where(
             ScanRiskNotificationEvent.scan_id == existing.id,
-            ScanRiskNotificationEvent.status == RISK_EVENT_PENDING,
+            ScanRiskNotificationEvent.status.in_((RISK_EVENT_PENDING, RISK_EVENT_CLAIMED)),
         )
-        .values(status=RISK_EVENT_CANCELLED)
+        .values(
+            status=RISK_EVENT_CANCELLED,
+            claim_token=None,
+            claim_expires_at=None,
+        )
     )
 
     # Rescan reuses the scan ID. Its old findings must not survive into the
@@ -570,6 +578,7 @@ async def retry_module(
 
     scan = await _get_scan_for_user(db, scan_id, user_id)
     validate_url_safety(scan.url)
+    original_generation = (scan.started_at, scan.completed_at)
 
     if scan.status not in TERMINAL_STATUSES:
         raise ScanNotRetryableError(
@@ -624,6 +633,29 @@ async def retry_module(
         result_duration = int(data.get("durationMs", duration_ms))
 
     raw_result = data if isinstance(data, dict) else {"data": data}
+
+    # The remote probe has finished. Lock the source before writing module
+    # evidence so rescan and notification reconciliation use the same order.
+    # Recheck state because the scan may have changed during the probe.
+    scan = await get_scan(db, scan_id, user_id, for_update=True)
+    if (scan.started_at, scan.completed_at) != original_generation:
+        raise ScanNotRetryableError("Scan changed during module retry. Please retry again.")
+    if scan.status not in TERMINAL_STATUSES:
+        raise ScanNotRetryableError(
+            f"Scan is {scan.status.value}. Module retry only allowed on "
+            "completed/failed/cancelled scans."
+        )
+    existing = next(
+        (row for row in scan.module_results if row.module_name == module_name),
+        None,
+    )
+    if existing and existing.status == ModuleStatus.SUCCESS:
+        from app.services.transformers import _is_skipped as _check_skipped
+
+        if not _check_skipped(existing):
+            raise ModuleAlreadySuccessfulError(
+                f"Module {module_name} already succeeded. No retry needed."
+            )
 
     now = datetime.now(timezone.utc)
     if existing:

@@ -366,7 +366,7 @@ def test_queue_skips_scans_without_safe_transitions(monkeypatch) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_retry_reconciliation_cancels_only_stale_pending_episode(monkeypatch) -> None:
+async def test_retry_reconciliation_cancels_only_stale_unsent_episode(monkeypatch) -> None:
     scan = Scan(
         id=uuid4(),
         user_id=7,
@@ -411,7 +411,11 @@ async def test_retry_reconciliation_cancels_only_stale_pending_episode(monkeypat
     stale_sql = str(stale.compile(dialect=postgresql.dialect()))
     assert "scan_risk_notification_events.scan_completed_at !=" in stale_sql
     assert "NOT IN" in stale_sql
-    assert "scan_risk_notification_events.status =" in stale_sql
+    assert "scan_risk_notification_events.status IN" in stale_sql
+    params = stale.compile().params
+    assert set(params["status_1"]) == {"pending", "claimed"}
+    assert params["claim_token"] is None
+    assert params["claim_expires_at"] is None
     assert isinstance(db.statements[2], Insert)
 
 
@@ -450,3 +454,4 @@ async def test_retry_without_supported_transition_cancels_pending_without_insert
     stale = db.statements[1]
     assert isinstance(stale, Update)
     assert "NOT IN" not in str(stale.compile(dialect=postgresql.dialect()))
+    assert set(stale.compile().params["status_1"]) == {"pending", "claimed"}

@@ -6,11 +6,36 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.dml import Delete, Update
 
 from app.core.exceptions import ScanNotRescannableError, ScanNotFoundError
-from app.models.scan import ScanStatus
+from app.models.scan import Scan, ScanStatus
 from app.services import scan_service
+
+TEST_USER_ID = 7
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_rescan_scan_lookup_locks_owner_scoped_row_before_events() -> None:
+    scan = Scan(
+        id=uuid4(),
+        user_id=TEST_USER_ID,
+        domain="example.com",
+        url="https://example.com",
+        status=ScanStatus.COMPLETED,
+    )
+    db = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: scan))
+    )
+
+    assert await scan_service.get_scan(db, scan.id, TEST_USER_ID, for_update=True) is scan
+    query = db.execute.await_args.args[0]
+    sql = str(query.compile(dialect=postgresql.dialect()))
+    assert "scans.user_id =" in sql
+    assert "FOR UPDATE OF scans" in sql
+    assert query._execution_options["populate_existing"]
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +63,8 @@ async def test_rescan_running_scan_raises_409(monkeypatch) -> None:
         domain="example.com",
     )
 
-    async def _fake_get_scan(_db, scan_id):
+    async def _fake_get_scan(_db, scan_id, _user_id=None, *, for_update=False):
+        assert for_update
         return running_scan
 
     monkeypatch.setattr(scan_service, "get_scan", _fake_get_scan)
@@ -63,7 +89,8 @@ async def test_rescan_pending_scan_raises_409(monkeypatch) -> None:
         url="https://example.com",
     )
 
-    async def _fake_get_scan(_db, scan_id):
+    async def _fake_get_scan(_db, scan_id, _user_id=None, *, for_update=False):
+        assert for_update
         return pending_scan
 
     monkeypatch.setattr(scan_service, "get_scan", _fake_get_scan)
@@ -79,7 +106,8 @@ async def test_rescan_pending_scan_raises_409(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_rescan_nonexistent_scan_raises_404(monkeypatch) -> None:
     """Rescan nonexistent scan raises ScanNotFoundError."""
-    async def _fake_get_scan(_db, scan_id):
+    async def _fake_get_scan(_db, scan_id, _user_id=None, *, for_update=False):
+        assert for_update
         raise ScanNotFoundError(str(scan_id))
 
     monkeypatch.setattr(scan_service, "get_scan", _fake_get_scan)
@@ -95,7 +123,8 @@ async def test_rescan_nonexistent_scan_raises_404(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_rescan_api_endpoint_responds(async_client, monkeypatch) -> None:
     """Rescan endpoint is registered and returns 404 for nonexistent scan."""
-    async def _fake_get_scan(_db, scan_id):
+    async def _fake_get_scan(_db, scan_id, _user_id=None, *, for_update=False):
+        assert for_update
         raise ScanNotFoundError(str(scan_id))
 
     monkeypatch.setattr(scan_service, "get_scan", _fake_get_scan)
@@ -121,7 +150,8 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
         finding_observations_projection_failed_at=datetime.now(timezone.utc),
     )
 
-    async def _fake_get_scan(_db, scan_id):
+    async def _fake_get_scan(_db, scan_id, _user_id=None, *, for_update=False):
+        assert for_update
         return completed_scan
 
     class FakeDb:
@@ -162,10 +192,13 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
     event_update, finding_delete = db.statements
     assert isinstance(event_update, Update)
     assert event_update.table.name == "scan_risk_notification_events"
-    assert "scan_risk_notification_events.status =" in str(event_update)
-    assert completed_scan.id in event_update.compile().params.values()
-    assert "cancelled" in event_update.compile().params.values()
-    assert "pending" in event_update.compile().params.values()
+    assert "scan_risk_notification_events.status IN" in str(event_update)
+    params = event_update.compile().params
+    assert completed_scan.id in params.values()
+    assert params["status"] == "cancelled"
+    assert set(params["status_1"]) == {"pending", "claimed"}
+    assert params["claim_token"] is None
+    assert params["claim_expires_at"] is None
     assert isinstance(finding_delete, Delete)
     assert finding_delete.table.name == "scan_finding_observations"
     assert completed_scan.id in finding_delete.compile().params.values()
@@ -183,7 +216,8 @@ async def test_rescan_failed_scan_resets_in_place(monkeypatch) -> None:
         module_results=[],
     )
 
-    async def _fake_get_scan(_db, scan_id):
+    async def _fake_get_scan(_db, scan_id, _user_id=None, *, for_update=False):
+        assert for_update
         return failed_scan
 
     class FakeDb:
@@ -228,7 +262,8 @@ async def test_rescan_deletes_stale_cancel_and_progress_keys(
         module_results=[],
     )
 
-    async def _fake_get_scan(_db, scan_id):
+    async def _fake_get_scan(_db, scan_id, _user_id=None, *, for_update=False):
+        assert for_update
         return cancelled_scan
 
     class FakeDb:

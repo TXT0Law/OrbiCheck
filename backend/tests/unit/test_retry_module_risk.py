@@ -1,5 +1,6 @@
 """Unit tests for module retry and post-retry risk score refresh."""
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -7,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from app.models.scan import ModuleStatus, ScanStatus
+from app.core.exceptions import ScanNotRetryableError
 from app.services import scan_service
 from app.services.security_analyzer import SecurityScoreResult
 
@@ -115,14 +117,19 @@ async def test_retry_module_invokes_risk_refresh(monkeypatch) -> None:
         id=scan_id,
         url="https://example.com",
         status=ScanStatus.COMPLETED,
+        started_at=None,
+        completed_at=None,
         module_results=[ssl_row],
     )
 
-    async def fake_get_scan(_db, sid):
+    async def fake_get_scan(_db, sid, _user_id=None, *, for_update=False):
         assert sid == scan_id
+        if for_update:
+            write_order.append("lock")
         return scan
 
     async def fake_call_scan_module(_name, _url):
+        write_order.append("probe")
         return {
             "status_code": 200,
             "data": {"success": True, "durationMs": 12},
@@ -162,6 +169,52 @@ async def test_retry_module_invokes_risk_refresh(monkeypatch) -> None:
     assert refresh_findings.await_count == 1
     assert refresh_findings.await_args.args[:3] == (db, scan_id, "ssl")
     reconcile_events.assert_awaited_once_with(db, scan_id)
-    assert write_order == ["findings", "events", "commit"]
+    assert write_order == ["probe", "lock", "findings", "events", "commit"]
     db.flush.assert_awaited()
     db.commit.assert_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["status", "generation"])
+async def test_retry_rechecks_scan_after_probe_before_writing(monkeypatch, change: str) -> None:
+    scan_id = uuid4()
+    module = SimpleNamespace(
+        module_name="ssl",
+        status=ModuleStatus.FAILED,
+        raw_result=None,
+    )
+    scan = SimpleNamespace(
+        id=scan_id,
+        url="https://example.com",
+        status=ScanStatus.COMPLETED,
+        started_at=None,
+        completed_at=None,
+        module_results=[module],
+    )
+    calls: list[str] = []
+
+    async def fake_get_scan(_db, _sid, _user_id=None, *, for_update=False):
+        calls.append("lock" if for_update else "read")
+        if for_update:
+            if change == "status":
+                scan.status = ScanStatus.RUNNING
+            else:
+                scan.completed_at = datetime.now(timezone.utc)
+        return scan
+
+    async def fake_call_scan_module(_name, _url):
+        calls.append("probe")
+        return {"status_code": 200, "data": {"success": True}}
+
+    monkeypatch.setattr(scan_service, "get_scan", fake_get_scan)
+    monkeypatch.setattr(scan_service, "call_scan_module", fake_call_scan_module)
+    db = AsyncMock()
+
+    with pytest.raises(ScanNotRetryableError):
+        await scan_service.retry_module(db, scan_id, "ssl")
+
+    assert calls == ["read", "probe", "lock"]
+    assert module.status == ModuleStatus.FAILED
+    db.flush.assert_not_awaited()
+    db.commit.assert_not_awaited()

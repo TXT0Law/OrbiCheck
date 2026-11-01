@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.scan import Scan
 from app.models.scan_risk_notification_event import (
     RISK_EVENT_CANCELLED,
+    RISK_EVENT_CLAIMED,
     RISK_EVENT_PENDING,
     ScanRiskNotificationEvent,
 )
@@ -196,7 +197,7 @@ async def reconcile_high_risk_events_after_retry(
     transitions = classify_high_risk_transitions(scan, history)
     stale = update(ScanRiskNotificationEvent).where(
         ScanRiskNotificationEvent.scan_id == scan_id,
-        ScanRiskNotificationEvent.status == RISK_EVENT_PENDING,
+        ScanRiskNotificationEvent.status.in_((RISK_EVENT_PENDING, RISK_EVENT_CLAIMED)),
     )
     if transitions and scan.completed_at is not None:
         episode_columns = tuple_(
@@ -211,6 +212,12 @@ async def reconcile_high_risk_events_after_retry(
                 episode_columns.not_in([transition.dedup_key for transition in transitions]),
             )
         )
-    await db.execute(stale.values(status=RISK_EVENT_CANCELLED))
+    await db.execute(
+        stale.values(
+            status=RISK_EVENT_CANCELLED,
+            claim_token=None,
+            claim_expires_at=None,
+        )
+    )
     if transitions:
         await db.execute(_event_insert(scan, transitions))
