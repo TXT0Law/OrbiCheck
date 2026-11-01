@@ -14,13 +14,14 @@ from app.api.v1.schemas.operational_event import OperationalEventListResponse
 from app.api.v1.schemas.scan import (
     ScanCreateRequest,
     ScanDetailResponse,
+    ScanFindingListResponse,
     ScanListResponse,
     ScanResponse,
 )
 from app.core.deps import CurrentUser, get_current_user, get_db
 from app.core.config import settings
 from app.core.redis import get_redis_async
-from app.services import operational_event_service, scan_service, scan_trend
+from app.services import finding_observation, operational_event_service, scan_service, scan_trend
 from app.services.recommendations import generate_recommendations
 from app.services.scan_trend import (
     DEFAULT_TIMELINE_LIMIT,
@@ -361,6 +362,17 @@ async def get_scan(
     """Get a scan with all module results."""
     scan = await scan_service.get_scan(db, scan_id, current_user.id)
     return SuccessResponse(data=ScanDetailResponse.model_validate(scan))
+
+
+@router.get("/{scan_id}/findings", response_model=SuccessResponse[ScanFindingListResponse])
+async def get_scan_findings(
+    scan_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuccessResponse[ScanFindingListResponse]:
+    """List evidence-backed rule findings for an owned scan."""
+    findings = await finding_observation.list_scan_findings(db, scan_id, current_user.id)
+    return SuccessResponse(data=ScanFindingListResponse.model_validate(findings))
 
 
 @router.get("/{scan_id}/events", response_model=SuccessResponse[OperationalEventListResponse])

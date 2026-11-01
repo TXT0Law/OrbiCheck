@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Literal
 
 import structlog
 from sqlalchemy import case, delete, select, update
@@ -12,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import ScanNotFoundError
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanStatus
 from app.services.finding_identity import finding_evidence_modules, finding_rule_identity
 from app.services.security_analyzer import extract_key_findings
@@ -49,6 +51,52 @@ class FindingBackfillPage:
     processed_scans: int
     inserted_observations: int
     failed_scans: int
+
+
+@dataclass(frozen=True, slots=True)
+class ScanFindingList:
+    scan_id: uuid.UUID
+    projection_status: Literal["ready", "pending", "failed", "unavailable"]
+    projected_at: datetime | None
+    observations: list[ScanFindingObservation]
+
+
+async def list_scan_findings(
+    db: AsyncSession, scan_id: uuid.UUID, user_id: int
+) -> ScanFindingList:
+    """Read one owner's projected findings without equating missing data with zero risk."""
+    scan = (
+        await db.execute(
+            select(Scan)
+            .where(Scan.id == scan_id, Scan.user_id == user_id)
+            .options(selectinload(Scan.finding_observations))
+        )
+    ).scalar_one_or_none()
+    if scan is None:
+        raise ScanNotFoundError(str(scan_id))
+
+    if scan.status != ScanStatus.COMPLETED:
+        projection_status: Literal["ready", "pending", "failed", "unavailable"] = "unavailable"
+    elif scan.finding_observations_projection_failed_at is not None:
+        projection_status = "failed"
+    elif scan.finding_observations_projected_at is None:
+        projection_status = "pending"
+    else:
+        projection_status = "ready"
+
+    observations = (
+        sorted(scan.finding_observations, key=lambda row: row.rule_id)
+        if projection_status == "ready"
+        else []
+    )
+    return ScanFindingList(
+        scan_id=scan.id,
+        projection_status=projection_status,
+        projected_at=(
+            scan.finding_observations_projected_at if projection_status == "ready" else None
+        ),
+        observations=observations,
+    )
 
 
 def build_finding_observations(scan: Scan) -> list[FindingObservationCandidate]:

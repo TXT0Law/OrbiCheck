@@ -828,6 +828,50 @@
         }
       }
     },
+    "/api/v1/scans/{scan_id}/findings": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get Scan Findings",
+        "description": "List evidence-backed rule findings for an owned scan.",
+        "operationId": "get_scan_findings_api_v1_scans__scan_id__findings_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_ScanFindingListResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/scans/{scan_id}/events": {
       "get": {
         "tags": [
@@ -9801,6 +9845,99 @@
         "title": "ScanDetailResponse",
         "description": "Scan with all module results included."
       },
+      "ScanFindingListResponse": {
+        "properties": {
+          "scanId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scanid"
+          },
+          "projectionStatus": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "pending",
+              "failed",
+              "unavailable"
+            ],
+            "title": "Projectionstatus"
+          },
+          "projectedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectedat"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/ScanFindingObservationResponse"
+            },
+            "type": "array",
+            "title": "Observations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scanId",
+          "projectionStatus",
+          "projectedAt",
+          "observations"
+        ],
+        "title": "ScanFindingListResponse"
+      },
+      "ScanFindingObservationResponse": {
+        "properties": {
+          "ruleId": {
+            "type": "string",
+            "title": "Ruleid"
+          },
+          "rulesetVersion": {
+            "type": "integer",
+            "title": "Rulesetversion"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "evidenceModules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidencemodules"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ruleId",
+          "rulesetVersion",
+          "severity",
+          "title",
+          "description",
+          "evidenceModules",
+          "observedAt"
+        ],
+        "title": "ScanFindingObservationResponse"
+      },
       "ScanListResponse": {
         "properties": {
           "scans": {
@@ -10707,6 +10844,35 @@
           "data"
         ],
         "title": "SuccessResponse[ScanDetailResponse]"
+      },
+      "SuccessResponse_ScanFindingListResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ScanFindingListResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[ScanFindingListResponse]"
       },
       "SuccessResponse_ScanListResponse_": {
         "properties": {
