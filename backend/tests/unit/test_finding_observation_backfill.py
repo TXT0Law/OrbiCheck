@@ -11,6 +11,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.dml import Insert, Update
 from sqlalchemy.sql.selectable import Select
 
+from app.core.celery_app import SCAN_FINDING_BACKFILL_INTERVAL_SECONDS, celery_app
 from app.models.scan import ModuleStatus, Scan, ScanStatus
 from app.services import finding_observation
 from app.tasks import scan_tasks
@@ -166,6 +167,9 @@ def test_backfill_task_commits_one_page(
     assert scan_tasks.backfill_scan_finding_observations.name == (
         "app.tasks.scan_tasks.backfill_scan_finding_observations"
     )
+    schedule = celery_app.conf.beat_schedule["backfill-scan-finding-observations"]
+    assert schedule["task"] == scan_tasks.backfill_scan_finding_observations.name
+    assert schedule["schedule"] == SCAN_FINDING_BACKFILL_INTERVAL_SECONDS
 
 
 @pytest.mark.unit
