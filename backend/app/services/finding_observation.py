@@ -49,11 +49,10 @@ def build_finding_observations(scan: Scan) -> list[FindingObservationCandidate]:
         and isinstance(row.raw_result, dict)
         and not _is_skipped(row)
     }
-    successful_modules = set(raw_results)
     observations: list[FindingObservationCandidate] = []
     seen_rule_ids: set[str] = set()
     for finding in extract_key_findings(raw_results, max_findings=None):
-        evidence_modules = finding_evidence_modules(finding, successful_modules)
+        evidence_modules = finding_evidence_modules(finding, raw_results)
         if not evidence_modules:
             continue
         identity = finding_rule_identity(finding)

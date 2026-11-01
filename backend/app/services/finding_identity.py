@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from app.services.security_analyzer import extract_key_findings
+
 
 # Persist alongside future observations so a ruleset change can be distinguished
 # from a target change. Rule IDs stay stable when only copy or severity changes.
@@ -56,11 +58,25 @@ def finding_rule_identity(finding: Mapping[str, object]) -> FindingRuleIdentity:
 
 
 def finding_evidence_modules(
-    finding: Mapping[str, object], successful_modules: set[str]
+    finding: Mapping[str, object], raw_results: Mapping[str, dict]
 ) -> frozenset[str]:
-    """Return successful source modules that can support this finding."""
+    """Return source modules that independently support this finding."""
     module = finding.get("module")
     if not isinstance(module, str):
         return frozenset()
     sources = _EVIDENCE_MODULES.get(module, frozenset({module}))
-    return sources & successful_modules
+    if module not in _EVIDENCE_MODULES:
+        return frozenset({module}) if module in raw_results else frozenset()
+
+    return frozenset(
+        source
+        for source in sources
+        if source in raw_results
+        and any(
+            candidate.get("module") == module
+            and candidate.get("title") == finding.get("title")
+            for candidate in extract_key_findings(
+                {source: raw_results[source]}, max_findings=None
+            )
+        )
+    )

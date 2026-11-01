@@ -76,6 +76,21 @@ def test_projection_does_not_treat_skipped_modules_as_missing_security_controls(
 
 
 @pytest.mark.unit
+def test_projection_records_only_sources_that_support_shared_findings() -> None:
+    scan = _scan(
+        _module("headers", {"X-Frame-Options": "DENY"}),
+        _module("http-security", {"Content-Security-Policy": "default-src 'self'"}),
+        _module("threats", {"safeBrowsing": {"unsafe": True}}),
+        _module("block-lists", {"blocklists": [{"isBlocked": False}]}),
+    )
+
+    observations = {row.rule_id: row for row in build_finding_observations(scan)}
+
+    assert observations["headers.missing_csp"].evidence_modules == ("headers",)
+    assert observations["threats.listed"].evidence_modules == ("threats",)
+
+
+@pytest.mark.unit
 def test_projection_has_stable_scan_rule_idempotency_key() -> None:
     scan = _scan(_module("http-security", {}))
 

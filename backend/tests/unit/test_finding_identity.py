@@ -9,6 +9,7 @@ import pytest
 from app.services.finding_identity import (
     FINDING_RULESET_VERSION,
     _RULE_IDS,
+    finding_evidence_modules,
     finding_rule_identity,
 )
 from app.services.security_analyzer import extract_key_findings
@@ -63,3 +64,33 @@ def test_ssl_expiry_identity_survives_severity_and_title_change() -> None:
 def test_unknown_finding_requires_explicit_rule_review() -> None:
     with pytest.raises(ValueError, match="Unmapped finding rule"):
         finding_rule_identity({"module": "ssl", "title": "New unreviewed SSL rule"})
+
+
+@pytest.mark.unit
+def test_header_evidence_excludes_successful_source_with_opposite_result() -> None:
+    raw = {
+        "headers": {"X-Frame-Options": "DENY"},
+        "http-security": {"Content-Security-Policy": "default-src 'self'"},
+    }
+    finding = next(
+        item
+        for item in extract_key_findings(raw, max_findings=None)
+        if item["title"] == "Missing Content-Security-Policy"
+    )
+
+    assert finding_evidence_modules(finding, raw) == frozenset({"headers"})
+
+
+@pytest.mark.unit
+def test_threat_evidence_excludes_unlisted_source() -> None:
+    raw = {
+        "threats": {"safeBrowsing": {"unsafe": True}},
+        "block-lists": {"blocklists": [{"isBlocked": False}]},
+    }
+    finding = next(
+        item
+        for item in extract_key_findings(raw, max_findings=None)
+        if item["title"] == "Listed in threat/block-list database"
+    )
+
+    assert finding_evidence_modules(finding, raw) == frozenset({"threats"})

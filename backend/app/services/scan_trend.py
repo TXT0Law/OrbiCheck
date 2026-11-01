@@ -283,12 +283,12 @@ def compute_scan_diff(
     base_findings = [
         finding
         for finding in extract_key_findings(base_shared_raw, max_findings=None)
-        if finding_evidence_modules(finding, shared_modules)
+        if finding_evidence_modules(finding, base_shared_raw)
     ]
     compare_findings = [
         finding
         for finding in extract_key_findings(compare_shared_raw, max_findings=None)
-        if finding_evidence_modules(finding, shared_modules)
+        if finding_evidence_modules(finding, compare_shared_raw)
     ]
     base_keys = {_finding_key(f) for f in base_findings}
     compare_keys = {_finding_key(f) for f in compare_findings}
