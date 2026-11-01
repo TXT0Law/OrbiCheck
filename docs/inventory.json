@@ -84,6 +84,7 @@
     "report",
     "report_schedule",
     "scan",
+    "scan_risk_notification_event",
     "url_group"
   ],
   "backendTasks": [
@@ -134,7 +135,7 @@
     "composeServices": 8,
     "frontendRoutes": 52,
     "backendApiRouters": 10,
-    "backendModels": 8,
+    "backendModels": 9,
     "backendTasks": 6,
     "scanModules": 34
   }
