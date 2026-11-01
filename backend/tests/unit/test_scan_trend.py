@@ -143,17 +143,58 @@ def test_compute_scan_diff_flags_removed_finding_when_compare_recovers() -> None
 
 @pytest.mark.unit
 def test_compute_scan_diff_skips_pending_module_results() -> None:
-    """Only SUCCESS module rows feed the diff so partial scans don't lie."""
+    """A missing baseline cannot establish that a finding was newly introduced."""
     base_pending_ssl = _module("ssl", raw=None, status=ModuleStatus.PENDING)
     base = _scan(module_results=[base_pending_ssl])
     compare = _scan(module_results=[_ssl_module(days_remaining=-10)])
 
     diff = compute_scan_diff(base, compare)
 
-    # The base scan has no SUCCESS modules, so any new finding in the
-    # compare scan must show up under addedFindings.
-    titles_added = {item["title"] for item in diff["addedFindings"]}
-    assert "SSL certificate expired" in titles_added
+    assert diff["addedFindings"] == []
+    assert diff["removedFindings"] == []
+
+
+@pytest.mark.unit
+def test_compute_scan_diff_does_not_call_failed_module_a_fix() -> None:
+    base = _scan(module_results=[_ssl_module(days_remaining=-10)])
+    compare = _scan(
+        module_results=[_module("ssl", raw=None, status=ModuleStatus.FAILED)]
+    )
+
+    diff = compute_scan_diff(base, compare)
+
+    assert diff["removedFindings"] == []
+
+
+@pytest.mark.unit
+def test_compute_scan_diff_accepts_http_security_as_header_evidence() -> None:
+    base = _scan(module_results=[_module("http-security", raw={})])
+    compare = _scan(
+        module_results=[_module("http-security", raw={"content-security-policy": "default-src 'self'"})]
+    )
+
+    diff = compute_scan_diff(base, compare)
+
+    assert diff["addedFindings"] == []
+    assert "Missing Content-Security-Policy" in {
+        item["title"] for item in diff["removedFindings"]
+    }
+
+
+@pytest.mark.unit
+def test_compute_scan_diff_limited_view_does_not_invent_removed_finding() -> None:
+    common_modules = [
+        _module("headers", raw={}),
+        _module("hsts", raw={"compatible": False}),
+        _module("dnssec", raw={"enabled": False}),
+    ]
+    base = _scan(module_results=[*common_modules, _ssl_module(days_remaining=200)])
+    compare = _scan(module_results=[*common_modules, _ssl_module(days_remaining=-10)])
+
+    diff = compute_scan_diff(base, compare, key_findings_limit=2)
+
+    assert [item["title"] for item in diff["addedFindings"]] == ["SSL certificate expired"]
+    assert diff["removedFindings"] == []
 
 
 @pytest.mark.unit
