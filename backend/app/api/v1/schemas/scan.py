@@ -211,3 +211,28 @@ class ScanFindingListResponse(BaseModel):
         alias_generator=to_camel,
         populate_by_name=True,
     )
+
+
+class ScanFindingHistoryItemResponse(BaseModel):
+    scan_id: uuid.UUID
+    domain: str
+    observation: ScanFindingObservationResponse
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+
+class ScanFindingHistoryResponse(BaseModel):
+    items: list[ScanFindingHistoryItemResponse]
+    total: int
+    pending_scans: int
+    failed_scans: int
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )

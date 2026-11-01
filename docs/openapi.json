@@ -519,6 +519,100 @@
         }
       }
     },
+    "/api/v1/scans/findings/history": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "List Scan Finding History",
+        "description": "Lists evidence-backed findings from completed, projected scans owned by the caller. pendingScans and failedScans count completed scans whose findings are not available for the requested domain. A missing observation does not establish that a risk was fixed.",
+        "operationId": "list_scan_finding_history_api_v1_scans_findings_history_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain"
+            }
+          },
+          {
+            "name": "rule_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 96
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_ScanFindingHistoryResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/scans/export.csv": {
       "get": {
         "tags": [
@@ -9845,6 +9939,60 @@
         "title": "ScanDetailResponse",
         "description": "Scan with all module results included."
       },
+      "ScanFindingHistoryItemResponse": {
+        "properties": {
+          "scanId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scanid"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "observation": {
+            "$ref": "#/components/schemas/ScanFindingObservationResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scanId",
+          "domain",
+          "observation"
+        ],
+        "title": "ScanFindingHistoryItemResponse"
+      },
+      "ScanFindingHistoryResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScanFindingHistoryItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "pendingScans": {
+            "type": "integer",
+            "title": "Pendingscans"
+          },
+          "failedScans": {
+            "type": "integer",
+            "title": "Failedscans"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "pendingScans",
+          "failedScans"
+        ],
+        "title": "ScanFindingHistoryResponse"
+      },
       "ScanFindingListResponse": {
         "properties": {
           "scanId": {
@@ -10844,6 +10992,35 @@
           "data"
         ],
         "title": "SuccessResponse[ScanDetailResponse]"
+      },
+      "SuccessResponse_ScanFindingHistoryResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ScanFindingHistoryResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[ScanFindingHistoryResponse]"
       },
       "SuccessResponse_ScanFindingListResponse_": {
         "properties": {
