@@ -18,6 +18,7 @@ from app.services.finding_observation import (
     backfill_finding_observations_page,
     persist_finding_observations,
 )
+from app.services.finding_notification_event import queue_high_risk_events_for_scan
 from app.services.security_analyzer import (
     compute_security_score_v2,
     resolve_security_score_for_detail,
@@ -585,6 +586,7 @@ def execute_scan(
             )
             if final_status == ScanStatus.COMPLETED:
                 persist_finding_observations(db, uuid.UUID(scan_id))
+                queue_high_risk_events_for_scan(db, uuid.UUID(scan_id))
             if target_failure_count >= SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD:
                 record_event_sync(
                     db,

@@ -161,6 +161,7 @@ def patched_environment(monkeypatch: pytest.MonkeyPatch, stub_scan):
     # Skip the security score recompute path — it touches selectinload eager
     # loaders that the stub session doesn't honour.
     monkeypatch.setattr(scan_tasks, "compute_security_score_v2", lambda *_a, **_kw: None)
+    monkeypatch.setattr(scan_tasks, "queue_high_risk_events_for_scan", lambda *_a: 0)
     monkeypatch.setattr(
         scan_tasks,
         "resolve_security_score_for_detail",
@@ -410,12 +411,21 @@ def test_completed_scan_persists_findings_before_final_commit(
         },
     )
     observations: list[tuple[Any, uuid.UUID, int]] = []
+    queued_events: list[tuple[Any, uuid.UUID, int]] = []
+    write_order: list[str] = []
 
     def _persist(session: Any, scan_id: uuid.UUID) -> int:
+        write_order.append("observations")
         observations.append((session, scan_id, session.commits))
         return 1
 
+    def _queue(session: Any, scan_id: uuid.UUID) -> int:
+        write_order.append("events")
+        queued_events.append((session, scan_id, session.commits))
+        return 1
+
     monkeypatch.setattr(scan_tasks, "persist_finding_observations", _persist)
+    monkeypatch.setattr(scan_tasks, "queue_high_risk_events_for_scan", _queue)
     scan_tasks.execute_scan.request.id = "task-observations-1"
 
     result = scan_tasks.execute_scan.run(str(stub_scan.id))
@@ -424,3 +434,5 @@ def test_completed_scan_persists_findings_before_final_commit(
     assert observations == [
         (patched_environment["session"], stub_scan.id, patched_environment["session"].commits - 1)
     ]
+    assert queued_events == observations
+    assert write_order == ["observations", "events"]
