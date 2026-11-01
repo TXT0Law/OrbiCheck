@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 
 RISK_EVENT_PENDING = "pending"
+RISK_EVENT_CLAIMED = "claimed"
 RISK_EVENT_SENT = "sent"
 RISK_EVENT_CANCELLED = "cancelled"
 
@@ -41,8 +42,13 @@ class ScanRiskNotificationEvent(Base):
             "kind IN ('new', 'regressed')", name="ck_scan_risk_notification_kind"
         ),
         CheckConstraint(
-            "status IN ('pending', 'sent', 'cancelled')",
+            "status IN ('pending', 'claimed', 'sent', 'cancelled')",
             name="ck_scan_risk_notification_status",
+        ),
+        CheckConstraint(
+            "(status = 'claimed' AND claim_token IS NOT NULL AND claim_expires_at IS NOT NULL) "
+            "OR (status != 'claimed' AND claim_token IS NULL AND claim_expires_at IS NULL)",
+            name="ck_scan_risk_notification_claim",
         ),
         Index("ix_scan_risk_notification_status_created", "status", "created_at"),
     )
@@ -64,5 +70,9 @@ class ScanRiskNotificationEvent(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     scan: Mapped[Scan] = relationship()

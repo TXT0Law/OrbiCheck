@@ -10,6 +10,7 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 
 from app.models.scan import Scan, ScanStatus
 from app.models.scan_risk_notification_event import (
+    RISK_EVENT_CLAIMED,
     RISK_EVENT_PENDING,
     ScanRiskNotificationEvent,
 )
@@ -43,7 +44,18 @@ def test_episode_key_is_unique_across_source_scans() -> None:
         "ck_scan_risk_notification_ruleset_version",
         "ck_scan_risk_notification_kind",
         "ck_scan_risk_notification_status",
+        "ck_scan_risk_notification_claim",
     }
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in table.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert RISK_EVENT_CLAIMED in constraints["ck_scan_risk_notification_status"]
+    assert "claim_token IS NOT NULL" in constraints["ck_scan_risk_notification_claim"]
+    assert "claim_expires_at IS NOT NULL" in constraints["ck_scan_risk_notification_claim"]
+    assert table.c.claim_token.nullable
+    assert table.c.claim_expires_at.nullable
 
 
 @pytest.mark.unit
