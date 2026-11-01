@@ -117,6 +117,7 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
         domain="example.com",
         module_results=[],
         finding_observations_projected_at=datetime.now(timezone.utc),
+        finding_ruleset_version=1,
         finding_observations_projection_failed_at=datetime.now(timezone.utc),
     )
 
@@ -155,6 +156,7 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
     assert result.id == completed_scan.id
     assert result.url == "https://example.com"
     assert result.finding_observations_projected_at is None
+    assert result.finding_ruleset_version is None
     assert result.finding_observations_projection_failed_at is None
     assert len(db.statements) == 1
     assert isinstance(db.statements[0], Delete)

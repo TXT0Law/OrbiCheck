@@ -12,6 +12,7 @@ from sqlalchemy.sql.dml import Delete, Insert, Update
 from sqlalchemy.sql.selectable import Select
 
 from app.models.scan import ModuleStatus, ScanStatus
+from app.services.finding_identity import FINDING_RULESET_VERSION
 from app.services.finding_observation import (
     build_finding_observations,
     persist_finding_observations,
@@ -167,6 +168,10 @@ def test_persistence_uses_scan_rule_conflict_key_and_skips_failed_evidence() -> 
         "finding_observations_projected_at" in str(statement)
         for statement in session.updates
     )
+    assert all(
+        statement.compile().params["finding_ruleset_version"] == FINDING_RULESET_VERSION
+        for statement in session.updates
+    )
     assert "ON CONFLICT ON CONSTRAINT uq_scan_finding_observation_scan_rule DO NOTHING" in session.insert_sql
 
 
@@ -199,6 +204,7 @@ def test_completed_scan_without_findings_is_marked_projected() -> None:
     assert len(statements) == 2
     assert isinstance(statements[0], Select)
     assert isinstance(statements[1], Update)
+    assert statements[1].compile().params["finding_ruleset_version"] == FINDING_RULESET_VERSION
 
 
 @pytest.mark.unit
@@ -225,6 +231,7 @@ async def test_module_retry_refreshes_findings_and_uses_retry_observation_time()
     assert isinstance(session.statements[0], Select)
     assert isinstance(session.statements[1], Delete)
     assert isinstance(session.statements[2], Update)
+    assert session.statements[2].compile().params["finding_ruleset_version"] == FINDING_RULESET_VERSION
     assert isinstance(session.statements[3], Insert)
     select_sql = str(session.statements[0].compile(dialect=postgresql.dialect()))
     delete_sql = str(session.statements[1].compile(dialect=postgresql.dialect()))

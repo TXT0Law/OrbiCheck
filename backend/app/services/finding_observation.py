@@ -22,7 +22,11 @@ from app.models.scan import (
     ScanModuleResult,
     ScanStatus,
 )
-from app.services.finding_identity import finding_evidence_modules, finding_rule_identity
+from app.services.finding_identity import (
+    FINDING_RULESET_VERSION,
+    finding_evidence_modules,
+    finding_rule_identity,
+)
 from app.services.security_analyzer import extract_key_findings
 from app.services.transformers import _is_skipped
 
@@ -363,6 +367,7 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
         .where(Scan.id == scan_id)
         .values(
             finding_observations_projected_at=datetime.now(timezone.utc),
+            finding_ruleset_version=FINDING_RULESET_VERSION,
             finding_observations_projection_failed_at=None,
         )
     )
@@ -438,6 +443,9 @@ async def refresh_finding_observations_after_retry(
         .values(
             finding_observations_projected_at=(
                 datetime.now(timezone.utc) if scan.status == ScanStatus.COMPLETED else None
+            ),
+            finding_ruleset_version=(
+                FINDING_RULESET_VERSION if scan.status == ScanStatus.COMPLETED else None
             ),
             finding_observations_projection_failed_at=None,
         )

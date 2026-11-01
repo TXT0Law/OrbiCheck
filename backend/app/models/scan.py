@@ -54,6 +54,9 @@ class Scan(Base):
     finding_observations_projected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    finding_ruleset_version: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     finding_observations_projection_failed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
