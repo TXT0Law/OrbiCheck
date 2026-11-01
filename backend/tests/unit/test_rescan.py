@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.sql.dml import Delete
 
 from app.core.exceptions import ScanNotRescannableError, ScanNotFoundError
 from app.models.scan import ScanStatus
@@ -120,6 +121,12 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
         return completed_scan
 
     class FakeDb:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        async def execute(self, statement: object) -> None:
+            self.statements.append(statement)
+
         def add(self, x):
             pass
 
@@ -140,9 +147,14 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
         SimpleNamespace(APP_ENV="production"),
     )
 
-    result = await scan_service.rescan(FakeDb(), completed_scan.id, None)
+    db = FakeDb()
+    result = await scan_service.rescan(db, completed_scan.id, None)
     assert result.id == completed_scan.id
     assert result.url == "https://example.com"
+    assert len(db.statements) == 1
+    assert isinstance(db.statements[0], Delete)
+    assert db.statements[0].table.name == "scan_finding_observations"
+    assert completed_scan.id in db.statements[0].compile().params.values()
 
 
 @pytest.mark.unit
@@ -161,6 +173,9 @@ async def test_rescan_failed_scan_resets_in_place(monkeypatch) -> None:
         return failed_scan
 
     class FakeDb:
+        async def execute(self, statement: object) -> None:
+            pass
+
         def add(self, x):
             pass
 
@@ -203,6 +218,9 @@ async def test_rescan_deletes_stale_cancel_and_progress_keys(
         return cancelled_scan
 
     class FakeDb:
+        async def execute(self, statement: object) -> None:
+            pass
+
         def add(self, x):
             pass
 

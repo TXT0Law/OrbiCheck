@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from sqlalchemy import asc, desc, func, or_, select, update
+from sqlalchemy import asc, delete, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,7 +25,7 @@ from app.core.exceptions import (
     ScanNotRetryableError,
     ScanServiceError,
 )
-from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
+from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult, ScanStatus
 from app.tasks.scan_tasks import execute_scan
 from app.services.security_analyzer import compute_security_score_v2
 from app.services.scan_client import call_scan_module
@@ -423,6 +423,12 @@ async def rescan(
 
     if existing.status not in TERMINAL_STATUSES:
         raise ScanNotRescannableError(str(scan_id), existing.status.value)
+
+    # Rescan reuses the scan ID. Its old findings must not survive into the
+    # next run or block the (scan_id, rule_id) insert for new evidence.
+    await db.execute(
+        delete(ScanFindingObservation).where(ScanFindingObservation.scan_id == existing.id)
+    )
 
     # Clear module results and recreate slots
     for mr in existing.module_results:
