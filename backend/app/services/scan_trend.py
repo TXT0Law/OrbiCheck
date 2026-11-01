@@ -28,6 +28,7 @@ from app.services.security_analyzer import (
     compute_severity_counts,
     extract_key_findings,
 )
+from app.services.transformers import _is_skipped
 
 
 # ─── Constants ──────────────────────────────────────────────────────────
@@ -145,7 +146,9 @@ def _build_all_raw(module_results: Sequence) -> dict:
     return {
         m.module_name: m.raw_result
         for m in module_results
-        if m.status == ModuleStatus.SUCCESS and isinstance(m.raw_result, dict)
+        if m.status == ModuleStatus.SUCCESS
+        and isinstance(m.raw_result, dict)
+        and not _is_skipped(m)
     }
 
 

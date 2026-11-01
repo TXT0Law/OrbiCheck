@@ -195,6 +195,23 @@ def test_compute_scan_diff_does_not_call_failed_module_a_fix() -> None:
 
 
 @pytest.mark.unit
+def test_compute_scan_diff_does_not_count_skipped_module_as_new_risk() -> None:
+    base = _scan(module_results=[_module("hsts", raw={"compatible": True})])
+    compare = _scan(
+        module_results=[
+            _module("hsts", raw={"skipped": True, "data": {"note": "Skipped by user"}})
+        ]
+    )
+
+    diff = compute_scan_diff(base, compare)
+
+    assert diff["addedFindings"] == []
+    assert diff["removedFindings"] == []
+    assert all(value == 0 for value in diff["severityDelta"]["delta"].values())
+    assert diff["breakdownDelta"]["delta"] is None
+
+
+@pytest.mark.unit
 def test_compute_scan_diff_scores_only_shared_successful_modules() -> None:
     healthy_ssl = _ssl_module(days_remaining=200)
     base = _scan(

@@ -58,6 +58,24 @@ def test_projection_only_records_findings_with_successful_module_evidence() -> N
 
 
 @pytest.mark.unit
+def test_projection_does_not_treat_skipped_modules_as_missing_security_controls() -> None:
+    skipped = {"skipped": True, "data": {"note": "Skipped by user"}}
+    scan = _scan(
+        _module("ssl", {"bits": 2048, "valid_to": "Jan 1 2020 GMT"}),
+        _module("headers", skipped),
+        _module("hsts", skipped),
+        _module("dnssec", skipped),
+        _module("firewall", skipped),
+        _module("security-txt", skipped),
+        _module("robots-txt", skipped),
+    )
+
+    assert [row.rule_id for row in build_finding_observations(scan)] == [
+        "ssl.certificate_expiry"
+    ]
+
+
+@pytest.mark.unit
 def test_projection_has_stable_scan_rule_idempotency_key() -> None:
     scan = _scan(_module("http-security", {}))
 

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanStatus
 from app.services.finding_identity import finding_evidence_modules, finding_rule_identity
 from app.services.security_analyzer import extract_key_findings
+from app.services.transformers import _is_skipped
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +45,9 @@ def build_finding_observations(scan: Scan) -> list[FindingObservationCandidate]:
     raw_results = {
         row.module_name: row.raw_result
         for row in scan.module_results
-        if row.status == ModuleStatus.SUCCESS and isinstance(row.raw_result, dict)
+        if row.status == ModuleStatus.SUCCESS
+        and isinstance(row.raw_result, dict)
+        and not _is_skipped(row)
     }
     successful_modules = set(raw_results)
     observations: list[FindingObservationCandidate] = []
