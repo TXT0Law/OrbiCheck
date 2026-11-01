@@ -6,9 +6,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import case, delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanStatus
 from app.services.finding_identity import finding_evidence_modules, finding_rule_identity
@@ -107,3 +108,62 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
         constraint="uq_scan_finding_observation_scan_rule"
     )
     return db.execute(statement).rowcount
+
+
+async def refresh_finding_observations_after_retry(
+    db: AsyncSession,
+    scan_id: uuid.UUID,
+    module_name: str,
+    retried_at: datetime,
+) -> None:
+    """Reconcile current findings after a module retry in its transaction."""
+    scan = (
+        await db.execute(
+            select(Scan)
+            .where(Scan.id == scan_id)
+            .options(selectinload(Scan.module_results))
+            .execution_options(populate_existing=True)
+            .with_for_update(of=Scan)
+        )
+    ).scalar_one()
+    candidates = build_finding_observations(scan)
+    rule_ids = [candidate.rule_id for candidate in candidates]
+    stale = delete(ScanFindingObservation).where(ScanFindingObservation.scan_id == scan_id)
+    if rule_ids:
+        stale = stale.where(ScanFindingObservation.rule_id.not_in(rule_ids))
+    await db.execute(stale)
+    if not candidates:
+        return
+
+    rows = [
+        {
+            "id": uuid.uuid4(),
+            "scan_id": candidate.scan_id,
+            "rule_id": candidate.rule_id,
+            "ruleset_version": candidate.ruleset_version,
+            "severity": candidate.severity,
+            "title": candidate.title,
+            "description": candidate.description,
+            "evidence_modules": list(candidate.evidence_modules),
+            "observed_at": (
+                retried_at if module_name in candidate.evidence_modules else candidate.observed_at
+            ),
+        }
+        for candidate in candidates
+    ]
+    statement = insert(ScanFindingObservation).values(rows)
+    statement = statement.on_conflict_do_update(
+        constraint="uq_scan_finding_observation_scan_rule",
+        set_={
+            "ruleset_version": statement.excluded.ruleset_version,
+            "severity": statement.excluded.severity,
+            "title": statement.excluded.title,
+            "description": statement.excluded.description,
+            "evidence_modules": statement.excluded.evidence_modules,
+            "observed_at": case(
+                (statement.excluded.evidence_modules.contains([module_name]), retried_at),
+                else_=ScanFindingObservation.observed_at,
+            ),
+        },
+    )
+    await db.execute(statement)

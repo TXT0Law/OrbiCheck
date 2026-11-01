@@ -129,9 +129,13 @@ async def test_retry_module_invokes_risk_refresh(monkeypatch) -> None:
         }
 
     refresh = AsyncMock()
+    refresh_findings = AsyncMock()
     monkeypatch.setattr(scan_service, "get_scan", fake_get_scan)
     monkeypatch.setattr(scan_service, "call_scan_module", fake_call_scan_module)
     monkeypatch.setattr(scan_service, "_refresh_scan_security_score", refresh)
+    monkeypatch.setattr(
+        scan_service, "refresh_finding_observations_after_retry", refresh_findings
+    )
 
     db = AsyncMock()
     db.commit = AsyncMock()
@@ -140,4 +144,7 @@ async def test_retry_module_invokes_risk_refresh(monkeypatch) -> None:
     await scan_service.retry_module(db, scan_id, "ssl")
 
     refresh.assert_awaited_once_with(db, scan_id)
+    assert refresh_findings.await_count == 1
+    assert refresh_findings.await_args.args[:3] == (db, scan_id, "ssl")
+    db.flush.assert_awaited()
     db.commit.assert_awaited()

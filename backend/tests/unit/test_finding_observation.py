@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.sql.dml import Insert
+from sqlalchemy.sql.dml import Delete, Insert
+from sqlalchemy.sql.selectable import Select
 
 from app.models.scan import ModuleStatus, ScanStatus
 from app.services.finding_observation import (
     build_finding_observations,
     persist_finding_observations,
+    refresh_finding_observations_after_retry,
 )
 
 
@@ -136,3 +138,66 @@ def test_persistence_does_not_write_noncompleted_scan() -> None:
             return SimpleNamespace(scalar_one=lambda: scan)
 
     assert persist_finding_observations(_Session(), scan.id) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_module_retry_refreshes_findings_and_uses_retry_observation_time() -> None:
+    scan = _scan(
+        _module("ssl", {"bits": 2048, "valid_to": "Jan 1 2020 GMT"}),
+        _module("headers", None, ModuleStatus.FAILED),
+    )
+    retried_at = scan.completed_at + timedelta(minutes=1)
+
+    class _Session:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        async def execute(self, statement: object) -> SimpleNamespace:
+            self.statements.append(statement)
+            return SimpleNamespace(scalar_one=lambda: scan)
+
+    session = _Session()
+    await refresh_finding_observations_after_retry(session, scan.id, "ssl", retried_at)
+
+    assert len(session.statements) == 3
+    assert isinstance(session.statements[0], Select)
+    assert isinstance(session.statements[1], Delete)
+    assert isinstance(session.statements[2], Insert)
+    select_sql = str(session.statements[0].compile(dialect=postgresql.dialect()))
+    delete_sql = str(session.statements[1].compile(dialect=postgresql.dialect()))
+    insert_sql = str(session.statements[2].compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE OF scans" in select_sql
+    assert "scan_finding_observations.scan_id" in delete_sql
+    assert "NOT IN" in delete_sql
+    assert "ON CONFLICT ON CONSTRAINT uq_scan_finding_observation_scan_rule DO UPDATE" in insert_sql
+    row = {
+        getattr(key, "key", key): value
+        for key, value in session.statements[2]._multi_values[0][0].items()
+    }
+    assert row["rule_id"] == "ssl.certificate_expiry"
+    assert row["observed_at"] == retried_at
+    assert row["evidence_modules"] == ["ssl"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_module_retry_clears_observations_when_scan_has_no_findings() -> None:
+    scan = _scan(_module("ssl", None, ModuleStatus.FAILED))
+
+    class _Session:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        async def execute(self, statement: object) -> SimpleNamespace:
+            self.statements.append(statement)
+            return SimpleNamespace(scalar_one=lambda: scan)
+
+    session = _Session()
+    await refresh_finding_observations_after_retry(
+        session, scan.id, "ssl", datetime.now(timezone.utc)
+    )
+
+    assert len(session.statements) == 2
+    assert isinstance(session.statements[0], Select)
+    assert isinstance(session.statements[1], Delete)
