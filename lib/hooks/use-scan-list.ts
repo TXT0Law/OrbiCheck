@@ -72,6 +72,8 @@ export function useRescan(onSuccess?: (scan: ScanResponse) => void) {
     mutationFn: ({ scanId }: { scanId: string }) => rescanScan(scanId),
     onSuccess: (scan) => {
       queryClient.invalidateQueries({ queryKey: ["scans"] });
+      queryClient.invalidateQueries({ queryKey: ["scan-detail", scan.id] });
+      queryClient.invalidateQueries({ queryKey: ["scan-findings", scan.id] });
       queryClient.invalidateQueries({ queryKey: ["scan", scan.id] });
       onSuccess?.(scan);
     },

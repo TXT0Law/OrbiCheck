@@ -16,7 +16,7 @@ function renderWithClient(ui: React.ReactElement) {
       mutations: { retry: false },
     },
   });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return { ...render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>), client };
 }
 
 describe("ModuleRetryBanner", () => {
@@ -51,7 +51,7 @@ describe("ModuleRetryBanner", () => {
       durationMs: 10,
     });
 
-    renderWithClient(
+    const { client } = renderWithClient(
       <ModuleRetryBanner
         scanId="s1"
         scanStatus="completed"
@@ -65,10 +65,13 @@ describe("ModuleRetryBanner", () => {
     );
 
     expect(screen.getByRole("region", { name: /module retry/i })).toBeInTheDocument();
+    const findingKey = ["scan-findings", "s1", "run-1"];
+    client.setQueryData(findingKey, { projectionStatus: "ready" });
     fireEvent.click(screen.getByRole("button", { name: /retry all modules here/i }));
 
     await waitFor(() => {
       expect(retryModule).toHaveBeenCalledTimes(2);
+      expect(client.getQueryState(findingKey)?.isInvalidated).toBe(true);
     });
     expect(retryModule).toHaveBeenCalledWith("s1", "dns");
     expect(retryModule).toHaveBeenCalledWith("s1", "txt-records");

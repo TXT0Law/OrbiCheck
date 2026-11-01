@@ -24,6 +24,21 @@ const SeverityAndBreakdownSection = dynamic(
   },
 );
 
+const RiskObservationsCard = dynamic(
+  () =>
+    import("@/components/scan/summary/risk-observations-card").then(
+      (module) => module.RiskObservationsCard,
+    ),
+  {
+    loading: () => (
+      <p className="text-sm text-muted-foreground" role="status">
+        Loading tracked risks…
+      </p>
+    ),
+    ssr: false,
+  },
+);
+
 function getCategoryStatusClass(status: "pass" | "warn" | "fail") {
   if (status === "pass") {
     return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200";
@@ -63,7 +78,7 @@ function keyFindingsEmptyMessage(status: string): string {
   if (status === "pending" || status === "running") {
     return "No key findings yet — prioritized issues appear as modules complete.";
   }
-  return "No key findings — no high-priority issues were detected. Open individual module pages for full raw results.";
+  return "No key findings from available module evidence. Failed or skipped checks may leave gaps.";
 }
 
 const KEY_FINDINGS_DISPLAY_LIMIT = 8;
@@ -144,6 +159,8 @@ export default function ScanSummaryPage() {
           )}
         </CardContent>
       </Card>
+
+      <RiskObservationsCard detail={safeDetail} />
 
       <Card>
         <CardHeader>

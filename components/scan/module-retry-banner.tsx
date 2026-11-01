@@ -50,6 +50,7 @@ export function ModuleRetryBanner({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scan-detail", scanId] });
+      queryClient.invalidateQueries({ queryKey: ["scan-findings", scanId] });
       queryClient.invalidateQueries({ queryKey: ["scan", scanId] });
     },
     onError: (error) => {

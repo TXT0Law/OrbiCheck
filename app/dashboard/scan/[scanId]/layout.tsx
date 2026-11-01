@@ -45,6 +45,7 @@ export default function ScanLayout({ children }: ScanLayoutProps) {
 
   const onProgressComplete = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["scan-detail", scanId] });
+    queryClient.invalidateQueries({ queryKey: ["scan-findings", scanId] });
     queryClient.invalidateQueries({ queryKey: ["scans"] });
   }, [queryClient, scanId]);
 

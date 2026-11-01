@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { rescanScan } from "@/lib/api/scans";
 import type { ScanResponse } from "@/shared/types/api";
@@ -16,6 +17,7 @@ export interface RescanAllProgress {
 }
 
 export function useRescanAll() {
+  const queryClient = useQueryClient();
   const [isRescanning, setIsRescanning] = useState(false);
   const [progress, setProgress] = useState<RescanAllProgress | null>(null);
   const cancelledRef = useRef(false);
@@ -46,6 +48,8 @@ export function useRescanAll() {
         const scan = terminal[i];
         try {
           await rescanScan(scan.id);
+          queryClient.invalidateQueries({ queryKey: ["scan-detail", scan.id] });
+          queryClient.invalidateQueries({ queryKey: ["scan-findings", scan.id] });
           prog.succeeded++;
         } catch (err) {
           prog.failed++;
@@ -66,7 +70,7 @@ export function useRescanAll() {
       setProgress(prog);
       return prog;
     },
-    []
+    [queryClient]
   );
 
   return {

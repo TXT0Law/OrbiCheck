@@ -54,6 +54,10 @@ vi.mock("@/components/scan/module-retry-banner", () => ({
   ),
 }));
 
+vi.mock("@/components/scan/summary/risk-observations-card", () => ({
+  RiskObservationsCard: () => <div data-testid="risk-observations-card">tracked risks</div>,
+}));
+
 vi.mock("@/components/scan/details/archives-detail", () => ({ ArchivesDetail: () => <div data-testid="mock-detail">archives</div> }));
 vi.mock("@/components/scan/details/associated-hosts-detail", () => ({
   AssociatedHostsDetail: () => <div data-testid="mock-detail">associated hosts</div>,
@@ -238,7 +242,7 @@ describe("scan detail routes", () => {
     expect(
       screen.getByText(/No category summary for this scan/i)
     ).toBeInTheDocument();
-    expect(screen.getByText(/No key findings — no high-priority issues/i)).toBeInTheDocument();
+    expect(screen.getByText(/No key findings from available module evidence/i)).toBeInTheDocument();
   });
 
   it("shows em-dash gauge and progress verdict when security score is null while running", () => {
@@ -260,6 +264,7 @@ describe("scan detail routes", () => {
 
     expect(screen.getByText("Missing CSP header")).toBeInTheDocument();
     expect(screen.getByText("Certificate expires soon")).toBeInTheDocument();
+    expect(screen.getByTestId("risk-observations-card")).toBeInTheDocument();
   });
 
   it("summary does not show ambiguous Scan data not found when detail is present", () => {

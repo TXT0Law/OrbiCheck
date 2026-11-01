@@ -19,7 +19,7 @@ describe("useScanFindings", () => {
       refetchInterval: (query: { state: { data?: { projectionStatus: string } } }) => number | false;
     };
 
-    expect(query.queryKey).toEqual(["scan-findings", "scan-1"]);
+    expect(query.queryKey).toEqual(["scan-findings", "scan-1", ""]);
     expect(query.enabled).toBe(true);
     expect(query.refetchInterval({ state: { data: { projectionStatus: "pending" } } })).toBe(60_000);
     expect(query.refetchInterval({ state: { data: { projectionStatus: "ready" } } })).toBe(false);
@@ -32,5 +32,18 @@ describe("useScanFindings", () => {
     useScanFindings(undefined);
 
     expect(useQueryMock.mock.lastCall?.[0]).toMatchObject({ enabled: false });
+  });
+
+  it("waits for completion and keys findings by the scan run", () => {
+    useQueryMock.mockReturnValue({ data: null });
+
+    useScanFindings("scan-1", { scanStatus: "running", scanStartedAt: "run-2" });
+    expect(useQueryMock.mock.lastCall?.[0]).toMatchObject({
+      queryKey: ["scan-findings", "scan-1", "run-2"],
+      enabled: false,
+    });
+
+    useScanFindings("scan-1", { scanStatus: "completed", scanStartedAt: "run-2" });
+    expect(useQueryMock.mock.lastCall?.[0]).toMatchObject({ enabled: true });
   });
 });
