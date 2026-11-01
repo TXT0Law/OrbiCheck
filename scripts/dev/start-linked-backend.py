@@ -9,6 +9,7 @@ import uvicorn
 
 
 LINKED_TEST_AUTH_RATE_LIMIT = "100"
+LINKED_TEST_SCAN_CREATE_RATE_LIMIT = "100"
 LINKED_TEST_DATABASE_NAME = "orbicheck_linked"
 
 
@@ -29,6 +30,7 @@ os.environ.setdefault("AUTH_LOGIN_PASSWORD", "linked-test-password")
 os.environ.setdefault("AUTH_SESSION_SECRET", "linked-test-session-secret")
 os.environ.setdefault("AUTH_COOKIE_SECURE", "false")
 os.environ.setdefault("RATE_LIMIT_AUTH_REQUESTS", LINKED_TEST_AUTH_RATE_LIMIT)
+os.environ.setdefault("RATE_LIMIT_SCAN_CREATE_REQUESTS", LINKED_TEST_SCAN_CREATE_RATE_LIMIT)
 
 def ensure_db_and_migrate() -> None:
     """Prepare the linked-test database exclusively through Alembic."""
