@@ -472,6 +472,7 @@ async def rescan(
     existing.error_message = None
     existing.started_at = None
     existing.completed_at = None
+    existing.finding_observations_projected_at = None
     existing.celery_task_id = None
     await db.flush()
 

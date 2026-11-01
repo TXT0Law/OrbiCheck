@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import case, delete, select
+from sqlalchemy import case, delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,29 +87,37 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
         .where(Scan.id == scan_id)
         .options(selectinload(Scan.module_results))
         .execution_options(populate_existing=True)
+        .with_for_update(of=Scan)
     ).scalar_one()
-    candidates = build_finding_observations(scan)
-    if not candidates:
+    if scan.status != ScanStatus.COMPLETED:
         return 0
-
-    rows = [
-        {
-            "id": uuid.uuid4(),
-            "scan_id": candidate.scan_id,
-            "rule_id": candidate.rule_id,
-            "ruleset_version": candidate.ruleset_version,
-            "severity": candidate.severity,
-            "title": candidate.title,
-            "description": candidate.description,
-            "evidence_modules": list(candidate.evidence_modules),
-            "observed_at": candidate.observed_at,
-        }
-        for candidate in candidates
-    ]
-    statement = insert(ScanFindingObservation).values(rows).on_conflict_do_nothing(
-        constraint="uq_scan_finding_observation_scan_rule"
+    candidates = build_finding_observations(scan)
+    inserted = 0
+    if candidates:
+        rows = [
+            {
+                "id": uuid.uuid4(),
+                "scan_id": candidate.scan_id,
+                "rule_id": candidate.rule_id,
+                "ruleset_version": candidate.ruleset_version,
+                "severity": candidate.severity,
+                "title": candidate.title,
+                "description": candidate.description,
+                "evidence_modules": list(candidate.evidence_modules),
+                "observed_at": candidate.observed_at,
+            }
+            for candidate in candidates
+        ]
+        statement = insert(ScanFindingObservation).values(rows).on_conflict_do_nothing(
+            constraint="uq_scan_finding_observation_scan_rule"
+        )
+        inserted = db.execute(statement).rowcount
+    db.execute(
+        update(Scan)
+        .where(Scan.id == scan_id)
+        .values(finding_observations_projected_at=datetime.now(timezone.utc))
     )
-    return db.execute(statement).rowcount
+    return inserted
 
 
 async def refresh_finding_observations_after_retry(
@@ -134,6 +142,15 @@ async def refresh_finding_observations_after_retry(
     if rule_ids:
         stale = stale.where(ScanFindingObservation.rule_id.not_in(rule_ids))
     await db.execute(stale)
+    await db.execute(
+        update(Scan)
+        .where(Scan.id == scan_id)
+        .values(
+            finding_observations_projected_at=(
+                datetime.now(timezone.utc) if scan.status == ScanStatus.COMPLETED else None
+            )
+        )
+    )
     if not candidates:
         return
 

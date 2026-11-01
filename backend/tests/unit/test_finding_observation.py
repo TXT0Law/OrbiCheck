@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.sql.dml import Delete, Insert
+from sqlalchemy.sql.dml import Delete, Insert, Update
 from sqlalchemy.sql.selectable import Select
 
 from app.models.scan import ModuleStatus, ScanStatus
@@ -135,8 +135,12 @@ def test_persistence_uses_scan_rule_conflict_key_and_skips_failed_evidence() -> 
             self.saved_keys: set[tuple[object, str]] = set()
             self.insert_sql: str | None = None
             self.rows: list[dict] = []
+            self.updates: list[Update] = []
 
         def execute(self, statement: object) -> SimpleNamespace:
+            if isinstance(statement, Update):
+                self.updates.append(statement)
+                return SimpleNamespace()
             if not isinstance(statement, Insert):
                 return SimpleNamespace(scalar_one=lambda: scan)
             self.insert_sql = str(statement.compile(dialect=postgresql.dialect()))
@@ -158,19 +162,43 @@ def test_persistence_uses_scan_rule_conflict_key_and_skips_failed_evidence() -> 
     assert session.rows[0]["rule_id"] == "ssl.certificate_expiry"
     assert session.rows[0]["evidence_modules"] == ["ssl"]
     assert session.rows[0]["observed_at"] == scan.completed_at
+    assert len(session.updates) == 2
+    assert all(
+        "finding_observations_projected_at" in str(statement)
+        for statement in session.updates
+    )
     assert "ON CONFLICT ON CONSTRAINT uq_scan_finding_observation_scan_rule DO NOTHING" in session.insert_sql
 
 
 @pytest.mark.unit
 def test_persistence_does_not_write_noncompleted_scan() -> None:
     scan = _scan(_module("ssl", {"bits": 2048}), status=ScanStatus.FAILED)
+    statements: list[object] = []
 
     class _Session:
         def execute(self, statement: object) -> SimpleNamespace:
-            assert not isinstance(statement, Insert)
+            statements.append(statement)
             return SimpleNamespace(scalar_one=lambda: scan)
 
     assert persist_finding_observations(_Session(), scan.id) == 0
+    assert len(statements) == 1
+    assert isinstance(statements[0], Select)
+
+
+@pytest.mark.unit
+def test_completed_scan_without_findings_is_marked_projected() -> None:
+    scan = _scan()
+    statements: list[object] = []
+
+    class _Session:
+        def execute(self, statement: object) -> SimpleNamespace:
+            statements.append(statement)
+            return SimpleNamespace(scalar_one=lambda: scan)
+
+    assert persist_finding_observations(_Session(), scan.id) == 0
+    assert len(statements) == 2
+    assert isinstance(statements[0], Select)
+    assert isinstance(statements[1], Update)
 
 
 @pytest.mark.unit
@@ -193,20 +221,21 @@ async def test_module_retry_refreshes_findings_and_uses_retry_observation_time()
     session = _Session()
     await refresh_finding_observations_after_retry(session, scan.id, "ssl", retried_at)
 
-    assert len(session.statements) == 3
+    assert len(session.statements) == 4
     assert isinstance(session.statements[0], Select)
     assert isinstance(session.statements[1], Delete)
-    assert isinstance(session.statements[2], Insert)
+    assert isinstance(session.statements[2], Update)
+    assert isinstance(session.statements[3], Insert)
     select_sql = str(session.statements[0].compile(dialect=postgresql.dialect()))
     delete_sql = str(session.statements[1].compile(dialect=postgresql.dialect()))
-    insert_sql = str(session.statements[2].compile(dialect=postgresql.dialect()))
+    insert_sql = str(session.statements[3].compile(dialect=postgresql.dialect()))
     assert "FOR UPDATE OF scans" in select_sql
     assert "scan_finding_observations.scan_id" in delete_sql
     assert "NOT IN" in delete_sql
     assert "ON CONFLICT ON CONSTRAINT uq_scan_finding_observation_scan_rule DO UPDATE" in insert_sql
     row = {
         getattr(key, "key", key): value
-        for key, value in session.statements[2]._multi_values[0][0].items()
+        for key, value in session.statements[3]._multi_values[0][0].items()
     }
     assert row["rule_id"] == "ssl.certificate_expiry"
     assert row["observed_at"] == retried_at
@@ -231,6 +260,7 @@ async def test_module_retry_clears_observations_when_scan_has_no_findings() -> N
         session, scan.id, "ssl", datetime.now(timezone.utc)
     )
 
-    assert len(session.statements) == 2
+    assert len(session.statements) == 3
     assert isinstance(session.statements[0], Select)
     assert isinstance(session.statements[1], Delete)
+    assert isinstance(session.statements[2], Update)

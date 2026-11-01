@@ -1,5 +1,6 @@
 """Unit tests for rescan service and API."""
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -115,6 +116,7 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
         url="https://example.com",
         domain="example.com",
         module_results=[],
+        finding_observations_projected_at=datetime.now(timezone.utc),
     )
 
     async def _fake_get_scan(_db, scan_id):
@@ -151,6 +153,7 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
     result = await scan_service.rescan(db, completed_scan.id, None)
     assert result.id == completed_scan.id
     assert result.url == "https://example.com"
+    assert result.finding_observations_projected_at is None
     assert len(db.statements) == 1
     assert isinstance(db.statements[0], Delete)
     assert db.statements[0].table.name == "scan_finding_observations"
