@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.scan import ModuleStatus, Scan, ScanStatus
+from app.services.finding_identity import finding_rule_identity
 from app.services.security_analyzer import (
     compute_security_score_v2,
     compute_severity_counts,
@@ -167,10 +168,13 @@ def _category_scores_camel(scores: dict | None) -> dict[str, float] | None:
 
 
 def _finding_key(finding: dict) -> tuple[str, str]:
-    """Stable identity for diff comparisons — module + title."""
+    """Use stable rule identity, retaining title matching for unknown future rules."""
     module = str(finding.get("module") or "")
     title = str(finding.get("title") or "")
-    return module, title
+    try:
+        return module, finding_rule_identity(finding).rule_id
+    except ValueError:
+        return module, title
 
 
 def _to_finding_delta(finding: dict) -> FindingDelta:

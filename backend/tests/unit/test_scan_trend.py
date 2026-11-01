@@ -19,6 +19,7 @@ from app.services.scan_trend import (
     DIFF_KEY_FINDINGS_LIMIT,
     MAX_TIMELINE_LIMIT,
     TIMELINE_RANGE_DAYS,
+    _finding_key,
     compute_scan_diff,
 )
 
@@ -139,6 +140,26 @@ def test_compute_scan_diff_flags_removed_finding_when_compare_recovers() -> None
     titles_removed = {item["title"] for item in diff["removedFindings"]}
     assert "SSL certificate expired" in titles_removed
     assert diff["severityDelta"]["delta"]["critical"] <= -1
+
+
+@pytest.mark.unit
+def test_compute_scan_diff_tracks_ssl_expiry_as_one_rule_when_severity_worsens() -> None:
+    base = _scan(module_results=[_ssl_module(days_remaining=15)])
+    compare = _scan(module_results=[_ssl_module(days_remaining=-10)])
+
+    diff = compute_scan_diff(base, compare)
+
+    assert diff["addedFindings"] == []
+    assert diff["removedFindings"] == []
+    assert diff["severityDelta"]["delta"]["critical"] > 0
+
+
+@pytest.mark.unit
+def test_unreviewed_rule_keeps_legacy_diff_identity() -> None:
+    assert _finding_key({"module": "custom", "title": "Future rule"}) == (
+        "custom",
+        "Future rule",
+    )
 
 
 @pytest.mark.unit
