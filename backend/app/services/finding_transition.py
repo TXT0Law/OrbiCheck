@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.services.transformers import _is_skipped
@@ -48,12 +48,7 @@ class RiskHistoryPage:
     complete: bool
 
 
-async def load_recent_risk_history(db: AsyncSession, current: Scan) -> RiskHistoryPage:
-    """Load a bounded, owner-scoped baseline with only relevant module evidence.
-
-    ``complete=False`` means older history exists. Callers must not label a
-    finding as globally new when the earlier risk history was truncated.
-    """
+def _history_source_names(current: Scan) -> frozenset[str] | None:
     if (
         current.status != ScanStatus.COMPLETED
         or current.completed_at is None
@@ -61,18 +56,18 @@ async def load_recent_risk_history(db: AsyncSession, current: Scan) -> RiskHisto
         or current.finding_observations_projection_failed_at is not None
         or current.finding_ruleset_version is None
     ):
-        return RiskHistoryPage(scans=[], complete=False)
+        return None
 
-    source_names = {
+    return frozenset(
         module_name
         for finding in current.finding_observations
         if finding.severity in HIGH_RISK_SEVERITIES
         for module_name in finding.evidence_modules
-    }
-    if not source_names:
-        return RiskHistoryPage(scans=[], complete=True)
+    )
 
-    query = (
+
+def _history_query(current: Scan, source_names: frozenset[str]) -> Select[tuple[Scan]]:
+    return (
         select(Scan)
         .where(
             Scan.user_id == current.user_id,
@@ -96,11 +91,39 @@ async def load_recent_risk_history(db: AsyncSession, current: Scan) -> RiskHisto
         .order_by(Scan.completed_at.desc(), Scan.id.desc())
         .limit(MAX_NOTIFICATION_HISTORY_SCANS + 1)
     )
-    scans = list((await db.execute(query)).scalars().all())
+
+
+def _history_page(scans: list[Scan]) -> RiskHistoryPage:
     return RiskHistoryPage(
         scans=scans[:MAX_NOTIFICATION_HISTORY_SCANS],
         complete=len(scans) <= MAX_NOTIFICATION_HISTORY_SCANS,
     )
+
+
+async def load_recent_risk_history(db: AsyncSession, current: Scan) -> RiskHistoryPage:
+    """Load bounded, owner-scoped history from an async request transaction."""
+    source_names = _history_source_names(current)
+    if source_names is None:
+        return RiskHistoryPage(scans=[], complete=False)
+    if not source_names:
+        return RiskHistoryPage(scans=[], complete=True)
+    scans = list((await db.execute(_history_query(current, source_names))).scalars().all())
+    return _history_page(scans)
+
+
+def load_recent_risk_history_sync(db: Session, current: Scan) -> RiskHistoryPage:
+    """Use the same bounded evidence query in synchronous Celery transactions.
+
+    ``complete=False`` means older history exists. It cannot prove a finding
+    is globally new when that earlier risk history has been truncated.
+    """
+    source_names = _history_source_names(current)
+    if source_names is None:
+        return RiskHistoryPage(scans=[], complete=False)
+    if not source_names:
+        return RiskHistoryPage(scans=[], complete=True)
+    scans = list(db.execute(_history_query(current, source_names)).scalars().all())
+    return _history_page(scans)
 
 
 def _ready_for_comparison(scan: Scan, current: Scan) -> bool:

@@ -13,6 +13,7 @@ from app.services.finding_transition import (
     RiskHistoryPage,
     classify_high_risk_transitions,
     load_recent_risk_history,
+    load_recent_risk_history_sync,
 )
 
 BASE_TIME = datetime(2026, 11, 1, tzinfo=timezone.utc)
@@ -253,3 +254,50 @@ async def test_history_loader_skips_unprojected_or_nonrisk_current_scan() -> Non
 
     assert not (await load_recent_risk_history(_Session(), unprojected)).complete
     assert (await load_recent_risk_history(_Session(), no_high_risk)).complete
+
+
+@pytest.mark.unit
+def test_sync_history_loader_uses_same_scope_and_bounded_page() -> None:
+    current = _scan(3, modules={"ssl": {}}, findings=[(RULE_ID, "high", ["ssl"])])
+    prior = _scan(2, modules={"ssl": {}})
+
+    class _Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [prior] * (MAX_NOTIFICATION_HISTORY_SCANS + 1)
+
+    class _Session:
+        def __init__(self) -> None:
+            self.query = None
+
+        def execute(self, query):
+            self.query = query
+            return _Result()
+
+    db = _Session()
+    page = load_recent_risk_history_sync(db, current)
+
+    assert len(page.scans) == MAX_NOTIFICATION_HISTORY_SCANS
+    assert not page.complete
+    assert db.query is not None
+    sql = str(db.query)
+    assert "scans.user_id" in sql
+    assert "scans.domain" in sql
+    assert "finding_ruleset_version" in sql
+    assert "ORDER BY scans.completed_at DESC, scans.id DESC" in sql
+    assert MAX_NOTIFICATION_HISTORY_SCANS + 1 in db.query.compile().params.values()
+
+
+@pytest.mark.unit
+def test_sync_history_loader_skips_unprojected_or_nonrisk_current_scan() -> None:
+    class _Session:
+        def execute(self, _query):
+            raise AssertionError("No history query should be issued")
+
+    unprojected = _scan(2, modules={"ssl": {}}, findings=[(RULE_ID, "high", ["ssl"])], projected=False)
+    no_high_risk = _scan(2, modules={"ssl": {}})
+
+    assert not load_recent_risk_history_sync(_Session(), unprojected).complete
+    assert load_recent_risk_history_sync(_Session(), no_high_risk).complete
