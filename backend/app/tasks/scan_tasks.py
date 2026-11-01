@@ -84,10 +84,12 @@ def backfill_scan_finding_observations() -> dict[str, int]:
         "scan_finding_backfill_page",
         processed_scans=page.processed_scans,
         inserted_observations=page.inserted_observations,
+        failed_scans=page.failed_scans,
     )
     return {
         "processedScans": page.processed_scans,
         "insertedObservations": page.inserted_observations,
+        "failedScans": page.failed_scans,
     }
 
 

@@ -63,6 +63,9 @@ def test_observation_ownership_and_deletion_follow_parent_scan() -> None:
 @pytest.mark.unit
 def test_scan_projection_marker_distinguishes_clean_from_unprojected_history() -> None:
     column = Scan.__table__.c.finding_observations_projected_at
+    failure_column = Scan.__table__.c.finding_observations_projection_failed_at
 
     assert column.nullable
     assert column.type.timezone
+    assert failure_column.nullable
+    assert failure_column.type.timezone

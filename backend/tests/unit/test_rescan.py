@@ -117,6 +117,7 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
         domain="example.com",
         module_results=[],
         finding_observations_projected_at=datetime.now(timezone.utc),
+        finding_observations_projection_failed_at=datetime.now(timezone.utc),
     )
 
     async def _fake_get_scan(_db, scan_id):
@@ -154,6 +155,7 @@ async def test_rescan_completed_scan_resets_in_place(monkeypatch) -> None:
     assert result.id == completed_scan.id
     assert result.url == "https://example.com"
     assert result.finding_observations_projected_at is None
+    assert result.finding_observations_projection_failed_at is None
     assert len(db.statements) == 1
     assert isinstance(db.statements[0], Delete)
     assert db.statements[0].table.name == "scan_finding_observations"

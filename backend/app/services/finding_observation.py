@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import structlog
 from sqlalchemy import case, delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
@@ -18,6 +19,11 @@ from app.services.transformers import _is_skipped
 
 SCAN_FINDING_BACKFILL_BATCH_SIZE = 25
 SCAN_FINDING_BACKFILL_MAX_BATCH_SIZE = 100
+logger = structlog.get_logger(__name__)
+
+
+class FindingProjectionError(ValueError):
+    """A scan's stored evidence cannot be projected with the current rules."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +48,7 @@ class FindingObservationCandidate:
 class FindingBackfillPage:
     processed_scans: int
     inserted_observations: int
+    failed_scans: int
 
 
 def build_finding_observations(scan: Scan) -> list[FindingObservationCandidate]:
@@ -100,7 +107,10 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
     ).scalar_one()
     if scan.status != ScanStatus.COMPLETED:
         return 0
-    candidates = build_finding_observations(scan)
+    try:
+        candidates = build_finding_observations(scan)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise FindingProjectionError("Stored scan evidence cannot be projected") from exc
     inserted = 0
     if candidates:
         rows = [
@@ -124,7 +134,10 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
     db.execute(
         update(Scan)
         .where(Scan.id == scan_id)
-        .values(finding_observations_projected_at=datetime.now(timezone.utc))
+        .values(
+            finding_observations_projected_at=datetime.now(timezone.utc),
+            finding_observations_projection_failed_at=None,
+        )
     )
     return inserted
 
@@ -141,16 +154,32 @@ def backfill_finding_observations_page(
             Scan.status == ScanStatus.COMPLETED,
             Scan.completed_at.is_not(None),
             Scan.finding_observations_projected_at.is_(None),
+            Scan.finding_observations_projection_failed_at.is_(None),
         )
         .order_by(Scan.id)
         .limit(limit)
     ).scalars().all()
     inserted = 0
+    failed = 0
     for scan_id in scan_ids:
-        inserted += persist_finding_observations(db, scan_id)
+        try:
+            inserted += persist_finding_observations(db, scan_id)
+        except FindingProjectionError as exc:
+            failed += 1
+            db.execute(
+                update(Scan)
+                .where(Scan.id == scan_id)
+                .values(finding_observations_projection_failed_at=datetime.now(timezone.utc))
+            )
+            logger.warning(
+                "scan_finding_backfill_projection_failed",
+                scan_id=str(scan_id),
+                error_type=type(exc.__cause__).__name__,
+            )
     return FindingBackfillPage(
         processed_scans=len(scan_ids),
         inserted_observations=inserted,
+        failed_scans=failed,
     )
 
 
@@ -182,7 +211,8 @@ async def refresh_finding_observations_after_retry(
         .values(
             finding_observations_projected_at=(
                 datetime.now(timezone.utc) if scan.status == ScanStatus.COMPLETED else None
-            )
+            ),
+            finding_observations_projection_failed_at=None,
         )
     )
     if not candidates:
