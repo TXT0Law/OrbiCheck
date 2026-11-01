@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from app.models.scan import ModuleStatus, Scan, ScanStatus
+from sqlalchemy import and_, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.services.transformers import _is_skipped
 
 HIGH_RISK_SEVERITIES = frozenset({"critical", "high"})
+MAX_NOTIFICATION_HISTORY_SCANS = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +22,67 @@ class HighRiskTransition:
     scan_id: uuid.UUID
     rule_id: str
     kind: Literal["new", "regressed"]
+
+
+@dataclass(frozen=True, slots=True)
+class RiskHistoryPage:
+    scans: list[Scan]
+    complete: bool
+
+
+async def load_recent_risk_history(db: AsyncSession, current: Scan) -> RiskHistoryPage:
+    """Load a bounded, owner-scoped baseline with only relevant module evidence.
+
+    ``complete=False`` means older history exists. Callers must not label a
+    finding as globally new when the earlier risk history was truncated.
+    """
+    if (
+        current.status != ScanStatus.COMPLETED
+        or current.completed_at is None
+        or current.finding_observations_projected_at is None
+        or current.finding_observations_projection_failed_at is not None
+        or current.finding_ruleset_version is None
+    ):
+        return RiskHistoryPage(scans=[], complete=False)
+
+    source_names = {
+        module_name
+        for finding in current.finding_observations
+        if finding.severity in HIGH_RISK_SEVERITIES
+        for module_name in finding.evidence_modules
+    }
+    if not source_names:
+        return RiskHistoryPage(scans=[], complete=True)
+
+    query = (
+        select(Scan)
+        .where(
+            Scan.user_id == current.user_id,
+            Scan.domain == current.domain,
+            Scan.status == ScanStatus.COMPLETED,
+            Scan.finding_ruleset_version == current.finding_ruleset_version,
+            Scan.finding_observations_projected_at.is_not(None),
+            Scan.finding_observations_projection_failed_at.is_(None),
+            Scan.completed_at.is_not(None),
+            or_(
+                Scan.completed_at < current.completed_at,
+                and_(Scan.completed_at == current.completed_at, Scan.id < current.id),
+            ),
+        )
+        .options(
+            selectinload(Scan.finding_observations),
+            selectinload(
+                Scan.module_results.and_(ScanModuleResult.module_name.in_(source_names))
+            ),
+        )
+        .order_by(Scan.completed_at.desc(), Scan.id.desc())
+        .limit(MAX_NOTIFICATION_HISTORY_SCANS + 1)
+    )
+    scans = list((await db.execute(query)).scalars().all())
+    return RiskHistoryPage(
+        scans=scans[:MAX_NOTIFICATION_HISTORY_SCANS],
+        complete=len(scans) <= MAX_NOTIFICATION_HISTORY_SCANS,
+    )
 
 
 def _ready_for_comparison(scan: Scan, current: Scan) -> bool:
@@ -50,7 +115,7 @@ def _successful_modules(scan: Scan) -> frozenset[str]:
 
 
 def classify_high_risk_transitions(
-    current: Scan, history: Sequence[Scan]
+    current: Scan, history: RiskHistoryPage
 ) -> list[HighRiskTransition]:
     """Find newly observed or returning high risks only with a proven baseline.
 
@@ -73,7 +138,7 @@ def classify_high_risk_transitions(
         return []
 
     prior_scans = sorted(
-        (scan for scan in history if _ready_for_comparison(scan, current)),
+        (scan for scan in history.scans if _ready_for_comparison(scan, current)),
         key=lambda scan: (scan.completed_at, scan.id),
         reverse=True,
     )
@@ -100,6 +165,8 @@ def classify_high_risk_transitions(
                 finding.rule_id in older_findings
                 for older_findings in prior_findings[index + 1 :]
             )
+            if not had_earlier_risk and not history.complete:
+                break
             transitions.append(
                 HighRiskTransition(
                     scan_id=current.id,
