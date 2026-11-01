@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql.dml import Insert, Update
 
 from app.models.scan import Scan, ScanStatus
 from app.services import finding_notification_event
@@ -104,3 +106,91 @@ def test_queue_skips_scans_without_safe_transitions(monkeypatch) -> None:
     db = _Session()
     assert finding_notification_event.queue_high_risk_events_for_scan(db, scan.id) == 0
     assert db.calls == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_retry_reconciliation_cancels_only_stale_pending_episode(monkeypatch) -> None:
+    scan = Scan(
+        id=uuid4(),
+        user_id=7,
+        domain="example.com",
+        url="https://example.com",
+        status=ScanStatus.COMPLETED,
+        completed_at=COMPLETED_AT,
+    )
+    transition = HighRiskTransition(
+        scan_id=scan.id,
+        rule_id=RULE_ID,
+        kind="regressed",
+        ruleset_version=FINDING_RULESET_VERSION,
+        baseline_scan_id=uuid4(),
+        baseline_completed_at=COMPLETED_AT,
+    )
+    history = AsyncMock(return_value=RiskHistoryPage(scans=[], complete=True))
+    monkeypatch.setattr(finding_notification_event, "load_recent_risk_history", history)
+    monkeypatch.setattr(
+        finding_notification_event,
+        "classify_high_risk_transitions",
+        lambda *_args: [transition],
+    )
+
+    class _Session:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+            if len(self.statements) == 1:
+                return SimpleNamespace(scalar_one=lambda: scan)
+            return SimpleNamespace(rowcount=1)
+
+    db = _Session()
+    await finding_notification_event.reconcile_high_risk_events_after_retry(db, scan.id)
+
+    assert len(db.statements) == 3
+    history.assert_awaited_once_with(db, scan)
+    stale = db.statements[1]
+    assert isinstance(stale, Update)
+    stale_sql = str(stale.compile(dialect=postgresql.dialect()))
+    assert "scan_risk_notification_events.scan_completed_at !=" in stale_sql
+    assert "NOT IN" in stale_sql
+    assert "scan_risk_notification_events.status =" in stale_sql
+    assert isinstance(db.statements[2], Insert)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_retry_without_supported_transition_cancels_pending_without_insert(monkeypatch) -> None:
+    scan = Scan(
+        id=uuid4(),
+        user_id=7,
+        domain="example.com",
+        url="https://example.com",
+        status=ScanStatus.COMPLETED,
+        completed_at=COMPLETED_AT,
+    )
+    monkeypatch.setattr(
+        finding_notification_event,
+        "load_recent_risk_history",
+        AsyncMock(return_value=RiskHistoryPage(scans=[], complete=False)),
+    )
+    monkeypatch.setattr(finding_notification_event, "classify_high_risk_transitions", lambda *_args: [])
+
+    class _Session:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+            if len(self.statements) == 1:
+                return SimpleNamespace(scalar_one=lambda: scan)
+            return SimpleNamespace(rowcount=1)
+
+    db = _Session()
+    await finding_notification_event.reconcile_high_risk_events_after_retry(db, scan.id)
+
+    assert len(db.statements) == 2
+    stale = db.statements[1]
+    assert isinstance(stale, Update)
+    assert "NOT IN" not in str(stale.compile(dialect=postgresql.dialect()))

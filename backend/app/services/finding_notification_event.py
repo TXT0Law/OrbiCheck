@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import Select, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql.dml import Insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.scan import Scan
@@ -15,19 +17,15 @@ from app.models.scan_risk_notification_event import (
     ScanRiskNotificationEvent,
 )
 from app.services.finding_transition import (
+    HighRiskTransition,
     classify_high_risk_transitions,
+    load_recent_risk_history,
     load_recent_risk_history_sync,
 )
 
 
-def queue_high_risk_events_for_scan(db: Session, scan_id: uuid.UUID) -> int:
-    """Queue one event per proven episode without committing the transaction.
-
-    Rescanned source rows may reactivate a cancelled, unsent episode. An
-    already pending or sent episode remains untouched, even when another scan
-    sees the same risk after the same clean baseline.
-    """
-    scan = db.execute(
+def _scan_query(scan_id: uuid.UUID) -> Select[tuple[Scan]]:
+    return (
         select(Scan)
         .where(Scan.id == scan_id)
         .options(
@@ -36,12 +34,12 @@ def queue_high_risk_events_for_scan(db: Session, scan_id: uuid.UUID) -> int:
         )
         .execution_options(populate_existing=True)
         .with_for_update(of=Scan)
-    ).scalar_one()
-    history = load_recent_risk_history_sync(db, scan)
-    transitions = classify_high_risk_transitions(scan, history)
-    if not transitions or scan.completed_at is None:
-        return 0
+    )
 
+
+def _event_insert(scan: Scan, transitions: list[HighRiskTransition]) -> Insert:
+    if scan.completed_at is None:
+        raise ValueError("Risk event source scan has no completion time")
     rows = [
         {
             "id": uuid.uuid4(),
@@ -57,7 +55,7 @@ def queue_high_risk_events_for_scan(db: Session, scan_id: uuid.UUID) -> int:
         for transition in transitions
     ]
     statement = insert(ScanRiskNotificationEvent).values(rows)
-    statement = statement.on_conflict_do_update(
+    return statement.on_conflict_do_update(
         constraint="uq_scan_risk_notification_episode",
         set_={
             "scan_id": statement.excluded.scan_id,
@@ -68,4 +66,53 @@ def queue_high_risk_events_for_scan(db: Session, scan_id: uuid.UUID) -> int:
         },
         where=ScanRiskNotificationEvent.status == RISK_EVENT_CANCELLED,
     )
-    return db.execute(statement).rowcount
+
+
+def queue_high_risk_events_for_scan(db: Session, scan_id: uuid.UUID) -> int:
+    """Queue one event per proven episode without committing the transaction.
+
+    Rescanned source rows may reactivate a cancelled, unsent episode. An
+    already pending or sent episode remains untouched, even when another scan
+    sees the same risk after the same clean baseline.
+    """
+    scan = db.execute(_scan_query(scan_id)).scalar_one()
+    history = load_recent_risk_history_sync(db, scan)
+    transitions = classify_high_risk_transitions(scan, history)
+    if not transitions or scan.completed_at is None:
+        return 0
+
+    return db.execute(_event_insert(scan, transitions)).rowcount
+
+
+async def reconcile_high_risk_events_after_retry(
+    db: AsyncSession, scan_id: uuid.UUID
+) -> None:
+    """Replace stale pending candidates after module evidence changes.
+
+    The finding projection and this reconciliation must share a transaction.
+    Failed or missing evidence never becomes a proof of repair; it only stops
+    an unsupported, unsent notification from being delivered.
+    """
+    scan = (await db.execute(_scan_query(scan_id))).scalar_one()
+    history = await load_recent_risk_history(db, scan)
+    transitions = classify_high_risk_transitions(scan, history)
+    stale = update(ScanRiskNotificationEvent).where(
+        ScanRiskNotificationEvent.scan_id == scan_id,
+        ScanRiskNotificationEvent.status == RISK_EVENT_PENDING,
+    )
+    if transitions and scan.completed_at is not None:
+        episode_columns = tuple_(
+            ScanRiskNotificationEvent.baseline_scan_id,
+            ScanRiskNotificationEvent.baseline_completed_at,
+            ScanRiskNotificationEvent.rule_id,
+            ScanRiskNotificationEvent.ruleset_version,
+        )
+        stale = stale.where(
+            or_(
+                ScanRiskNotificationEvent.scan_completed_at != scan.completed_at,
+                episode_columns.not_in([transition.dedup_key for transition in transitions]),
+            )
+        )
+    await db.execute(stale.values(status=RISK_EVENT_CANCELLED))
+    if transitions:
+        await db.execute(_event_insert(scan, transitions))

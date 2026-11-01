@@ -129,16 +129,31 @@ async def test_retry_module_invokes_risk_refresh(monkeypatch) -> None:
         }
 
     refresh = AsyncMock()
-    refresh_findings = AsyncMock()
+    write_order: list[str] = []
+
+    async def _refresh_findings(*_args: object) -> None:
+        write_order.append("findings")
+
+    async def _reconcile_events(*_args: object) -> None:
+        write_order.append("events")
+
+    async def _commit() -> None:
+        write_order.append("commit")
+
+    refresh_findings = AsyncMock(side_effect=_refresh_findings)
+    reconcile_events = AsyncMock(side_effect=_reconcile_events)
     monkeypatch.setattr(scan_service, "get_scan", fake_get_scan)
     monkeypatch.setattr(scan_service, "call_scan_module", fake_call_scan_module)
     monkeypatch.setattr(scan_service, "_refresh_scan_security_score", refresh)
     monkeypatch.setattr(
         scan_service, "refresh_finding_observations_after_retry", refresh_findings
     )
+    monkeypatch.setattr(
+        scan_service, "reconcile_high_risk_events_after_retry", reconcile_events
+    )
 
     db = AsyncMock()
-    db.commit = AsyncMock()
+    db.commit = AsyncMock(side_effect=_commit)
     db.refresh = AsyncMock()
 
     await scan_service.retry_module(db, scan_id, "ssl")
@@ -146,5 +161,7 @@ async def test_retry_module_invokes_risk_refresh(monkeypatch) -> None:
     refresh.assert_awaited_once_with(db, scan_id)
     assert refresh_findings.await_count == 1
     assert refresh_findings.await_args.args[:3] == (db, scan_id, "ssl")
+    reconcile_events.assert_awaited_once_with(db, scan_id)
+    assert write_order == ["findings", "events", "commit"]
     db.flush.assert_awaited()
     db.commit.assert_awaited()

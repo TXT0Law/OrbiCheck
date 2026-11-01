@@ -32,6 +32,7 @@ from app.models.scan_risk_notification_event import (
     ScanRiskNotificationEvent,
 )
 from app.services.finding_observation import refresh_finding_observations_after_retry
+from app.services.finding_notification_event import reconcile_high_risk_events_after_retry
 from app.tasks.scan_tasks import execute_scan
 from app.services.security_analyzer import compute_security_score_v2
 from app.services.scan_client import call_scan_module
@@ -645,6 +646,7 @@ async def retry_module(
 
     await db.flush()
     await refresh_finding_observations_after_retry(db, scan_id, module_name, now)
+    await reconcile_high_risk_events_after_retry(db, scan_id)
     await db.commit()
     if existing:
         await db.refresh(existing)
