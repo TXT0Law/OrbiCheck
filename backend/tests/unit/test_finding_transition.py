@@ -88,6 +88,32 @@ def test_new_high_risk_requires_prior_successful_absence() -> None:
 
     assert [(item.rule_id, item.kind) for item in transitions] == [(RULE_ID, "new")]
     assert transitions[0].scan_id == current.id
+    assert transitions[0].dedup_key == (
+        clean.id,
+        clean.completed_at,
+        RULE_ID,
+        FINDING_RULESET_VERSION,
+    )
+
+
+@pytest.mark.unit
+def test_dedup_key_collapses_concurrent_findings_but_changes_after_baseline_rescan() -> None:
+    clean = _scan(1, modules={"ssl": {}})
+    first_current = _scan(2, modules={"ssl": {}}, findings=[(RULE_ID, "high", ["ssl"])])
+    concurrent_current = _scan(3, modules={"ssl": {}}, findings=[(RULE_ID, "high", ["ssl"])])
+    first = _classify(first_current, [clean])[0]
+    concurrent = _classify(concurrent_current, [clean])[0]
+
+    assert first.scan_id != concurrent.scan_id
+    assert first.dedup_key == concurrent.dedup_key
+
+    rescanned_clean = _scan(4, modules={"ssl": {}})
+    rescanned_clean.id = clean.id
+    later_current = _scan(5, modules={"ssl": {}}, findings=[(RULE_ID, "high", ["ssl"])])
+    later = _classify(later_current, [rescanned_clean])[0]
+
+    assert later.baseline_scan_id == first.baseline_scan_id
+    assert later.dedup_key != first.dedup_key
 
 
 @pytest.mark.unit

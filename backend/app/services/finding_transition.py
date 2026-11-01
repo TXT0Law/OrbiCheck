@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import and_, or_, select
@@ -22,6 +23,23 @@ class HighRiskTransition:
     scan_id: uuid.UUID
     rule_id: str
     kind: Literal["new", "regressed"]
+    ruleset_version: int
+    baseline_scan_id: uuid.UUID
+    baseline_completed_at: datetime
+
+    @property
+    def dedup_key(self) -> tuple[uuid.UUID, datetime, str, int]:
+        """Identify one risk episode across concurrent scans and retries.
+
+        A rescan reuses the scan ID, so the baseline completion time must be
+        included. The globally unique baseline scan ID fixes owner and site.
+        """
+        return (
+            self.baseline_scan_id,
+            self.baseline_completed_at,
+            self.rule_id,
+            self.ruleset_version,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,11 +185,16 @@ def classify_high_risk_transitions(
             )
             if not had_earlier_risk and not history.complete:
                 break
+            if earlier.completed_at is None:
+                continue
             transitions.append(
                 HighRiskTransition(
                     scan_id=current.id,
                     rule_id=finding.rule_id,
                     kind="regressed" if had_earlier_risk else "new",
+                    ruleset_version=current.finding_ruleset_version,
+                    baseline_scan_id=earlier.id,
+                    baseline_completed_at=earlier.completed_at,
                 )
             )
             break
