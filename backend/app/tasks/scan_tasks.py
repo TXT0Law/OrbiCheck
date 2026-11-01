@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+import structlog
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.pool import NullPool
@@ -13,7 +14,10 @@ from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.redis import get_redis_sync
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
-from app.services.finding_observation import persist_finding_observations
+from app.services.finding_observation import (
+    backfill_finding_observations_page,
+    persist_finding_observations,
+)
 from app.services.security_analyzer import (
     compute_security_score_v2,
     resolve_security_score_for_detail,
@@ -37,6 +41,7 @@ SECONDS_TO_MILLISECONDS = 1000
 RETRY_BUDGET_EXHAUSTED_MESSAGE = "Batch recovery time budget exhausted"
 
 logger = logging.getLogger(__name__)
+backfill_logger = structlog.get_logger(__name__)
 sync_engine = None
 
 
@@ -67,6 +72,23 @@ def _is_scan_aborted(db: Session, scan_id: str, redis) -> bool:
 
 def _get_sync_session() -> Session:
     return Session(_get_sync_engine())
+
+
+@celery_app.task(name="app.tasks.scan_tasks.backfill_scan_finding_observations")
+def backfill_scan_finding_observations() -> dict[str, int]:
+    """Fill one bounded page; invoke again until processedScans is zero."""
+    with _get_sync_session() as db:
+        page = backfill_finding_observations_page(db)
+        db.commit()
+    backfill_logger.info(
+        "scan_finding_backfill_page",
+        processed_scans=page.processed_scans,
+        inserted_observations=page.inserted_observations,
+    )
+    return {
+        "processedScans": page.processed_scans,
+        "insertedObservations": page.inserted_observations,
+    }
 
 
 def _coerce_uuid_option(value: object) -> uuid.UUID | None:

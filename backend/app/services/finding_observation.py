@@ -16,6 +16,9 @@ from app.services.finding_identity import finding_evidence_modules, finding_rule
 from app.services.security_analyzer import extract_key_findings
 from app.services.transformers import _is_skipped
 
+SCAN_FINDING_BACKFILL_BATCH_SIZE = 25
+SCAN_FINDING_BACKFILL_MAX_BATCH_SIZE = 100
+
 
 @dataclass(frozen=True, slots=True)
 class FindingObservationCandidate:
@@ -33,6 +36,12 @@ class FindingObservationCandidate:
     @property
     def idempotency_key(self) -> tuple[uuid.UUID, str]:
         return self.scan_id, self.rule_id
+
+
+@dataclass(frozen=True, slots=True)
+class FindingBackfillPage:
+    processed_scans: int
+    inserted_observations: int
 
 
 def build_finding_observations(scan: Scan) -> list[FindingObservationCandidate]:
@@ -118,6 +127,31 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
         .values(finding_observations_projected_at=datetime.now(timezone.utc))
     )
     return inserted
+
+
+def backfill_finding_observations_page(
+    db: Session, limit: int = SCAN_FINDING_BACKFILL_BATCH_SIZE
+) -> FindingBackfillPage:
+    """Project one bounded page of legacy completed scans; safe to repeat."""
+    if not 1 <= limit <= SCAN_FINDING_BACKFILL_MAX_BATCH_SIZE:
+        raise ValueError("Backfill limit is outside the allowed range")
+    scan_ids = db.execute(
+        select(Scan.id)
+        .where(
+            Scan.status == ScanStatus.COMPLETED,
+            Scan.completed_at.is_not(None),
+            Scan.finding_observations_projected_at.is_(None),
+        )
+        .order_by(Scan.id)
+        .limit(limit)
+    ).scalars().all()
+    inserted = 0
+    for scan_id in scan_ids:
+        inserted += persist_finding_observations(db, scan_id)
+    return FindingBackfillPage(
+        processed_scans=len(scan_ids),
+        inserted_observations=inserted,
+    )
 
 
 async def refresh_finding_observations_after_retry(
