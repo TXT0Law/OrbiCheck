@@ -14,6 +14,7 @@ from sqlalchemy.sql.dml import Insert, Update
 
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult, ScanStatus
 from app.models.scan_risk_notification_event import (
+    RISK_EVENT_CANCELLED,
     RISK_EVENT_PENDING,
     RISK_EVENT_SENT,
     ScanRiskNotificationEvent,
@@ -101,6 +102,110 @@ def _evidence_scan(*, risk: bool, completed_at: datetime = COMPLETED_AT) -> Scan
         else []
     )
     return scan
+
+
+def _pending_event(scan: Scan, baseline: Scan) -> ScanRiskNotificationEvent:
+    return ScanRiskNotificationEvent(
+        id=uuid4(),
+        scan_id=scan.id,
+        scan_completed_at=scan.completed_at,
+        baseline_scan_id=baseline.id,
+        baseline_completed_at=baseline.completed_at,
+        rule_id=RULE_ID,
+        ruleset_version=FINDING_RULESET_VERSION,
+        kind="new",
+        status=RISK_EVENT_PENDING,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_revalidation_locks_scan_before_event_and_keeps_live_candidate(monkeypatch) -> None:
+    baseline = _evidence_scan(risk=False)
+    scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    event = _pending_event(scan, baseline)
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: scan.id),
+                SimpleNamespace(scalar_one_or_none=lambda: scan),
+                SimpleNamespace(scalar_one_or_none=lambda: event),
+            ]
+        )
+    )
+    history = AsyncMock(return_value=RiskHistoryPage(scans=[baseline], complete=True))
+    monkeypatch.setattr(finding_notification_event, "load_recent_risk_history", history)
+
+    assert await finding_notification_event.revalidate_pending_risk_event_in_transaction(
+        db, event.id
+    )
+    queries = [call.args[0] for call in db.execute.await_args_list]
+    assert len(queries) == 3
+    sql = [str(query.compile(dialect=postgresql.dialect())) for query in queries]
+    assert "FOR UPDATE" not in sql[0]
+    assert "FOR UPDATE OF scans" in sql[1]
+    assert "FOR UPDATE OF scan_risk_notification_events" in sql[2]
+    assert queries[1]._execution_options["populate_existing"]
+    assert queries[2]._execution_options["populate_existing"]
+    assert event.status == RISK_EVENT_PENDING
+    history.assert_awaited_once_with(db, scan)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_revalidation_cancels_stale_pending_event_without_committing(monkeypatch) -> None:
+    baseline = _evidence_scan(risk=False)
+    scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    event = _pending_event(scan, baseline)
+    scan.completed_at += timedelta(minutes=1)
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: scan.id),
+                SimpleNamespace(scalar_one_or_none=lambda: scan),
+                SimpleNamespace(scalar_one_or_none=lambda: event),
+            ]
+        ),
+        commit=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        finding_notification_event,
+        "load_recent_risk_history",
+        AsyncMock(return_value=RiskHistoryPage(scans=[baseline], complete=True)),
+    )
+
+    assert not await finding_notification_event.revalidate_pending_risk_event_in_transaction(
+        db, event.id
+    )
+    assert event.status == RISK_EVENT_CANCELLED
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_revalidation_does_not_cancel_event_requeued_for_another_scan(monkeypatch) -> None:
+    baseline = _evidence_scan(risk=False)
+    scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    event = _pending_event(scan, baseline)
+    old_source_id = event.scan_id
+    event.scan_id = uuid4()
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: old_source_id),
+                SimpleNamespace(scalar_one_or_none=lambda: scan),
+                SimpleNamespace(scalar_one_or_none=lambda: event),
+            ]
+        )
+    )
+    history = AsyncMock()
+    monkeypatch.setattr(finding_notification_event, "load_recent_risk_history", history)
+
+    assert not await finding_notification_event.revalidate_pending_risk_event_in_transaction(
+        db, event.id
+    )
+    assert event.status == RISK_EVENT_PENDING
+    history.assert_not_awaited()
 
 
 @pytest.mark.unit

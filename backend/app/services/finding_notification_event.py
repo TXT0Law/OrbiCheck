@@ -50,6 +50,48 @@ async def list_pending_risk_event_ids(
     return list((await db.execute(query)).scalars().all())
 
 
+async def revalidate_pending_risk_event_in_transaction(
+    db: AsyncSession, event_id: uuid.UUID
+) -> bool:
+    """Lock the source scan before its event and cancel stale pending evidence.
+
+    The unlocked source lookup is only a hint: an episode may have been
+    requeued for another scan. Recheck the source after locking the event and
+    leave that event untouched if it changed. The caller owns the transaction;
+    a true result is not a delivery claim or permission to send after commit.
+    """
+    source_id = (
+        await db.execute(
+            select(ScanRiskNotificationEvent.scan_id).where(
+                ScanRiskNotificationEvent.id == event_id,
+                ScanRiskNotificationEvent.status == RISK_EVENT_PENDING,
+            )
+        )
+    ).scalar_one_or_none()
+    if source_id is None:
+        return False
+
+    scan = (await db.execute(_scan_query(source_id))).scalar_one_or_none()
+    if scan is None:
+        return False
+    event = (
+        await db.execute(
+            select(ScanRiskNotificationEvent)
+            .where(ScanRiskNotificationEvent.id == event_id)
+            .execution_options(populate_existing=True)
+            .with_for_update(of=ScanRiskNotificationEvent)
+        )
+    ).scalar_one_or_none()
+    if event is None or event.status != RISK_EVENT_PENDING or event.scan_id != scan.id:
+        return False
+
+    history = await load_recent_risk_history(db, scan)
+    if not risk_event_is_dispatchable(event, scan, history):
+        event.status = RISK_EVENT_CANCELLED
+        return False
+    return True
+
+
 def risk_event_is_dispatchable(
     event: ScanRiskNotificationEvent, scan: Scan, history: RiskHistoryPage
 ) -> bool:
