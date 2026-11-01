@@ -6,7 +6,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from app.models.scan import ModuleStatus, Scan, ScanStatus
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session, selectinload
+
+from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanStatus
 from app.services.finding_identity import finding_evidence_modules, finding_rule_identity
 from app.services.security_analyzer import extract_key_findings
 
@@ -67,3 +71,39 @@ def build_finding_observations(scan: Scan) -> list[FindingObservationCandidate]:
             )
         )
     return observations
+
+
+def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
+    """Insert the completed scan's findings in the caller's transaction.
+
+    A retry leaves existing observations intact. The database uniqueness
+    constraint resolves concurrent retries without a read-before-write race.
+    """
+    scan = db.execute(
+        select(Scan)
+        .where(Scan.id == scan_id)
+        .options(selectinload(Scan.module_results))
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+    candidates = build_finding_observations(scan)
+    if not candidates:
+        return 0
+
+    rows = [
+        {
+            "id": uuid.uuid4(),
+            "scan_id": candidate.scan_id,
+            "rule_id": candidate.rule_id,
+            "ruleset_version": candidate.ruleset_version,
+            "severity": candidate.severity,
+            "title": candidate.title,
+            "description": candidate.description,
+            "evidence_modules": list(candidate.evidence_modules),
+            "observed_at": candidate.observed_at,
+        }
+        for candidate in candidates
+    ]
+    statement = insert(ScanFindingObservation).values(rows).on_conflict_do_nothing(
+        constraint="uq_scan_finding_observation_scan_rule"
+    )
+    return db.execute(statement).rowcount

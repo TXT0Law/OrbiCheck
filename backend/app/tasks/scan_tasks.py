@@ -13,6 +13,7 @@ from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.redis import get_redis_sync
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
+from app.services.finding_observation import persist_finding_observations
 from app.services.security_analyzer import (
     compute_security_score_v2,
     resolve_security_score_for_detail,
@@ -558,6 +559,8 @@ def execute_scan(
                     security_score=security_score,
                 )
             )
+            if final_status == ScanStatus.COMPLETED:
+                persist_finding_observations(db, uuid.UUID(scan_id))
             if target_failure_count >= SCAN_DEGRADED_TARGET_FAILURE_THRESHOLD:
                 record_event_sync(
                     db,

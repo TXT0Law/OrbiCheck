@@ -7,9 +7,14 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql.dml import Insert
 
 from app.models.scan import ModuleStatus, ScanStatus
-from app.services.finding_observation import build_finding_observations
+from app.services.finding_observation import (
+    build_finding_observations,
+    persist_finding_observations,
+)
 
 
 def _scan(
@@ -81,3 +86,53 @@ def test_projection_rejects_completed_scan_without_completion_time() -> None:
 
     with pytest.raises(ValueError, match="completed_at"):
         build_finding_observations(scan)
+
+
+@pytest.mark.unit
+def test_persistence_uses_scan_rule_conflict_key_and_skips_failed_evidence() -> None:
+    scan = _scan(
+        _module("ssl", {"bits": 2048, "valid_to": "Jan 1 2020 GMT"}),
+        _module("headers", None, ModuleStatus.FAILED),
+    )
+
+    class _Session:
+        def __init__(self) -> None:
+            self.saved_keys: set[tuple[object, str]] = set()
+            self.insert_sql: str | None = None
+            self.rows: list[dict] = []
+
+        def execute(self, statement: object) -> SimpleNamespace:
+            if not isinstance(statement, Insert):
+                return SimpleNamespace(scalar_one=lambda: scan)
+            self.insert_sql = str(statement.compile(dialect=postgresql.dialect()))
+            rows = statement._multi_values[0]
+            inserted = 0
+            for raw_row in rows:
+                row = {getattr(key, "key", key): value for key, value in raw_row.items()}
+                key = (row["scan_id"], row["rule_id"])
+                if key not in self.saved_keys:
+                    self.saved_keys.add(key)
+                    self.rows.append(row)
+                    inserted += 1
+            return SimpleNamespace(rowcount=inserted)
+
+    session = _Session()
+    assert persist_finding_observations(session, scan.id) == 1
+    assert persist_finding_observations(session, scan.id) == 0
+    assert len(session.rows) == 1
+    assert session.rows[0]["rule_id"] == "ssl.certificate_expiry"
+    assert session.rows[0]["evidence_modules"] == ["ssl"]
+    assert session.rows[0]["observed_at"] == scan.completed_at
+    assert "ON CONFLICT ON CONSTRAINT uq_scan_finding_observation_scan_rule DO NOTHING" in session.insert_sql
+
+
+@pytest.mark.unit
+def test_persistence_does_not_write_noncompleted_scan() -> None:
+    scan = _scan(_module("ssl", {"bits": 2048}), status=ScanStatus.FAILED)
+
+    class _Session:
+        def execute(self, statement: object) -> SimpleNamespace:
+            assert not isinstance(statement, Insert)
+            return SimpleNamespace(scalar_one=lambda: scan)
+
+    assert persist_finding_observations(_Session(), scan.id) == 0

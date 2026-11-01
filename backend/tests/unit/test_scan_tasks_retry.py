@@ -387,3 +387,40 @@ def test_batch_recovery_budget_marks_unattempted_modules_timed_out(
         for key, value in update_values.items()
         if key.endswith(".completed_modules")
     )
+
+
+@pytest.mark.unit
+def test_completed_scan_persists_findings_before_final_commit(
+    monkeypatch: pytest.MonkeyPatch, patched_environment, stub_scan
+) -> None:
+    modules = ["status"]
+    monkeypatch.setattr(
+        scan_tasks,
+        "MODULE_BATCHES",
+        {"quick": modules, "medium": [], "heavy": []},
+    )
+    monkeypatch.setattr(scan_tasks, "ALL_MODULES", modules)
+    monkeypatch.setattr(
+        scan_tasks,
+        "call_scan_batch_sync",
+        lambda *_args, **_kwargs: {
+            "results": {
+                "status": {"success": True, "data": {"ok": True}, "durationMs": 1}
+            }
+        },
+    )
+    observations: list[tuple[Any, uuid.UUID, int]] = []
+
+    def _persist(session: Any, scan_id: uuid.UUID) -> int:
+        observations.append((session, scan_id, session.commits))
+        return 1
+
+    monkeypatch.setattr(scan_tasks, "persist_finding_observations", _persist)
+    scan_tasks.execute_scan.request.id = "task-observations-1"
+
+    result = scan_tasks.execute_scan.run(str(stub_scan.id))
+
+    assert result["status"] == ScanStatus.COMPLETED.value
+    assert observations == [
+        (patched_environment["session"], stub_scan.id, patched_environment["session"].commits - 1)
+    ]
