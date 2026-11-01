@@ -164,6 +164,34 @@ def test_compute_scan_diff_does_not_call_failed_module_a_fix() -> None:
     diff = compute_scan_diff(base, compare)
 
     assert diff["removedFindings"] == []
+    assert diff["severityDelta"]["delta"] == {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+    }
+    assert diff["breakdownDelta"]["delta"] is None
+
+
+@pytest.mark.unit
+def test_compute_scan_diff_scores_only_shared_successful_modules() -> None:
+    healthy_ssl = _ssl_module(days_remaining=200)
+    base = _scan(
+        module_results=[healthy_ssl, _module("hsts", raw={"compatible": False})]
+    )
+    compare = _scan(
+        module_results=[
+            healthy_ssl,
+            _module("hsts", raw=None, status=ModuleStatus.FAILED),
+        ]
+    )
+
+    diff = compute_scan_diff(base, compare)
+
+    assert diff["severityDelta"]["base"] == diff["severityDelta"]["compare"]
+    assert diff["breakdownDelta"]["base"] == diff["breakdownDelta"]["compare"]
+    assert all(value == 0 for value in diff["severityDelta"]["delta"].values())
+    assert all(value == 0 for value in diff["breakdownDelta"]["delta"].values())
 
 
 @pytest.mark.unit

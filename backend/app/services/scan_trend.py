@@ -280,7 +280,8 @@ def compute_scan_diff(
     zero added / removed entries. Only modules with successful results on
     both sides can prove a finding was added or removed. The display limit
     applies after comparison, so a finding falling out of the top list is
-    not mistaken for a fix.
+    not mistaken for a fix. Severity and category deltas use the same
+    shared-module subset to avoid treating a failed probe as an improvement.
     """
     base_raw = _build_all_raw(base_scan.module_results)
     compare_raw = _build_all_raw(compare_scan.module_results)
@@ -308,8 +309,8 @@ def compute_scan_diff(
         _to_finding_delta(f) for f in base_findings if _finding_key(f) not in compare_keys
     ][:key_findings_limit]
 
-    base_severity = _normalize_severity(compute_severity_counts(base_raw))
-    compare_severity = _normalize_severity(compute_severity_counts(compare_raw))
+    base_severity = _normalize_severity(compute_severity_counts(base_shared_raw))
+    compare_severity = _normalize_severity(compute_severity_counts(compare_shared_raw))
     severity_delta: SeverityDelta = {
         "base": base_severity,
         "compare": compare_severity,
@@ -318,10 +319,8 @@ def compute_scan_diff(
         },
     }
 
-    base_breakdown = compute_security_score_v2(base_raw, base_scan.module_results)
-    compare_breakdown = compute_security_score_v2(
-        compare_raw, compare_scan.module_results
-    )
+    base_breakdown = compute_security_score_v2(base_shared_raw)
+    compare_breakdown = compute_security_score_v2(compare_shared_raw)
     base_cat = (
         _category_scores_camel(base_breakdown.category_scores)
         if base_breakdown is not None
