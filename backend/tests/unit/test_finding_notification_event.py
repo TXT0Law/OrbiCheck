@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
@@ -18,12 +19,56 @@ from app.models.scan_risk_notification_event import (
     ScanRiskNotificationEvent,
 )
 from app.services import finding_notification_event
+from app.services.finding_notification_event import RISK_EVENT_DISPATCH_MAX_BATCH_SIZE
 from app.services.finding_identity import FINDING_RULESET_VERSION
 from app.services.finding_transition import HighRiskTransition, RiskHistoryPage
 
 COMPLETED_AT = datetime(2026, 11, 1, tzinfo=timezone.utc)
 RULE_ID = "ssl.certificate_expiry"
 NEXT_COMPLETION = COMPLETED_AT + timedelta(minutes=1)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_pending_event_ids_are_bounded_stably_ordered_and_unlocked() -> None:
+    event_ids = [uuid4(), uuid4()]
+
+    class _Result:
+        def scalars(self) -> _Result:
+            return self
+
+        def all(self) -> list[UUID]:
+            return event_ids
+
+    class _Session:
+        def __init__(self) -> None:
+            self.query: Any = None
+
+        async def execute(self, query: Any) -> _Result:
+            self.query = query
+            return _Result()
+
+    db = _Session()
+    assert await finding_notification_event.list_pending_risk_event_ids(db) == event_ids
+    query = db.query
+    assert query is not None
+    sql = str(query)
+    assert "scan_risk_notification_events.status =" in sql
+    assert "ORDER BY scan_risk_notification_events.created_at, scan_risk_notification_events.id" in sql
+    assert "FOR UPDATE" not in sql
+    assert finding_notification_event.RISK_EVENT_DISPATCH_BATCH_SIZE in query.compile().params.values()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, RISK_EVENT_DISPATCH_MAX_BATCH_SIZE + 1])
+async def test_pending_event_id_limit_rejects_unbounded_requests(limit: int) -> None:
+    class _Session:
+        async def execute(self, _query: Any) -> None:
+            raise AssertionError("Invalid limit should not reach the database")
+
+    with pytest.raises(ValueError, match="limit"):
+        await finding_notification_event.list_pending_risk_event_ids(_Session(), limit)
 
 
 def _evidence_scan(*, risk: bool, completed_at: datetime = COMPLETED_AT) -> Scan:

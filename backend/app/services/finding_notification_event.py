@@ -24,6 +24,31 @@ from app.services.finding_transition import (
     load_recent_risk_history_sync,
 )
 
+RISK_EVENT_DISPATCH_BATCH_SIZE = 50
+RISK_EVENT_DISPATCH_MAX_BATCH_SIZE = 100
+
+
+async def list_pending_risk_event_ids(
+    db: AsyncSession, limit: int = RISK_EVENT_DISPATCH_BATCH_SIZE
+) -> list[uuid.UUID]:
+    """Read a bounded, stable candidate page without holding row locks.
+
+    A later worker must lock the source scan before the event and revalidate
+    its evidence. This ID list is never authority to send a notification.
+    """
+    if not 1 <= limit <= RISK_EVENT_DISPATCH_MAX_BATCH_SIZE:
+        raise ValueError("Risk event dispatch limit is outside the allowed range")
+    query = (
+        select(ScanRiskNotificationEvent.id)
+        .where(ScanRiskNotificationEvent.status == RISK_EVENT_PENDING)
+        .order_by(
+            ScanRiskNotificationEvent.created_at,
+            ScanRiskNotificationEvent.id,
+        )
+        .limit(limit)
+    )
+    return list((await db.execute(query)).scalars().all())
+
 
 def risk_event_is_dispatchable(
     event: ScanRiskNotificationEvent, scan: Scan, history: RiskHistoryPage
