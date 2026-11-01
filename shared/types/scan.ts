@@ -16,6 +16,23 @@ export interface SeverityCounts {
 
 export type ScanSeverity = "critical" | "high" | "medium" | "low" | "info";
 
+export interface ScanFindingObservation {
+  ruleId: string;
+  rulesetVersion: number;
+  severity: ScanSeverity;
+  title: string;
+  description: string;
+  evidenceModules: string[];
+  observedAt: string;
+}
+
+export interface ScanFindingList {
+  scanId: string;
+  projectionStatus: "ready" | "pending" | "failed" | "unavailable";
+  projectedAt: string | null;
+  observations: ScanFindingObservation[];
+}
+
 export interface CategorySummary {
   category: "security" | "network" | "content";
   label: string;

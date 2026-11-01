@@ -16,11 +16,59 @@ vi.mock("@/lib/api/client", async (importOriginal) => {
   };
 });
 
-import { cancelScan, createScan, deleteAllScans, deleteScan, getScan, getScanDetail, listScans } from "@/lib/api/scans";
+import { cancelScan, createScan, deleteAllScans, deleteScan, getScan, getScanDetail, getScanFindings, listScans } from "@/lib/api/scans";
 
 describe("scan API wrappers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("validates evidence-backed scan findings", async () => {
+    const scanId = "4e8ee7cb-3936-4892-89bf-4bc18c5053f9";
+    apiClientMock.get.mockResolvedValueOnce({
+      data: {
+        scanId,
+        projectionStatus: "ready",
+        projectedAt: "2026-11-01T00:00:00Z",
+        observations: [{
+          ruleId: "ssl.certificate_expiry",
+          rulesetVersion: 1,
+          severity: "high",
+          title: "Expired certificate",
+          description: "Certificate expired",
+          evidenceModules: ["ssl"],
+          observedAt: "2026-11-01T00:00:00Z",
+        }],
+      },
+    });
+
+    const result = await getScanFindings(scanId);
+
+    expect(apiClientMock.get).toHaveBeenCalledWith(`/scans/${scanId}/findings`);
+    expect(result.observations[0].ruleId).toBe("ssl.certificate_expiry");
+    expect(result.observations[0].evidenceModules).toEqual(["ssl"]);
+  });
+
+  it("rejects malformed scan findings before they reach the UI", async () => {
+    apiClientMock.get.mockResolvedValueOnce({
+      data: { scanId: "invalid", projectionStatus: "ready", projectedAt: null, observations: [] },
+    });
+
+    await expect(getScanFindings("invalid")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE_SHAPE",
+    });
+  });
+
+  it("preserves pending projection instead of treating empty observations as clear", async () => {
+    const scanId = "4e8ee7cb-3936-4892-89bf-4bc18c5053f9";
+    apiClientMock.get.mockResolvedValueOnce({
+      data: { scanId, projectionStatus: "pending", projectedAt: null, observations: [] },
+    });
+
+    const result = await getScanFindings(scanId);
+
+    expect(result.projectionStatus).toBe("pending");
+    expect(result.observations).toEqual([]);
   });
 
   it("normalizes createScan snake_case payload", async () => {

@@ -63,6 +63,21 @@ export const ScanListSchema = z.object({
   total: z.number(),
 });
 
+export const ScanFindingListSchema = z.object({
+  scanId: z.string().uuid(),
+  projectionStatus: z.enum(["ready", "pending", "failed", "unavailable"]),
+  projectedAt: z.string().nullable(),
+  observations: z.array(z.object({
+    ruleId: z.string().min(1),
+    rulesetVersion: z.number().int().positive(),
+    severity: z.enum(["critical", "high", "medium", "low", "info"]),
+    title: z.string(),
+    description: z.string(),
+    evidenceModules: z.array(z.string()),
+    observedAt: z.string(),
+  })),
+});
+
 export const ScanProgressEventSchema = z.object({
   progress: z.number(),
   phase: z.string(),

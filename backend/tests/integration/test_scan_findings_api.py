@@ -53,6 +53,33 @@ async def test_scan_findings_endpoint_returns_owner_scoped_evidence(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize("projection_status", ["pending", "failed", "unavailable", "ready"])
+async def test_scan_findings_status_contract_distinguishes_empty_ready_scan(
+    async_client, monkeypatch: pytest.MonkeyPatch, projection_status: str
+) -> None:
+    scan_id = uuid4()
+    projected_at = datetime.now(timezone.utc) if projection_status == "ready" else None
+
+    async def _list_findings(_db, _scan_id, _user_id):
+        return ScanFindingList(
+            scan_id=scan_id,
+            projection_status=projection_status,
+            projected_at=projected_at,
+            observations=[],
+        )
+
+    monkeypatch.setattr(finding_observation, "list_scan_findings", _list_findings)
+    response = await async_client.get(f"/api/v1/scans/{scan_id}/findings")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["projectionStatus"] == projection_status
+    assert data["observations"] == []
+    assert (data["projectedAt"] is not None) == (projection_status == "ready")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_scan_findings_endpoint_rejects_invalid_scan_id(async_client) -> None:
     response = await async_client.get("/api/v1/scans/not-a-uuid/findings")
 

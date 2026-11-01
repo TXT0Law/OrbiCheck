@@ -3,6 +3,7 @@ import type {
   ModuleRetryResponse,
   ScanDetail,
   ScanDiffResponse,
+  ScanFindingList,
   ScanTimelineRange,
   ScanTimelineResponse,
 } from "@/shared/types/scan";
@@ -25,6 +26,7 @@ type ScanSchemaName =
   | "ModuleRetryResponseSchema"
   | "ScanDetailResponseSchema"
   | "ScanDiffResponseSchema"
+  | "ScanFindingListSchema"
   | "ScanFullExportSchema"
   | "ScanListSchema"
   | "ScanResponseSchema"
@@ -161,6 +163,15 @@ export async function getScanDetail(scanId: string): Promise<ScanDetail> {
     "ScanDetailResponseSchema",
     data,
     "scan detail",
+  );
+}
+
+export async function getScanFindings(scanId: string): Promise<ScanFindingList> {
+  const { data } = await apiClient.get<unknown>(`/scans/${encodeURIComponent(scanId)}/findings`);
+  return validateScanPayload<ScanFindingList>(
+    "ScanFindingListSchema",
+    data,
+    "scan findings",
   );
 }
 
