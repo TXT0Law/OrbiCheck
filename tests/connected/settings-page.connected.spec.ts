@@ -29,4 +29,46 @@ test.describe("Connected settings page", () => {
       timeout: 30_000,
     });
   });
+
+  test("mobile section picker keeps every settings area reachable", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await navigateTo(page, "/dashboard/settings");
+
+    const sectionPicker = page.getByRole("combobox", { name: "Settings" });
+    await expect(sectionPicker).toBeVisible();
+    await expect(sectionPicker.locator("option")).toHaveCount(7);
+    await sectionPicker.selectOption("notifications");
+    await expect(page.getByText("Webhook URL")).toBeVisible();
+
+    const channelTabs = page.getByRole("group", { name: "Notification channels" });
+    await expect(channelTabs).toHaveCSS("display", "grid");
+    const tabsBox = await channelTabs.boundingBox();
+    expect(tabsBox).not.toBeNull();
+    for (const tab of await channelTabs.getByRole("button").all()) {
+      const tabBox = await tab.boundingBox();
+      expect(tabBox).not.toBeNull();
+      expect((tabBox?.x ?? 0) + (tabBox?.width ?? 0)).toBeLessThanOrEqual(
+        (tabsBox?.x ?? 0) + (tabsBox?.width ?? 0)
+      );
+      expect((tabBox?.y ?? 0) + (tabBox?.height ?? 0)).toBeLessThanOrEqual(
+        (tabsBox?.y ?? 0) + (tabsBox?.height ?? 0)
+      );
+    }
+
+    const hasHorizontalOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth
+    );
+    expect(hasHorizontalOverflow).toBe(false);
+    for (const width of [768, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width < 1024) {
+        await expect(sectionPicker).toBeVisible();
+      } else {
+        await expect(page.getByRole("navigation", { name: "Settings" })).toBeVisible();
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+      ).toBe(false);
+    }
+  });
 });

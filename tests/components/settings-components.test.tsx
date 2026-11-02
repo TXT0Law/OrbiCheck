@@ -37,6 +37,17 @@ describe("settings components", () => {
     expect(onTabChange).toHaveBeenCalledWith("api-keys");
   });
 
+  it("changes tabs through the compact settings picker", () => {
+    const onTabChange = vi.fn();
+
+    render(<SettingsNav activeTab="appearance" onTabChange={onTabChange} />);
+
+    const picker = screen.getByRole("combobox", { name: "Settings" });
+    expect(picker.querySelectorAll("option")).toHaveLength(7);
+    fireEvent.change(picker, { target: { value: "notifications" } });
+    expect(onTabChange).toHaveBeenCalledWith("notifications");
+  });
+
   it("loads and updates appearance preferences", () => {
     localStorage.setItem(APPEARANCE_KEYS.fontSize, "large");
     localStorage.setItem(APPEARANCE_KEYS.language, "zh");
