@@ -18,6 +18,7 @@ from app.services.finding_notification_event import (
     ClaimedRiskSendSnapshot,
 )
 from app.services.finding_notification_payload import ScanRiskNotificationPayload
+from app.services.notification_channels import scan_risk_webhook
 from app.services.notification_channels.scan_risk_webhook import ScanRiskWebhookOutcome
 from app.tasks import notification_tasks
 
@@ -141,6 +142,64 @@ async def test_single_risk_delivery_records_only_confirmed_send_without_network_
     else:
         cancel.assert_awaited_once()
         mark_sent.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_risk_delivery_connects_opt_in_to_safe_webhook_and_sent_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise the worker and real adapter together without external network I/O."""
+    event_id, token = uuid4(), uuid4()
+    tracker = _SessionTracker()
+    _patch_preflight(
+        monkeypatch,
+        tracker,
+        settings={
+            "scanRiskEventsEnabled": True,
+            "webhookEnabled": True,
+            "webhookUrl": "https://hooks.example.com/risk",
+        },
+    )
+    snapshot = _snapshot(event_id)
+    mark_sent = AsyncMock(return_value=True)
+    cancel = AsyncMock()
+    requests: list[tuple[str, dict[str, Any], dict[str, str]]] = []
+
+    async def capture_post(
+        target: str, body: dict[str, Any], *, extra_headers: dict[str, str]
+    ) -> None:
+        assert tracker.open_sessions == tracker.open_transactions == 0
+        requests.append((target, body, extra_headers))
+
+    monkeypatch.setattr(
+        notification_tasks, "claim_pending_risk_event_in_transaction", AsyncMock(return_value=token)
+    )
+    monkeypatch.setattr(
+        notification_tasks,
+        "load_claimed_risk_send_snapshot",
+        AsyncMock(return_value=snapshot),
+    )
+    monkeypatch.setattr(notification_tasks, "mark_claimed_risk_event_sent_in_transaction", mark_sent)
+    monkeypatch.setattr(notification_tasks, "cancel_unattempted_risk_event_claim_in_transaction", cancel)
+    monkeypatch.setattr(scan_risk_webhook, "validate_https_url", lambda target: target)
+    monkeypatch.setattr(scan_risk_webhook, "post_json", capture_post)
+
+    outcome = await notification_tasks.deliver_one_scan_risk_event(event_id)
+
+    assert outcome is notification_tasks.ScanRiskDeliveryOutcome.SENT
+    assert len(requests) == 1
+    target, body, headers = requests[0]
+    assert target == "https://hooks.example.com/risk"
+    assert headers == {"Idempotency-Key": str(event_id)}
+    assert body["source"] == "orbicheck-scan-risk"
+    assert body["event"] == "high_risk_new"
+    assert body["data"]["eventId"] == str(event_id)
+    assert body["data"]["ruleId"] == "ssl.certificate_expiry"
+    assert "monitorId" not in body["data"]
+    mark_sent.assert_awaited_once()
+    cancel.assert_not_awaited()
+    assert tracker.open_sessions == tracker.open_transactions == 0
 
 
 @pytest.mark.unit
