@@ -8481,6 +8481,10 @@
             "type": "boolean",
             "title": "Monitoreventsenabled"
           },
+          "scanRiskEventsEnabled": {
+            "type": "boolean",
+            "title": "Scanriskeventsenabled"
+          },
           "emailEnabled": {
             "type": "boolean",
             "title": "Emailenabled"
@@ -8521,6 +8525,7 @@
           "webhookUrl",
           "webhookEnabled",
           "monitorEventsEnabled",
+          "scanRiskEventsEnabled",
           "emailEnabled",
           "emailAddress",
           "emailOnCritical",
@@ -8554,6 +8559,17 @@
             "type": "boolean",
             "title": "Monitoreventsenabled",
             "default": true
+          },
+          "scanRiskEventsEnabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanriskeventsenabled"
           },
           "emailEnabled": {
             "type": "boolean",

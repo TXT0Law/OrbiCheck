@@ -56,6 +56,7 @@ def _build_response(data: dict) -> NotificationSettingsResponse:
         webhookUrl=data.get("webhookUrl"),
         webhookEnabled=bool(data.get("webhookEnabled")),
         monitorEventsEnabled=bool(data.get("monitorEventsEnabled", True)),
+        scanRiskEventsEnabled=data.get("scanRiskEventsEnabled") is True,
         emailEnabled=bool(data.get("emailEnabled")),
         emailAddress=data.get("emailAddress"),
         emailOnCritical=bool(data.get("emailOnCritical", True)),
@@ -90,6 +91,10 @@ async def write_notification_settings(
     channels_payload = {
         cid: cfg.model_dump() for cid, cfg in body.channels.items()
     }
+    scan_risk_enabled = body.scanRiskEventsEnabled
+    if scan_risk_enabled is None:
+        existing = await get_notification_settings(redis, current_user.id)
+        scan_risk_enabled = existing["scanRiskEventsEnabled"]
     saved = await set_notification_settings(
         redis,
         current_user.id,
@@ -97,6 +102,7 @@ async def write_notification_settings(
             "webhookUrl": url_str,
             "webhookEnabled": body.webhookEnabled,
             "monitorEventsEnabled": body.monitorEventsEnabled,
+            "scanRiskEventsEnabled": scan_risk_enabled,
             "emailEnabled": body.emailEnabled,
             "emailAddress": body.emailAddress,
             "emailOnCritical": body.emailOnCritical,

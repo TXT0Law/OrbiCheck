@@ -86,6 +86,7 @@ class NotificationSettingsResponse(BaseModel):
     webhookUrl: str | None
     webhookEnabled: bool
     monitorEventsEnabled: bool
+    scanRiskEventsEnabled: bool
     emailEnabled: bool
     emailAddress: str | None
     emailOnCritical: bool
@@ -98,6 +99,8 @@ class NotificationSettingsUpdate(BaseModel):
     webhookUrl: Annotated[HttpUrl | None, BeforeValidator(_empty_to_none)] = None
     webhookEnabled: bool = False
     monitorEventsEnabled: bool = True
+    # None means an older client omitted this new preference on PUT.
+    scanRiskEventsEnabled: bool | None = Field(default=None, strict=True)
     emailEnabled: bool = False
     emailAddress: Annotated[str | None, BeforeValidator(_empty_to_none)] = None
     emailOnCritical: bool = True

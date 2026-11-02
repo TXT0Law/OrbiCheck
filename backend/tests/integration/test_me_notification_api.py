@@ -15,6 +15,7 @@ async def test_notification_settings_roundtrip(async_client: AsyncClient) -> Non
     assert body0["webhookUrl"] is None
     assert body0["webhookEnabled"] is False
     assert body0["monitorEventsEnabled"] is True
+    assert body0["scanRiskEventsEnabled"] is False
     assert body0["emailEnabled"] is False
     assert body0["emailAddress"] is None
     assert body0["emailOnCritical"] is True
@@ -27,6 +28,7 @@ async def test_notification_settings_roundtrip(async_client: AsyncClient) -> Non
             "webhookUrl": "https://example.com/hook",
             "webhookEnabled": True,
             "monitorEventsEnabled": True,
+            "scanRiskEventsEnabled": True,
             "emailEnabled": True,
             "emailAddress": "alerts@example.com",
             "emailOnCritical": True,
@@ -38,6 +40,7 @@ async def test_notification_settings_roundtrip(async_client: AsyncClient) -> Non
     d1 = r1.json()["data"]
     assert d1["webhookUrl"] == "https://example.com/hook"
     assert d1["webhookEnabled"] is True
+    assert d1["scanRiskEventsEnabled"] is True
     assert d1["emailEnabled"] is True
     assert d1["emailAddress"] == "alerts@example.com"
     assert d1["emailOnWarning"] is False
@@ -47,11 +50,33 @@ async def test_notification_settings_roundtrip(async_client: AsyncClient) -> Non
     d2 = r2.json()["data"]
     assert d2["webhookUrl"] == "https://example.com/hook"
     assert d2["webhookEnabled"] is True
+    assert d2["scanRiskEventsEnabled"] is True
     assert d2["emailEnabled"] is True
     assert d2["emailAddress"] == "alerts@example.com"
     assert d2["emailOnCritical"] is True
     assert d2["emailOnWarning"] is False
     assert d2["emailOnInfo"] is True
+
+    legacy_update = await async_client.put(
+        "/api/v1/me/notification-settings", json={"monitorEventsEnabled": False}
+    )
+    assert legacy_update.status_code == 200
+    assert legacy_update.json()["data"]["scanRiskEventsEnabled"] is True
+
+    disabled = await async_client.put(
+        "/api/v1/me/notification-settings", json={"scanRiskEventsEnabled": False}
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["data"]["scanRiskEventsEnabled"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_scan_risk_opt_in_rejects_non_boolean(async_client: AsyncClient) -> None:
+    response = await async_client.put(
+        "/api/v1/me/notification-settings", json={"scanRiskEventsEnabled": "true"}
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
