@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from redis.exceptions import RedisError
 
@@ -199,6 +200,48 @@ async def test_risk_delivery_connects_opt_in_to_safe_webhook_and_sent_record(
     assert "monitorId" not in body["data"]
     mark_sent.assert_awaited_once()
     cancel.assert_not_awaited()
+    assert tracker.open_sessions == tracker.open_transactions == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_risk_delivery_keeps_claim_after_uncertain_webhook_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out request may have arrived, so the worker must not cancel or mark it sent."""
+    event_id, token = uuid4(), uuid4()
+    tracker = _SessionTracker()
+    _patch_preflight(
+        monkeypatch,
+        tracker,
+        settings={
+            "scanRiskEventsEnabled": True,
+            "webhookEnabled": True,
+            "webhookUrl": "https://hooks.example.com/risk",
+        },
+    )
+    post = AsyncMock(side_effect=httpx.ReadTimeout("response unavailable"))
+    cancel = AsyncMock()
+    mark_sent = AsyncMock()
+    monkeypatch.setattr(
+        notification_tasks, "claim_pending_risk_event_in_transaction", AsyncMock(return_value=token)
+    )
+    monkeypatch.setattr(
+        notification_tasks,
+        "load_claimed_risk_send_snapshot",
+        AsyncMock(return_value=_snapshot(event_id)),
+    )
+    monkeypatch.setattr(notification_tasks, "cancel_unattempted_risk_event_claim_in_transaction", cancel)
+    monkeypatch.setattr(notification_tasks, "mark_claimed_risk_event_sent_in_transaction", mark_sent)
+    monkeypatch.setattr(scan_risk_webhook, "validate_https_url", lambda target: target)
+    monkeypatch.setattr(scan_risk_webhook, "post_json", post)
+
+    outcome = await notification_tasks.deliver_one_scan_risk_event(event_id)
+
+    assert outcome is notification_tasks.ScanRiskDeliveryOutcome.UNKNOWN
+    post.assert_awaited_once()
+    cancel.assert_not_awaited()
+    mark_sent.assert_not_awaited()
     assert tracker.open_sessions == tracker.open_transactions == 0
 
 
