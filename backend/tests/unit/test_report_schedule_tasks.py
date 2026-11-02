@@ -4,6 +4,7 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.models.report import Report, ReportFormat, ReportStatus
@@ -151,6 +152,8 @@ def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
     db = MagicMock()
     db.__enter__.return_value = db
     db.execute.return_value.scalar_one_or_none.side_effect = [run, source]
+    commit_states: list[tuple[ReportScheduleRunStatus, uuid.UUID | None]] = []
+    db.commit.side_effect = lambda: commit_states.append((run.status, run.report_id))
 
     def mark_scan_complete(scan: Scan) -> None:
         scan.status = ScanStatus.COMPLETED
@@ -198,6 +201,10 @@ def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
         else ReportScheduleRunStatus.FAILED
     )
     assert result["status"] == expected_status.value
+    assert commit_states[0] == (ReportScheduleRunStatus.GENERATING, None)
+    claim_query = db.execute.call_args_list[0].args[0]
+    claim_sql = str(claim_query.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE OF report_schedule_runs" in claim_sql
     assert run.status == expected_status
     assert run.error_message == (None if delivery_succeeds else "Delivery failed")
     assert run.scan_id != source.id

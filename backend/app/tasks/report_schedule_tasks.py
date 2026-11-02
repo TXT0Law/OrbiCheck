@@ -101,6 +101,7 @@ def generate_scheduled_report_run(run_id: str) -> dict:
             select(ReportScheduleRun)
             .options(selectinload(ReportScheduleRun.schedule))
             .where(ReportScheduleRun.id == run_uuid)
+            .with_for_update(of=ReportScheduleRun)
         ).scalar_one_or_none()
         if run is None:
             return {"run_id": run_id, "status": "not_found"}
@@ -113,6 +114,9 @@ def generate_scheduled_report_run(run_id: str) -> dict:
             # A redelivered task must not replay an external send. In particular,
             # a failed run may have reached the recipient before delivery failed.
             return {"run_id": run_id, "status": run.status.value}
+        run.status = ReportScheduleRunStatus.GENERATING
+        run.started_at = run.started_at or datetime.now(timezone.utc)
+        db.commit()  # Release the claim lock before scanning or external delivery.
         schedule = run.schedule
         if schedule.scan_id and schedule.rescan_before_report:
             scan = db.execute(
@@ -158,8 +162,6 @@ def generate_scheduled_report_run(run_id: str) -> dict:
                 return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}
 
         now = datetime.now(timezone.utc)
-        run.status = ReportScheduleRunStatus.GENERATING
-        run.started_at = run.started_at or now
         run.error_message = None
         report = Report(
             user_id=schedule.user_id,
