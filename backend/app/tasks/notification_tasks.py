@@ -62,6 +62,8 @@ NOTIFICATION_RETRY_BATCH_SIZE: int = 50
 class ScanRiskDeliveryOutcome(StrEnum):
     NOT_CLAIMED = "not_claimed"
     CANCELLED = "cancelled"
+    DISABLED = "disabled"
+    BLOCKED = "blocked"
     STALE = "stale"
     PREFLIGHT_UNAVAILABLE = "preflight_unavailable"
     UNKNOWN = "unknown"
@@ -114,7 +116,13 @@ async def deliver_one_scan_risk_event(event_id: uuid.UUID) -> ScanRiskDeliveryOu
                 cancelled = await cancel_unattempted_risk_event_claim_in_transaction(
                     db, event_id, claim_token
                 )
-        return ScanRiskDeliveryOutcome.CANCELLED if cancelled else ScanRiskDeliveryOutcome.STALE
+        if not cancelled:
+            return ScanRiskDeliveryOutcome.STALE
+        return (
+            ScanRiskDeliveryOutcome.DISABLED
+            if webhook_outcome is ScanRiskWebhookOutcome.DISABLED
+            else ScanRiskDeliveryOutcome.BLOCKED
+        )
     if webhook_outcome is ScanRiskWebhookOutcome.UNKNOWN:
         return ScanRiskDeliveryOutcome.UNKNOWN
     if webhook_outcome is not ScanRiskWebhookOutcome.CONFIRMED:

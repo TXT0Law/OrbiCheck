@@ -97,8 +97,8 @@ def _patch_preflight(
     [
         (ScanRiskWebhookOutcome.CONFIRMED, "sent"),
         (ScanRiskWebhookOutcome.UNKNOWN, "unknown"),
-        (ScanRiskWebhookOutcome.DISABLED, "cancelled"),
-        (ScanRiskWebhookOutcome.BLOCKED, "cancelled"),
+        (ScanRiskWebhookOutcome.DISABLED, "disabled"),
+        (ScanRiskWebhookOutcome.BLOCKED, "blocked"),
     ],
 )
 async def test_single_risk_delivery_records_only_confirmed_send_without_network_db_locks(
@@ -173,6 +173,37 @@ async def test_single_risk_delivery_leaves_claim_unresolved_when_settings_unavai
     send.assert_not_awaited()
     cancel.assert_not_awaited()
     mark_sent.assert_not_awaited()
+    assert tracker.open_sessions == tracker.open_transactions == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "webhook_result", [ScanRiskWebhookOutcome.DISABLED, ScanRiskWebhookOutcome.BLOCKED]
+)
+async def test_single_risk_delivery_reports_stale_if_unattempted_claim_was_cancelled_elsewhere(
+    monkeypatch: pytest.MonkeyPatch, webhook_result: ScanRiskWebhookOutcome
+) -> None:
+    event_id, token = uuid4(), uuid4()
+    tracker = _SessionTracker()
+    _patch_preflight(monkeypatch, tracker)
+    cancel = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        notification_tasks, "claim_pending_risk_event_in_transaction", AsyncMock(return_value=token)
+    )
+    monkeypatch.setattr(
+        notification_tasks, "load_claimed_risk_send_snapshot",
+        AsyncMock(return_value=_snapshot(event_id)),
+    )
+    monkeypatch.setattr(notification_tasks, "cancel_unattempted_risk_event_claim_in_transaction", cancel)
+    monkeypatch.setattr(
+        notification_tasks, "send_scan_risk_webhook", AsyncMock(return_value=webhook_result)
+    )
+
+    outcome = await notification_tasks.deliver_one_scan_risk_event(event_id)
+
+    assert outcome is notification_tasks.ScanRiskDeliveryOutcome.STALE
+    cancel.assert_awaited_once()
     assert tracker.open_sessions == tracker.open_transactions == 0
 
 
