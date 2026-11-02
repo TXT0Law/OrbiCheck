@@ -205,6 +205,45 @@ async def test_risk_delivery_connects_opt_in_to_safe_webhook_and_sent_record(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_risk_delivery_cancels_unattempted_claim_after_user_opts_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Current preferences can revoke a claimed event before external I/O."""
+    event_id, token = uuid4(), uuid4()
+    tracker = _SessionTracker()
+    _patch_preflight(
+        monkeypatch,
+        tracker,
+        settings={
+            "scanRiskEventsEnabled": False,
+            "webhookEnabled": True,
+            "webhookUrl": "https://hooks.example.com/risk",
+        },
+    )
+    snapshot = AsyncMock(return_value=_snapshot(event_id))
+    cancel = AsyncMock(return_value=True)
+    mark_sent = AsyncMock()
+    post = AsyncMock()
+    monkeypatch.setattr(
+        notification_tasks, "claim_pending_risk_event_in_transaction", AsyncMock(return_value=token)
+    )
+    monkeypatch.setattr(notification_tasks, "load_claimed_risk_send_snapshot", snapshot)
+    monkeypatch.setattr(notification_tasks, "cancel_unattempted_risk_event_claim_in_transaction", cancel)
+    monkeypatch.setattr(notification_tasks, "mark_claimed_risk_event_sent_in_transaction", mark_sent)
+    monkeypatch.setattr(scan_risk_webhook, "post_json", post)
+
+    outcome = await notification_tasks.deliver_one_scan_risk_event(event_id)
+
+    assert outcome is notification_tasks.ScanRiskDeliveryOutcome.DISABLED
+    assert snapshot.await_count == 2
+    cancel.assert_awaited_once_with(tracker, event_id, token)
+    post.assert_not_awaited()
+    mark_sent.assert_not_awaited()
+    assert tracker.open_sessions == tracker.open_transactions == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_risk_delivery_keeps_claim_after_uncertain_webhook_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
