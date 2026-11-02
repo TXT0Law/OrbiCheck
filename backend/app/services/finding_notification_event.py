@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Select, or_, select, tuple_, update
+from sqlalchemy import Select, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.dialects.postgresql.dml import Insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,7 @@ from app.models.scan_risk_notification_event import (
     RISK_EVENT_CANCELLED,
     RISK_EVENT_CLAIMED,
     RISK_EVENT_PENDING,
+    RISK_EVENT_SENT,
     ScanRiskNotificationEvent,
 )
 from app.services.finding_transition import (
@@ -118,6 +119,33 @@ async def claim_pending_risk_event_in_transaction(
     event.claim_token = token
     event.claim_expires_at = claim_time + RISK_EVENT_CLAIM_DURATION
     return token
+
+
+async def mark_claimed_risk_event_sent_in_transaction(
+    db: AsyncSession, event_id: uuid.UUID, claim_token: uuid.UUID
+) -> bool:
+    """Record a confirmed delivery only for the same unexpired live claim.
+
+    Rescan or retry may cancel a claim while external I/O is in flight. Their
+    cancellation clears its token, so this compare-and-set cannot turn that
+    stale event into a sent event. The caller owns the transaction.
+    """
+    result = await db.execute(
+        update(ScanRiskNotificationEvent)
+        .where(
+            ScanRiskNotificationEvent.id == event_id,
+            ScanRiskNotificationEvent.status == RISK_EVENT_CLAIMED,
+            ScanRiskNotificationEvent.claim_token == claim_token,
+            ScanRiskNotificationEvent.claim_expires_at > func.now(),
+        )
+        .values(
+            status=RISK_EVENT_SENT,
+            sent_at=func.now(),
+            claim_token=None,
+            claim_expires_at=None,
+        )
+    )
+    return result.rowcount == 1
 
 
 def risk_event_is_dispatchable(
