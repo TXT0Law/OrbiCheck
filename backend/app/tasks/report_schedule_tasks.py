@@ -104,6 +104,15 @@ def generate_scheduled_report_run(run_id: str) -> dict:
         ).scalar_one_or_none()
         if run is None:
             return {"run_id": run_id, "status": "not_found"}
+        if run.status in (
+            ReportScheduleRunStatus.GENERATING,
+            ReportScheduleRunStatus.DELIVERING,
+            ReportScheduleRunStatus.COMPLETED,
+            ReportScheduleRunStatus.FAILED,
+        ):
+            # A redelivered task must not replay an external send. In particular,
+            # a failed run may have reached the recipient before delivery failed.
+            return {"run_id": run_id, "status": run.status.value}
         schedule = run.schedule
         if schedule.scan_id and schedule.rescan_before_report:
             scan = db.execute(

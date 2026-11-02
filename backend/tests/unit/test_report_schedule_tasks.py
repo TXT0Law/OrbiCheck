@@ -89,6 +89,38 @@ def test_fresh_scan_rejects_empty_module_selection(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.parametrize(
+    "status",
+    [
+        ReportScheduleRunStatus.GENERATING,
+        ReportScheduleRunStatus.DELIVERING,
+        ReportScheduleRunStatus.COMPLETED,
+        ReportScheduleRunStatus.FAILED,
+    ],
+)
+def test_redelivered_report_run_never_replays_delivery(
+    monkeypatch: pytest.MonkeyPatch, status: ReportScheduleRunStatus
+) -> None:
+    run = ReportScheduleRun(id=uuid.uuid4(), status=status)
+    db = MagicMock()
+    db.__enter__.return_value = db
+    db.execute.return_value.scalar_one_or_none.return_value = run
+    monkeypatch.setattr(report_schedule_tasks, "_get_sync_session", lambda: db)
+    deliver = MagicMock()
+    monkeypatch.setattr(report_schedule_tasks, "deliver_scheduled_report", deliver)
+    generate = MagicMock()
+    monkeypatch.setattr(report_schedule_tasks, "generate_report_artifacts_sync", generate)
+
+    result = report_schedule_tasks.generate_scheduled_report_run.run(str(run.id))
+
+    assert result == {"run_id": str(run.id), "status": status.value}
+    assert run.status == status
+    assert run.report_id is None
+    deliver.assert_not_called()
+    generate.assert_not_called()
+    db.commit.assert_not_called()
+
+
+@pytest.mark.parametrize(
     ("delivery_response", "delivery_succeeds"),
     [
         ({"success": True}, True),
