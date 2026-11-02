@@ -1,0 +1,140 @@
+"""Report changes require successful evidence for the same stable rule."""
+
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+import pytest
+
+from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult, ScanStatus
+from app.services.finding_report_changes import classify_report_rule_change
+
+BASE_TIME = datetime(2026, 11, 1, tzinfo=timezone.utc)
+RULE_ID = "ssl.certificate_expiry"
+
+
+def _scan(
+    minute: int,
+    *,
+    modules: dict[str, dict | None],
+    findings: dict[str, list[str]] | None = None,
+    user_id: int = 7,
+    domain: str = "example.com",
+    version: int | None = 1,
+    projected: bool = True,
+    status: ScanStatus = ScanStatus.COMPLETED,
+) -> Scan:
+    completed_at = BASE_TIME + timedelta(minutes=minute)
+    scan = Scan(
+        id=uuid4(), user_id=user_id, domain=domain, url=f"https://{domain}",
+        status=status, completed_at=completed_at,
+        finding_observations_projected_at=completed_at if projected else None,
+        finding_ruleset_version=version,
+    )
+    scan.module_results = [
+        ScanModuleResult(
+            module_name=name,
+            status=ModuleStatus.SUCCESS if raw is not None else ModuleStatus.FAILED,
+            raw_result=raw,
+        )
+        for name, raw in modules.items()
+    ]
+    scan.finding_observations = [
+        ScanFindingObservation(
+            rule_id=rule_id,
+            ruleset_version=version or 1,
+            severity="high",
+            title="Risk",
+            description="Evidence-backed risk",
+            evidence_modules=evidence_modules,
+            observed_at=completed_at,
+        )
+        for rule_id, evidence_modules in (findings or {}).items()
+    ]
+    return scan
+
+
+@pytest.mark.unit
+def test_report_rule_change_requires_a_clean_successful_baseline() -> None:
+    clean = _scan(1, modules={"ssl": {}})
+    risky = _scan(2, modules={"ssl": {}}, findings={RULE_ID: ["ssl"]})
+    later_risky = _scan(3, modules={"ssl": {}}, findings={RULE_ID: ["ssl"]})
+    repaired = _scan(4, modules={"ssl": {}})
+
+    assert classify_report_rule_change(clean, risky, rule_id=RULE_ID) == "new"
+    assert classify_report_rule_change(risky, later_risky, rule_id=RULE_ID) == "continuing"
+    assert classify_report_rule_change(later_risky, repaired, rule_id=RULE_ID) == "resolved"
+    assert classify_report_rule_change(clean, repaired, rule_id=RULE_ID) == "unknown"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "raw",
+    [None, {"skipped": True}, {"data": {"note": "Not configured"}}],
+)
+def test_report_rule_absence_requires_successful_matching_module(raw: dict | None) -> None:
+    risky = _scan(1, modules={"ssl": {}}, findings={RULE_ID: ["ssl"]})
+    uncertain = _scan(2, modules={"ssl": raw})
+    prior_uncertain = _scan(1, modules={"ssl": raw})
+    current_risky = _scan(2, modules={"ssl": {}}, findings={RULE_ID: ["ssl"]})
+
+    assert classify_report_rule_change(risky, uncertain, rule_id=RULE_ID) == "unknown"
+    assert classify_report_rule_change(prior_uncertain, current_risky, rule_id=RULE_ID) == "unknown"
+
+
+@pytest.mark.unit
+def test_report_rule_uses_only_actual_multisource_evidence() -> None:
+    rule_id = "headers.missing_csp"
+    current = _scan(
+        2, modules={"headers": {}, "http-security": {}},
+        findings={rule_id: ["http-security"]},
+    )
+    unrelated = _scan(1, modules={"headers": {}})
+    matching = _scan(1, modules={"http-security": {}})
+
+    assert classify_report_rule_change(unrelated, current, rule_id=rule_id) == "unknown"
+    assert classify_report_rule_change(matching, current, rule_id=rule_id) == "new"
+
+
+@pytest.mark.unit
+def test_report_rule_with_unsupported_observation_is_unknown() -> None:
+    clean = _scan(1, modules={"ssl": {}})
+    unsupported = _scan(2, modules={"ssl": None}, findings={RULE_ID: ["ssl"]})
+
+    assert classify_report_rule_change(clean, unsupported, rule_id=RULE_ID) == "unknown"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "previous",
+    [
+        _scan(1, modules={"ssl": {}}, projected=False),
+        _scan(1, modules={"ssl": {}}, version=2),
+        _scan(1, modules={"ssl": {}}, version=None),
+        _scan(1, modules={"ssl": {}}, user_id=8),
+        _scan(1, modules={"ssl": {}}, domain="other.example"),
+        _scan(1, modules={"ssl": {}}, status=ScanStatus.FAILED),
+    ],
+)
+def test_report_rule_incompatible_or_missing_baseline_is_unknown(previous: Scan) -> None:
+    current = _scan(2, modules={"ssl": {}}, findings={RULE_ID: ["ssl"]})
+
+    assert classify_report_rule_change(previous, current, rule_id=RULE_ID) == "unknown"
+
+
+@pytest.mark.unit
+def test_report_rule_rejects_stale_projection_and_bad_rule_id() -> None:
+    clean = _scan(1, modules={"ssl": {}})
+    risky = _scan(2, modules={"ssl": {}}, findings={RULE_ID: ["ssl"]})
+    risky.finding_observations[0].ruleset_version = 2
+    assert classify_report_rule_change(clean, risky, rule_id=RULE_ID) == "unknown"
+
+    risky.finding_observations[0].ruleset_version = 1
+    risky.finding_observations_projection_failed_at = risky.completed_at
+    assert classify_report_rule_change(clean, risky, rule_id=RULE_ID) == "unknown"
+
+    risky.finding_observations_projection_failed_at = None
+    risky.finding_observations_projected_at = None
+    assert classify_report_rule_change(clean, risky, rule_id=RULE_ID) == "unknown"
+
+    with pytest.raises(ValueError, match="stable rule ID"):
+        classify_report_rule_change(clean, risky, rule_id=" ")
