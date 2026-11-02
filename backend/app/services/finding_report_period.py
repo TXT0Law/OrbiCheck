@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import DateTime, cast, select
 from sqlalchemy.orm import Session
 
 from app.models.report import Report, ReportStatus
@@ -126,8 +126,9 @@ def load_previous_delivered_report_boundary(
     if end_at.tzinfo is None or end_at.utcoffset() is None:
         raise ValueError("Report risk period end must include a timezone")
 
+    reported_end = Report.report_meta["riskPeriod"]["endAt"].astext
     query = (
-        select(Report.report_meta["riskPeriod"]["endAt"].astext)
+        select(reported_end)
         .join(ReportScheduleRun, ReportScheduleRun.report_id == Report.id)
         .where(
             ReportScheduleRun.schedule_id == schedule_id,
@@ -144,7 +145,13 @@ def load_previous_delivered_report_boundary(
             Report.report_meta["riskPeriod"]["version"].astext
             == str(REPORT_RISK_PERIOD_SCHEMA_VERSION),
         )
-        .order_by(Report.completed_at.desc(), ReportScheduleRun.id.desc())
+        # A slower, older run may finish delivering after a newer one. Its
+        # report completion time must not move the next period boundary back.
+        .order_by(
+            cast(reported_end, DateTime(timezone=True)).desc(),
+            Report.completed_at.desc(),
+            ReportScheduleRun.id.desc(),
+        )
         .limit(1)
     )
     raw_end = db.scalar(query)

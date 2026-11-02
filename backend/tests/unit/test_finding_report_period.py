@@ -101,7 +101,8 @@ def test_previous_delivered_boundary_requires_explicit_reported_risk_period() ->
     assert "status" in compiled.params.values()
     assert "version" in compiled.params.values()
     assert "reported" in compiled.params.values()
-    assert "ORDER BY reports.completed_at DESC, report_schedule_runs.id DESC" in sql
+    assert "ORDER BY CAST(" in sql
+    assert "AS TIMESTAMP WITH TIME ZONE) DESC, reports.completed_at DESC" in sql
     assert schedule_id in compiled.params.values()
     assert "example.com" in compiled.params.values()
     assert 1 in compiled.params.values()
