@@ -255,6 +255,40 @@ async def test_valid_mixed_delivery_sends_each_channel_once(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize("latest_target", [None, "https://example.com/webhook"])
+async def test_slack_setting_change_during_email_stops_webhook_delivery(
+    monkeypatch: pytest.MonkeyPatch, latest_target: str | None
+) -> None:
+    send_email = AsyncMock(return_value=True)
+    send_slack = AsyncMock()
+    valid_target = "https://hooks.slack.com/services/T/B/key"
+    resolve_slack = MagicMock(side_effect=[valid_target, latest_target])
+    monkeypatch.setattr(report_schedule_service.email_service, "send_report_email", send_email)
+    monkeypatch.setattr(report_schedule_service, "post_json", send_slack)
+    monkeypatch.setattr(report_schedule_service, "_resolve_slack_target", resolve_slack)
+    schedule = ReportSchedule(
+        id=uuid4(),
+        user_id=7,
+        name="Weekly risk report",
+        delivery_channels=["email", "slack"],
+        email_recipients=["ops@example.com"],
+    )
+    run = ReportScheduleRun(id=uuid4())
+
+    summary = await deliver_scheduled_report(
+        schedule, run, Report(id=uuid4(), format=ReportFormat.PDF), Scan(domain="example.com")
+    )
+
+    assert summary["success"] is False
+    assert summary["runId"] == str(run.id)
+    assert summary["channels"]["email"][0]["success"] is True
+    assert summary["channels"]["slack"]["success"] is False
+    send_email.assert_awaited_once()
+    send_slack.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "channels",
     [["unsupported"], ["email", "unsupported"], "email", None],

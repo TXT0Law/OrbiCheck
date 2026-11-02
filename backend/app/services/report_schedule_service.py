@@ -575,6 +575,25 @@ async def deliver_scheduled_report(
         summary["channels"]["email"] = email_results
 
     if "slack" in channels:
+        latest_target = _resolve_slack_target(schedule.user_id)
+        slack_error = None
+        if not latest_target:
+            slack_error = "slack_not_configured"
+        else:
+            try:
+                slack_target = validate_target_url(latest_target)
+            except ValueError as exc:
+                slack_error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+        if slack_error:
+            summary["channels"]["slack"] = {
+                "success": False,
+                "error": slack_error,
+                "latencyMs": 0,
+            }
+            summary["success"] = False
+            summary["runId"] = str(run.id)
+            return summary
+
         started = time.perf_counter()
         try:
             await post_json(slack_target, _build_slack_payload(schedule, report, scan))
