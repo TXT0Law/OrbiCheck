@@ -109,7 +109,19 @@ async def deliver_one_scan_risk_event(event_id: uuid.UUID) -> ScanRiskDeliveryOu
         )
         return ScanRiskDeliveryOutcome.PREFLIGHT_UNAVAILABLE
 
-    webhook_outcome = await send_scan_risk_webhook(snapshot.payload, user_settings)
+    # Redis may have been slow while a rescan or retry invalidated this claim.
+    # Read a fresh evidence snapshot before network I/O, without holding a lock.
+    async with async_session_factory() as db:
+        fresh_snapshot = await load_claimed_risk_send_snapshot(db, event_id, claim_token)
+    if fresh_snapshot is None or fresh_snapshot.user_id != snapshot.user_id:
+        async with async_session_factory() as db:
+            async with db.begin():
+                cancelled = await cancel_unattempted_risk_event_claim_in_transaction(
+                    db, event_id, claim_token
+                )
+        return ScanRiskDeliveryOutcome.CANCELLED if cancelled else ScanRiskDeliveryOutcome.STALE
+
+    webhook_outcome = await send_scan_risk_webhook(fresh_snapshot.payload, user_settings)
     if webhook_outcome in (ScanRiskWebhookOutcome.DISABLED, ScanRiskWebhookOutcome.BLOCKED):
         async with async_session_factory() as db:
             async with db.begin():

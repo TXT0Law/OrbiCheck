@@ -128,7 +128,7 @@ async def test_single_risk_delivery_records_only_confirmed_send_without_network_
 
     assert outcome.value == expected
     claim.assert_awaited_once()
-    snapshot.assert_awaited_once()
+    assert snapshot.await_count == 2
     get_settings.assert_awaited_once_with(redis, 7)
     redis.aclose.assert_awaited_once()
     assert tracker.open_sessions == tracker.open_transactions == 0
@@ -174,6 +174,33 @@ async def test_single_risk_delivery_leaves_claim_unresolved_when_settings_unavai
     send.assert_not_awaited()
     cancel.assert_not_awaited()
     mark_sent.assert_not_awaited()
+    assert tracker.open_sessions == tracker.open_transactions == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_risk_delivery_rechecks_claim_after_settings_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_id, token = uuid4(), uuid4()
+    tracker = _SessionTracker()
+    _patch_preflight(monkeypatch, tracker)
+    snapshot = AsyncMock(side_effect=[_snapshot(event_id), None])
+    cancel = AsyncMock(return_value=True)
+    send = AsyncMock()
+    monkeypatch.setattr(
+        notification_tasks, "claim_pending_risk_event_in_transaction", AsyncMock(return_value=token)
+    )
+    monkeypatch.setattr(notification_tasks, "load_claimed_risk_send_snapshot", snapshot)
+    monkeypatch.setattr(notification_tasks, "cancel_unattempted_risk_event_claim_in_transaction", cancel)
+    monkeypatch.setattr(notification_tasks, "send_scan_risk_webhook", send)
+
+    outcome = await notification_tasks.deliver_one_scan_risk_event(event_id)
+
+    assert outcome is notification_tasks.ScanRiskDeliveryOutcome.CANCELLED
+    assert snapshot.await_count == 2
+    cancel.assert_awaited_once()
+    send.assert_not_awaited()
     assert tracker.open_sessions == tracker.open_transactions == 0
 
 
