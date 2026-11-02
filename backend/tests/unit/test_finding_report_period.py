@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -13,9 +13,11 @@ from app.models.scan import Scan, ScanStatus
 from app.models.report_schedule import ReportScheduleCadence
 from app.services.finding_report_period import (
     REPORT_RISK_PERIOD_SCAN_MAX_LIMIT,
+    REPORT_RISK_PERIOD_PREDECESSOR_LIMIT,
     ReportRiskPeriodScans,
     first_report_risk_window,
     load_previous_delivered_report_boundary,
+    load_report_risk_period_predecessor,
     load_report_risk_period_scans,
     resolve_scheduled_report_risk_window,
     summarize_report_risk_projection_coverage,
@@ -341,3 +343,60 @@ def test_report_risk_period_rejects_invalid_boundary(change: dict) -> None:
         load_report_risk_period_scans(db, **args)
 
     db.execute.assert_not_called()
+
+
+@pytest.mark.unit
+def test_report_predecessor_preserves_latest_uncertain_scan() -> None:
+    scan = Scan(
+        id=uuid4(), user_id=7, domain="example.com", url="https://example.com",
+        status=ScanStatus.FAILED, completed_at=START - timedelta(minutes=1),
+        finding_observations_projected_at=None,
+    )
+    db = MagicMock()
+    db.scalar.return_value = scan
+
+    result = load_report_risk_period_predecessor(
+        db, user_id=7, domain="example.com", start_at=START
+    )
+
+    assert result is scan
+    query = db.scalar.call_args.args[0]
+    sql = str(query.compile(dialect=postgresql.dialect()))
+    assert "scans.user_id =" in sql
+    assert "scans.domain =" in sql
+    assert "scans.completed_at IS NOT NULL" in sql
+    assert "scans.completed_at <" in sql
+    assert "scans.status =" not in sql
+    assert "ORDER BY scans.completed_at DESC, scans.id DESC" in sql
+    assert REPORT_RISK_PERIOD_PREDECESSOR_LIMIT in query.compile().params.values()
+
+
+@pytest.mark.unit
+def test_report_predecessor_returns_none_when_no_earlier_scan_exists() -> None:
+    db = MagicMock()
+    db.scalar.return_value = None
+
+    assert load_report_risk_period_predecessor(
+        db, user_id=7, domain="example.com", start_at=START
+    ) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"user_id": 0},
+        {"domain": " "},
+        {"domain": " example.com "},
+        {"start_at": datetime(2026, 10, 1)},
+    ],
+)
+def test_report_predecessor_rejects_invalid_scope(change: dict) -> None:
+    db = MagicMock()
+    args = {"user_id": 7, "domain": "example.com", "start_at": START}
+    args.update(change)
+
+    with pytest.raises(ValueError):
+        load_report_risk_period_predecessor(db, **args)
+
+    db.scalar.assert_not_called()

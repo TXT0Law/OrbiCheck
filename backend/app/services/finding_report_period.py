@@ -21,6 +21,7 @@ from app.models.scan import Scan, ScanStatus
 
 REPORT_RISK_PERIOD_SCAN_LIMIT = 50
 REPORT_RISK_PERIOD_SCAN_MAX_LIMIT = 100
+REPORT_RISK_PERIOD_PREDECESSOR_LIMIT = 1
 WEEKLY_REPORT_RISK_LOOKBACK_DAYS = 7
 REPORT_RISK_PERIOD_SCHEMA_VERSION = 1
 REPORT_RISK_PERIOD_REPORTED_STATUS = "reported"
@@ -239,3 +240,30 @@ def load_report_risk_period_scans(
     )
     rows = list(db.execute(query).scalars().all())
     return ReportRiskPeriodScans(scans=rows[:limit], has_more=len(rows) > limit)
+
+
+def load_report_risk_period_predecessor(
+    db: Session, *, user_id: int, domain: str, start_at: datetime
+) -> Scan | None:
+    """Load the immediately preceding scan as a bounded comparison baseline.
+
+    Keep failed and unprojected scans. Skipping one to reach an older clean
+    scan could incorrectly classify an uncertain period as a new risk.
+    """
+    if user_id <= 0 or not domain or domain != domain.strip():
+        raise ValueError("Report risk period requires an owner and domain")
+    if start_at.tzinfo is None or start_at.utcoffset() is None:
+        raise ValueError("Report risk period start must include a timezone")
+
+    query = (
+        select(Scan)
+        .where(
+            Scan.user_id == user_id,
+            Scan.domain == domain,
+            Scan.completed_at.is_not(None),
+            Scan.completed_at < start_at,
+        )
+        .order_by(Scan.completed_at.desc(), Scan.id.desc())
+        .limit(REPORT_RISK_PERIOD_PREDECESSOR_LIMIT)
+    )
+    return db.scalar(query)
