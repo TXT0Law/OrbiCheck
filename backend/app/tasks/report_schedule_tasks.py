@@ -228,9 +228,12 @@ def generate_scheduled_report_run(run_id: str) -> dict:
             run.status = ReportScheduleRunStatus.DELIVERING
             db.commit()
 
-            # The owner may pause the schedule while report generation runs.
+            # The owner may change delivery settings while report generation runs.
             # Recheck persisted state before any external channel is attempted.
-            db.refresh(schedule, attribute_names=["is_enabled"])
+            db.refresh(
+                schedule,
+                attribute_names=["is_enabled", "delivery_channels", "email_recipients"],
+            )
             if schedule.is_enabled is False:
                 _fail_run(db, run, "Scheduled report was paused before delivery")
                 return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}

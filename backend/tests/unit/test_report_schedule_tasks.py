@@ -206,7 +206,7 @@ def test_pause_during_generation_prevents_external_delivery(
 
     def pause_schedule(entity: object, *, attribute_names: list[str]) -> None:
         assert entity is schedule
-        assert attribute_names == ["is_enabled"]
+        assert attribute_names == ["is_enabled", "delivery_channels", "email_recipients"]
         schedule.is_enabled = False
 
     db.refresh.side_effect = pause_schedule
@@ -274,7 +274,8 @@ def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
             entity.status = ScanStatus.COMPLETED
         else:
             assert entity is schedule
-            assert attribute_names == ["is_enabled"]
+            assert attribute_names == ["is_enabled", "delivery_channels", "email_recipients"]
+            entity.email_recipients = ["new-ops@example.com"]
 
     db.refresh.side_effect = refresh_state
     monkeypatch.setattr(report_schedule_tasks, "_get_sync_session", lambda: db)
@@ -306,7 +307,10 @@ def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
         artifact_generator,
     )
 
-    async def deliver(*_args):
+    async def deliver(
+        delivery_schedule: ReportSchedule, *_args: object
+    ) -> dict[str, object]:
+        assert delivery_schedule.email_recipients == ["new-ops@example.com"]
         return delivery_response
 
     monkeypatch.setattr(report_schedule_tasks, "deliver_scheduled_report", deliver)
