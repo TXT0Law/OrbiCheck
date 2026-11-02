@@ -487,7 +487,10 @@ async def test_risk_dispatch_batch_releases_candidate_session_before_each_delive
     monkeypatch.setattr(notification_tasks, "list_expired_claimed_risk_event_ids", expired_claims)
     monkeypatch.setattr(notification_tasks, "deliver_one_scan_risk_event", deliver)
     log_info = Mock()
-    monkeypatch.setattr(notification_tasks, "logger", SimpleNamespace(info=log_info))
+    log_warning = Mock()
+    monkeypatch.setattr(
+        notification_tasks, "logger", SimpleNamespace(info=log_info, warning=log_warning)
+    )
 
     result = await notification_tasks._dispatch_pending_scan_risk_events()
 
@@ -504,6 +507,9 @@ async def test_risk_dispatch_batch_releases_candidate_session_before_each_delive
     )
     log_info.assert_any_call(
         "scan_risk_dispatch_event_finished", event_id=str(event_ids[1]), outcome="unknown"
+    )
+    log_warning.assert_called_once_with(
+        "scan_risk_dispatch_unresolved_claims", event_ids=[str(unresolved_id)]
     )
     assert tracker.open_sessions == tracker.open_transactions == 0
 
@@ -530,6 +536,7 @@ async def test_worker_interruption_leaves_expired_claim_for_review_without_redel
     post = AsyncMock(side_effect=asyncio.CancelledError())
     mark_sent = AsyncMock()
     cancel = AsyncMock()
+    log_warning = Mock()
 
     async def pending_ids(_db: object, _limit: int) -> list[UUID]:
         return [event_id] if status == "pending" else []
@@ -556,12 +563,16 @@ async def test_worker_interruption_leaves_expired_claim_for_review_without_redel
     monkeypatch.setattr(notification_tasks, "cancel_unattempted_risk_event_claim_in_transaction", cancel)
     monkeypatch.setattr(scan_risk_webhook, "validate_https_url", lambda target: target)
     monkeypatch.setattr(scan_risk_webhook, "post_json", post)
+    monkeypatch.setattr(
+        notification_tasks, "logger", SimpleNamespace(info=Mock(), warning=log_warning)
+    )
 
     with pytest.raises(asyncio.CancelledError):
         await notification_tasks._dispatch_pending_scan_risk_events()
 
     assert status == "claimed"
     assert post.await_count == 1
+    log_warning.assert_not_called()
     assert tracker.open_sessions == tracker.open_transactions == 0
     expired = True
 
@@ -573,6 +584,9 @@ async def test_worker_interruption_leaves_expired_claim_for_review_without_redel
         "unresolvedClaimIdsSample": [str(event_id)],
     }
     assert post.await_count == 1
+    log_warning.assert_called_once_with(
+        "scan_risk_dispatch_unresolved_claims", event_ids=[str(event_id)]
+    )
     mark_sent.assert_not_awaited()
     cancel.assert_not_awaited()
     assert tracker.open_sessions == tracker.open_transactions == 0

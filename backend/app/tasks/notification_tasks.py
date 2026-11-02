@@ -168,6 +168,12 @@ async def _dispatch_pending_scan_risk_events() -> dict[str, Any]:
             event_id=str(event_id),
             outcome=outcome.value,
         )
+    unresolved_id_strings = [str(event_id) for event_id in unresolved_ids]
+    if unresolved_id_strings:
+        logger.warning(
+            "scan_risk_dispatch_unresolved_claims",
+            event_ids=unresolved_id_strings,
+        )
     logger.info(
         "scan_risk_dispatch_batch_finished",
         candidates=len(event_ids),
@@ -177,7 +183,7 @@ async def _dispatch_pending_scan_risk_events() -> dict[str, Any]:
     return {
         "candidates": len(event_ids),
         "outcomes": outcomes,
-        "unresolvedClaimIdsSample": [str(event_id) for event_id in unresolved_ids],
+        "unresolvedClaimIdsSample": unresolved_id_strings,
     }
 
 
