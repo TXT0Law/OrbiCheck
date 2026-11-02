@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Select, func, or_, select, tuple_, update
@@ -19,6 +20,10 @@ from app.models.scan_risk_notification_event import (
     RISK_EVENT_SENT,
     ScanRiskNotificationEvent,
 )
+from app.services.finding_notification_payload import (
+    ScanRiskNotificationPayload,
+    build_scan_risk_notification_payload,
+)
 from app.services.finding_transition import (
     HighRiskTransition,
     RiskHistoryPage,
@@ -30,6 +35,14 @@ from app.services.finding_transition import (
 RISK_EVENT_DISPATCH_BATCH_SIZE = 50
 RISK_EVENT_DISPATCH_MAX_BATCH_SIZE = 100
 RISK_EVENT_CLAIM_DURATION = timedelta(minutes=15)
+
+
+@dataclass(frozen=True)
+class ClaimedRiskSendSnapshot:
+    """Current owner and validated outbound fields from one evidence read."""
+
+    user_id: int
+    payload: ScanRiskNotificationPayload
 
 
 async def list_pending_risk_event_ids(
@@ -153,26 +166,39 @@ async def mark_claimed_risk_event_sent_in_transaction(
 async def claimed_risk_event_is_ready_for_send(
     db: AsyncSession, event_id: uuid.UUID, claim_token: uuid.UUID
 ) -> bool:
+    """Retained Boolean guard for callers that do not need the payload."""
+    return (await load_claimed_risk_send_snapshot(db, event_id, claim_token)) is not None
+
+
+async def load_claimed_risk_send_snapshot(
+    db: AsyncSession, event_id: uuid.UUID, claim_token: uuid.UUID
+) -> ClaimedRiskSendSnapshot | None:
     """Check a live claim and fresh evidence immediately before external I/O.
 
     This read holds no row locks. The caller must end its read transaction
-    before network I/O; a true result is only a current snapshot, since a
-    rescan or retry may still cancel the claim before delivery completes.
+    before network I/O. A returned payload is only a current snapshot, since
+    a rescan or retry may still cancel the claim before delivery completes.
     """
     event = (await db.execute(_live_claim_query(event_id, claim_token))).scalar_one_or_none()
     if event is None:
-        return False
+        return None
 
     scan = (await db.execute(_scan_query(event.scan_id, lock=False))).scalar_one_or_none()
     if scan is None:
-        return False
+        return None
     history = await load_recent_risk_history(db, scan)
     # The read of historical evidence may take time. Check the claim once
     # more so an intervening cancellation or expiration fails closed.
     event = (await db.execute(_live_claim_query(event_id, claim_token))).scalar_one_or_none()
     if event is None:
-        return False
-    return risk_event_is_dispatchable(event, scan, history, required_status=RISK_EVENT_CLAIMED)
+        return None
+    if not risk_event_is_dispatchable(event, scan, history, required_status=RISK_EVENT_CLAIMED):
+        return None
+    try:
+        payload = build_scan_risk_notification_payload(event, scan)
+    except ValueError:
+        return None
+    return ClaimedRiskSendSnapshot(user_id=scan.user_id, payload=payload)
 
 
 def risk_event_is_dispatchable(

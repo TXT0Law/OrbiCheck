@@ -337,6 +337,81 @@ async def test_claimed_event_pre_send_check_reads_fresh_evidence_without_locks(m
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_claimed_send_snapshot_binds_owner_and_safe_payload_to_live_evidence(
+    monkeypatch,
+) -> None:
+    baseline = _evidence_scan(risk=False)
+    scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    event = _pending_event(scan, baseline)
+    token = uuid4()
+    event.status = RISK_EVENT_CLAIMED
+    event.claim_token = token
+    event.claim_expires_at = NEXT_COMPLETION + RISK_EVENT_CLAIM_DURATION
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: event),
+                SimpleNamespace(scalar_one_or_none=lambda: scan),
+                SimpleNamespace(scalar_one_or_none=lambda: event),
+            ]
+        ),
+        commit=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        finding_notification_event,
+        "load_recent_risk_history",
+        AsyncMock(return_value=RiskHistoryPage(scans=[baseline], complete=True)),
+    )
+
+    snapshot = await finding_notification_event.load_claimed_risk_send_snapshot(
+        db, event.id, token
+    )
+
+    assert snapshot is not None
+    assert snapshot.user_id == scan.user_id
+    assert snapshot.payload.event_id == event.id
+    assert snapshot.payload.scan_id == scan.id
+    assert snapshot.payload.rule_id == RULE_ID
+    assert snapshot.payload.domain == "example.com"
+    assert snapshot.payload.dashboard_path == f"/dashboard/scan/{scan.id}"
+    assert not hasattr(snapshot.payload, "raw_result")
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claimed_send_snapshot_fails_closed_on_invalid_outbound_domain(monkeypatch) -> None:
+    baseline = _evidence_scan(risk=False)
+    scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    scan.domain = "example.com/path?secret=value"
+    event = _pending_event(scan, baseline)
+    token = uuid4()
+    event.status = RISK_EVENT_CLAIMED
+    event.claim_token = token
+    event.claim_expires_at = NEXT_COMPLETION + RISK_EVENT_CLAIM_DURATION
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: event),
+                SimpleNamespace(scalar_one_or_none=lambda: scan),
+                SimpleNamespace(scalar_one_or_none=lambda: event),
+            ]
+        )
+    )
+    monkeypatch.setattr(
+        finding_notification_event,
+        "load_recent_risk_history",
+        AsyncMock(return_value=RiskHistoryPage(scans=[baseline], complete=True)),
+    )
+
+    assert (
+        await finding_notification_event.load_claimed_risk_send_snapshot(db, event.id, token)
+        is None
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_claimed_event_pre_send_check_rejects_missing_claim_or_evidence(monkeypatch) -> None:
     baseline = _evidence_scan(risk=False)
     scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
