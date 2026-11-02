@@ -20,6 +20,7 @@ const defaultSettings: NotificationSettings = {
   webhookUrl: "https://example.com/hook",
   webhookEnabled: true,
   monitorEventsEnabled: true,
+  scanRiskEventsEnabled: false,
   emailEnabled: false,
   emailAddress: null,
   emailOnCritical: true,
@@ -88,6 +89,29 @@ describe("NotificationChannelSettings", () => {
     expect(screen.getByText("Critical alerts")).toBeInTheDocument();
     expect(screen.getByText("Warning alerts")).toBeInTheDocument();
     expect(screen.getByText("Info alerts")).toBeInTheDocument();
+  });
+
+  it("loads and saves the separate scan-risk opt-in", async () => {
+    render(<NotificationChannelSettings />);
+
+    const toggle = (await screen.findByLabelText(
+      "Opt in to high-risk scan notifications",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(
+      screen.getByText(/Delivery is not active yet/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save notification settings" }),
+    );
+    await waitFor(() => {
+      expect(updateNotificationSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ scanRiskEventsEnabled: true }),
+      );
+      expect(toggle.checked).toBe(true);
+    });
   });
 
   it("email address input is disabled when email notifications are off", async () => {

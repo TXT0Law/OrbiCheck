@@ -62,12 +62,16 @@ async def test_notification_settings_roundtrip(async_client: AsyncClient) -> Non
     )
     assert legacy_update.status_code == 200
     assert legacy_update.json()["data"]["scanRiskEventsEnabled"] is True
+    after_legacy_update = await async_client.get("/api/v1/me/notification-settings")
+    assert after_legacy_update.json()["data"]["scanRiskEventsEnabled"] is True
 
     disabled = await async_client.put(
         "/api/v1/me/notification-settings", json={"scanRiskEventsEnabled": False}
     )
     assert disabled.status_code == 200
     assert disabled.json()["data"]["scanRiskEventsEnabled"] is False
+    after_disabling = await async_client.get("/api/v1/me/notification-settings")
+    assert after_disabling.json()["data"]["scanRiskEventsEnabled"] is False
 
 
 @pytest.mark.asyncio

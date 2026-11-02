@@ -24,6 +24,7 @@ const _settingsResponse = {
   webhookUrl: "https://hooks.example.com",
   webhookEnabled: true,
   monitorEventsEnabled: true,
+  scanRiskEventsEnabled: false,
   emailEnabled: false,
   emailAddress: null,
   emailOnCritical: true,
@@ -50,6 +51,7 @@ describe("notification-settings api", () => {
 
     expect(apiClientMock.get).toHaveBeenCalledWith("/me/notification-settings");
     expect(result.webhookEnabled).toBe(true);
+    expect(result.scanRiskEventsEnabled).toBe(false);
     expect(result.channels.slack.enabled).toBe(false);
   });
 
@@ -59,6 +61,7 @@ describe("notification-settings api", () => {
       emailEnabled: true,
       emailAddress: "ops@example.com",
       emailOnWarning: true,
+      scanRiskEventsEnabled: true,
     };
     apiClientMock.put.mockResolvedValue({ data: body });
     const mod = await import("@/lib/api/notification-settings");
@@ -70,6 +73,22 @@ describe("notification-settings api", () => {
       body,
     );
     expect(result.emailAddress).toBe("ops@example.com");
+    expect(result.scanRiskEventsEnabled).toBe(true);
+  });
+
+  it("rejects a non-boolean scan-risk preference before sending", async () => {
+    const mod = await import("@/lib/api/notification-settings");
+    const invalidBody = {
+      ..._settingsResponse,
+      scanRiskEventsEnabled: "yes",
+    };
+
+    await expect(
+      mod.updateNotificationSettings(
+        invalidBody as unknown as Parameters<typeof mod.updateNotificationSettings>[0],
+      ),
+    ).rejects.toThrow();
+    expect(apiClientMock.put).not.toHaveBeenCalled();
   });
 
   it("sends a test email request", async () => {

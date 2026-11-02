@@ -1,5 +1,6 @@
 import {
   notificationSettingsResponseSchema,
+  notificationSettingsUpdateSchema,
   testNotificationResponseSchema,
   type NotificationSettingsResponse,
 } from "@/shared/schemas/notifications";
@@ -24,6 +25,7 @@ function _normalizeSettings(
     webhookUrl: raw.webhookUrl,
     webhookEnabled: raw.webhookEnabled,
     monitorEventsEnabled: raw.monitorEventsEnabled,
+    scanRiskEventsEnabled: raw.scanRiskEventsEnabled,
     emailEnabled: raw.emailEnabled,
     emailAddress: raw.emailAddress,
     emailOnCritical: raw.emailOnCritical,
@@ -46,9 +48,10 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
 export async function updateNotificationSettings(
   body: NotificationSettings,
 ): Promise<NotificationSettings> {
+  const validatedBody = notificationSettingsUpdateSchema.parse(body);
   const { data } = await apiClient.put<unknown>(
     "/me/notification-settings",
-    body,
+    validatedBody,
   );
   const validated = parseSingle<NotificationSettingsResponse>(
     notificationSettingsResponseSchema,

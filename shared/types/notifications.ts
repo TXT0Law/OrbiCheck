@@ -34,6 +34,7 @@ export interface NotificationSettings {
   webhookUrl: string | null;
   webhookEnabled: boolean;
   monitorEventsEnabled: boolean;
+  scanRiskEventsEnabled: boolean;
   emailEnabled: boolean;
   emailAddress: string | null;
   emailOnCritical: boolean;

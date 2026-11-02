@@ -52,6 +52,7 @@ export function NotificationChannelSettings() {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [webhookEnabled, setWebhookEnabled] = useState(false);
   const [monitorEventsEnabled, setMonitorEventsEnabled] = useState(true);
+  const [scanRiskEventsEnabled, setScanRiskEventsEnabled] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
   const [emailOnCritical, setEmailOnCritical] = useState(true);
@@ -70,6 +71,7 @@ export function NotificationChannelSettings() {
         setWebhookUrl(s.webhookUrl ?? "");
         setWebhookEnabled(s.webhookEnabled);
         setMonitorEventsEnabled(s.monitorEventsEnabled);
+        setScanRiskEventsEnabled(s.scanRiskEventsEnabled);
         setEmailEnabled(s.emailEnabled);
         setEmailAddress(s.emailAddress ?? "");
         setEmailOnCritical(s.emailOnCritical);
@@ -123,6 +125,7 @@ export function NotificationChannelSettings() {
       webhookUrl: webhookUrl.trim() === "" ? null : webhookUrl.trim(),
       webhookEnabled,
       monitorEventsEnabled,
+      scanRiskEventsEnabled,
       emailEnabled,
       emailAddress: emailAddress.trim() === "" ? null : emailAddress.trim(),
       emailOnCritical,
@@ -135,6 +138,7 @@ export function NotificationChannelSettings() {
       setWebhookUrl(saved.webhookUrl ?? "");
       setWebhookEnabled(saved.webhookEnabled);
       setMonitorEventsEnabled(saved.monitorEventsEnabled);
+      setScanRiskEventsEnabled(saved.scanRiskEventsEnabled);
       setEmailEnabled(saved.emailEnabled);
       setEmailAddress(saved.emailAddress ?? "");
       setEmailOnCritical(saved.emailOnCritical);
@@ -211,6 +215,24 @@ export function NotificationChannelSettings() {
         <p className="mt-1 text-sm text-muted-foreground">
           Configure where alert events are delivered. Per-monitor alerts must
           stay enabled in each monitor&apos;s capability settings.
+        </p>
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-zinc-400"
+            checked={scanRiskEventsEnabled}
+            onChange={(event) => setScanRiskEventsEnabled(event.target.checked)}
+          />
+          <span className="font-medium text-zinc-900 dark:text-zinc-100">
+            Opt in to high-risk scan notifications
+          </span>
+        </label>
+        <p className="text-xs text-muted-foreground">
+          For new or returning high-risk scan findings. Delivery is not active yet;
+          this saves your preference for when it becomes available.
         </p>
       </div>
 
