@@ -130,17 +130,19 @@ async def mark_claimed_risk_event_sent_in_transaction(
     cancellation clears its token, so this compare-and-set cannot turn that
     stale event into a sent event. The caller owns the transaction.
     """
+    # PostgreSQL now() is fixed at transaction start; use wall time so a long
+    # delivery transaction cannot finalize an already expired claim.
     result = await db.execute(
         update(ScanRiskNotificationEvent)
         .where(
             ScanRiskNotificationEvent.id == event_id,
             ScanRiskNotificationEvent.status == RISK_EVENT_CLAIMED,
             ScanRiskNotificationEvent.claim_token == claim_token,
-            ScanRiskNotificationEvent.claim_expires_at > func.now(),
+            ScanRiskNotificationEvent.claim_expires_at > func.clock_timestamp(),
         )
         .values(
             status=RISK_EVENT_SENT,
-            sent_at=func.now(),
+            sent_at=func.clock_timestamp(),
             claim_token=None,
             claim_expires_at=None,
         )

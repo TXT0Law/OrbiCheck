@@ -280,8 +280,8 @@ async def test_sent_finalization_requires_matching_unexpired_claim_without_commi
     assert "scan_risk_notification_events.id =" in sql
     assert "scan_risk_notification_events.status =" in sql
     assert "scan_risk_notification_events.claim_token =" in sql
-    assert "scan_risk_notification_events.claim_expires_at > now()" in sql
-    assert "sent_at=now()" in sql
+    assert "scan_risk_notification_events.claim_expires_at > clock_timestamp()" in sql
+    assert "sent_at=clock_timestamp()" in sql
     params = statement.compile().params
     assert event_id in params.values()
     assert token in params.values()
