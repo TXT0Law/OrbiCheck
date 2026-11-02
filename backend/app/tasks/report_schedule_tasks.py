@@ -209,12 +209,13 @@ def generate_scheduled_report_run(run_id: str) -> dict:
                 deliver_scheduled_report(schedule, run, report, scan)
             )
             run.delivery_summary = delivery_summary
+            delivery_confirmed = delivery_summary.get("success") is True
             run.status = (
                 ReportScheduleRunStatus.COMPLETED
-                if delivery_summary.get("success", True)
+                if delivery_confirmed
                 else ReportScheduleRunStatus.FAILED
             )
-            run.error_message = None if delivery_summary.get("success", True) else "Delivery failed"
+            run.error_message = None if delivery_confirmed else "Delivery failed"
             run.completed_at = datetime.now(timezone.utc)
             db.commit()
             return {

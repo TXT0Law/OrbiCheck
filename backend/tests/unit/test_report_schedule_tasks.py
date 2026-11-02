@@ -88,9 +88,19 @@ def test_fresh_scan_rejects_empty_module_selection(monkeypatch: pytest.MonkeyPat
     db.add.assert_not_called()
 
 
-@pytest.mark.parametrize("delivery_succeeds", [True, False])
+@pytest.mark.parametrize(
+    ("delivery_response", "delivery_succeeds"),
+    [
+        ({"success": True}, True),
+        ({"success": False}, False),
+        ({}, False),
+        ({"success": "true"}, False),
+    ],
+)
 def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
-    monkeypatch: pytest.MonkeyPatch, delivery_succeeds: bool
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_response: dict[str, object],
+    delivery_succeeds: bool,
 ) -> None:
     source = _source_scan()
     schedule = ReportSchedule(
@@ -144,7 +154,7 @@ def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
     )
 
     async def deliver(*_args):
-        return {"success": delivery_succeeds}
+        return delivery_response
 
     monkeypatch.setattr(report_schedule_tasks, "deliver_scheduled_report", deliver)
 
