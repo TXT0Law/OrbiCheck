@@ -134,6 +134,62 @@ def test_report_rule_uses_only_actual_multisource_evidence() -> None:
 
 
 @pytest.mark.unit
+def test_report_rule_cannot_resolve_when_one_supporting_module_fails() -> None:
+    rule_id = "headers.missing_csp"
+    risky = _scan(
+        1,
+        modules={"headers": {}, "http-security": {}},
+        findings={rule_id: ["headers", "http-security"]},
+    )
+    partial = _scan(2, modules={"headers": {}, "http-security": None})
+    complete = _scan(3, modules={"headers": {}, "http-security": {}})
+
+    assert classify_report_rule_change(risky, partial, rule_id=rule_id) == "unknown"
+    assert classify_report_rule_change(risky, complete, rule_id=rule_id) == "resolved"
+    assert (
+        classify_report_rule_change_from_evidence(
+            risky,
+            partial,
+            rule_id=rule_id,
+            previous_observations=_narrow_observations(risky),
+            current_observations=(),
+            previous_successful_modules=frozenset({"headers", "http-security"}),
+            current_successful_modules=frozenset({"headers"}),
+            evidence_complete=True,
+        )
+        == "unknown"
+    )
+
+
+@pytest.mark.unit
+def test_report_rule_cannot_be_new_when_one_supporting_baseline_module_fails() -> None:
+    rule_id = "headers.missing_csp"
+    partial = _scan(1, modules={"headers": {}, "http-security": None})
+    complete = _scan(1, modules={"headers": {}, "http-security": {}})
+    risky = _scan(
+        2,
+        modules={"headers": {}, "http-security": {}},
+        findings={rule_id: ["headers", "http-security"]},
+    )
+
+    assert classify_report_rule_change(partial, risky, rule_id=rule_id) == "unknown"
+    assert classify_report_rule_change(complete, risky, rule_id=rule_id) == "new"
+    assert (
+        classify_report_rule_change_from_evidence(
+            partial,
+            risky,
+            rule_id=rule_id,
+            previous_observations=(),
+            current_observations=_narrow_observations(risky),
+            previous_successful_modules=frozenset({"headers"}),
+            current_successful_modules=frozenset({"headers", "http-security"}),
+            evidence_complete=True,
+        )
+        == "unknown"
+    )
+
+
+@pytest.mark.unit
 def test_report_rule_with_unsupported_observation_is_unknown() -> None:
     clean = _scan(1, modules={"ssl": {}})
     unsupported = _scan(2, modules={"ssl": None}, findings={RULE_ID: ["ssl"]})

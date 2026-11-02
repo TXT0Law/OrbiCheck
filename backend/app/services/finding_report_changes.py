@@ -85,16 +85,18 @@ def _classify_rule_evidence(
         return "unknown"
     if before is not None and after is not None:
         return "continuing"
+    # An absent finding cannot prove a change if any of its previously
+    # supporting modules failed or were skipped on the other scan.
     if after is not None:
         return (
             "new"
-            if set(after.evidence_modules).intersection(previous_success)
+            if set(after.evidence_modules).issubset(previous_success)
             else "unknown"
         )
     return (
         "resolved"
         if before is not None
-        and set(before.evidence_modules).intersection(current_success)
+        and set(before.evidence_modules).issubset(current_success)
         else "unknown"
     )
 
