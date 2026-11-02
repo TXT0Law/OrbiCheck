@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.dialects import postgresql
 
+from app.api.v1.schemas.report_schedule import REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT
 from app.models.report import Report
 from app.models.report_schedule import (
     ReportSchedule,
@@ -122,6 +123,68 @@ async def test_email_delivery_without_recipients_reports_failure_without_sending
         }
     ]
     send_email.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "recipients",
+    [
+        "ops@example.com",
+        [""],
+        ["not-an-email"],
+        ["ops@example.com", 7],
+        ["ops@example.com"] * (REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT + 1),
+    ],
+)
+async def test_invalid_persisted_recipients_prevent_partial_delivery(
+    monkeypatch: pytest.MonkeyPatch, recipients: object
+) -> None:
+    send_email = AsyncMock()
+    resolve_slack = MagicMock()
+    monkeypatch.setattr(report_schedule_service.email_service, "send_report_email", send_email)
+    monkeypatch.setattr(report_schedule_service, "_resolve_slack_target", resolve_slack)
+    schedule = ReportSchedule(
+        id=uuid4(),
+        user_id=7,
+        name="Weekly risk report",
+        delivery_channels=["email", "slack"],
+        email_recipients=recipients,
+    )
+
+    summary = await deliver_scheduled_report(
+        schedule, ReportScheduleRun(id=uuid4()), Report(id=uuid4()), Scan(domain="example.com")
+    )
+
+    assert summary["success"] is False
+    assert summary["channels"]["email"][0]["error"] == "email_recipients_invalid"
+    assert "slack" not in summary["channels"]
+    send_email.assert_not_awaited()
+    resolve_slack.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_persisted_email_recipients_are_normalized_before_send(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    send_email = AsyncMock(return_value=True)
+    monkeypatch.setattr(report_schedule_service.email_service, "send_report_email", send_email)
+    schedule = ReportSchedule(
+        id=uuid4(),
+        user_id=7,
+        name="Weekly risk report",
+        delivery_channels=["email"],
+        email_recipients=[" Ops@Example.com "],
+    )
+
+    summary = await deliver_scheduled_report(
+        schedule, ReportScheduleRun(id=uuid4()), Report(id=uuid4()), Scan(domain="example.com")
+    )
+
+    assert summary["success"] is True
+    assert summary["channels"]["email"][0]["recipient"] == "ops@example.com"
+    assert send_email.await_args.kwargs["to_email"] == "ops@example.com"
 
 
 @pytest.mark.unit

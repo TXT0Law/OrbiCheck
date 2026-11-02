@@ -13,6 +13,7 @@ from app.models.report_schedule import (
 )
 
 REPORT_SCHEDULE_DELIVERY_CHANNELS = ("email", "slack")
+REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT = 20
 REPORT_SCHEDULE_FORMATS = ("pdf", "markdown", "html", "both", "all")
 REPORT_SCHEDULE_PERIODS = ("24h", "7d", "30d", "90d")
 
@@ -30,7 +31,9 @@ class ReportScheduleBase(BaseModel):
     hour: int = Field(ge=0, le=23)
     minute: int = Field(ge=0, le=59)
     delivery_channels: list[Literal["email", "slack"]] = Field(default_factory=list)
-    email_recipients: list[str] = Field(default_factory=list, max_length=20)
+    email_recipients: list[str] = Field(
+        default_factory=list, max_length=REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT
+    )
     is_enabled: bool = True
     rescan_before_report: bool = False
 
@@ -90,7 +93,9 @@ class ReportScheduleUpdateRequest(BaseModel):
     hour: int | None = Field(default=None, ge=0, le=23)
     minute: int | None = Field(default=None, ge=0, le=59)
     delivery_channels: list[Literal["email", "slack"]] | None = None
-    email_recipients: list[str] | None = Field(default=None, max_length=20)
+    email_recipients: list[str] | None = Field(
+        default=None, max_length=REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT
+    )
     is_enabled: bool | None = None
     rescan_before_report: bool = False
 

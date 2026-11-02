@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.schemas.report_schedule import (
     REPORT_SCHEDULE_DELIVERY_CHANNELS,
+    REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT,
+    ReportScheduleBase,
     ReportScheduleCreateRequest,
     ReportScheduleResponse,
     ReportScheduleRunResponse,
@@ -494,18 +496,38 @@ async def deliver_scheduled_report(
         summary["runId"] = str(run.id)
         return summary
 
+    email_recipients: list[str] = []
     if "email" in channels:
+        raw_recipients = schedule.email_recipients
+        email_error: str | None = None
+        if not raw_recipients:
+            email_error = "email_recipients_missing"
+        elif (
+            not isinstance(raw_recipients, list)
+            or len(raw_recipients) > REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT
+            or any(not isinstance(recipient, str) for recipient in raw_recipients)
+        ):
+            email_error = "email_recipients_invalid"
+        else:
+            try:
+                email_recipients = ReportScheduleBase.normalize_email_recipients(
+                    raw_recipients
+                )
+            except ValueError:
+                email_error = "email_recipients_invalid"
+            else:
+                if len(email_recipients) != len(raw_recipients):
+                    email_error = "email_recipients_invalid"
+        if email_error:
+            summary["channels"]["email"] = [
+                {"recipient": "", "success": False, "error": email_error, "latencyMs": 0}
+            ]
+            summary["success"] = False
+            summary["runId"] = str(run.id)
+            return summary
+
         email_results: list[dict[str, Any]] = []
-        if not schedule.email_recipients:
-            email_results.append(
-                {
-                    "recipient": "",
-                    "success": False,
-                    "error": "email_recipients_missing",
-                    "latencyMs": 0,
-                }
-            )
-        for recipient in schedule.email_recipients or []:
+        for recipient in email_recipients:
             started = time.perf_counter()
             try:
                 sent = await email_service.send_report_email(
