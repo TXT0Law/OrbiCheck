@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -504,6 +505,76 @@ async def test_risk_dispatch_batch_releases_candidate_session_before_each_delive
     log_info.assert_any_call(
         "scan_risk_dispatch_event_finished", event_id=str(event_ids[1]), outcome="unknown"
     )
+    assert tracker.open_sessions == tracker.open_transactions == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_worker_interruption_leaves_expired_claim_for_review_without_redelivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cancelled worker after webhook I/O must not send the claimed event again."""
+    event_id, token = uuid4(), uuid4()
+    tracker = _SessionTracker()
+    _patch_preflight(
+        monkeypatch,
+        tracker,
+        settings={
+            "scanRiskEventsEnabled": True,
+            "webhookEnabled": True,
+            "webhookUrl": "https://hooks.example.com/risk",
+        },
+    )
+    status = "pending"
+    expired = False
+    post = AsyncMock(side_effect=asyncio.CancelledError())
+    mark_sent = AsyncMock()
+    cancel = AsyncMock()
+
+    async def pending_ids(_db: object, _limit: int) -> list[UUID]:
+        return [event_id] if status == "pending" else []
+
+    async def expired_ids(_db: object, _limit: int) -> list[UUID]:
+        return [event_id] if status == "claimed" and expired else []
+
+    async def claim(_db: object, candidate_id: UUID) -> UUID | None:
+        nonlocal status
+        if candidate_id != event_id or status != "pending":
+            return None
+        status = "claimed"
+        return token
+
+    monkeypatch.setattr(notification_tasks, "list_pending_risk_event_ids", pending_ids)
+    monkeypatch.setattr(notification_tasks, "list_expired_claimed_risk_event_ids", expired_ids)
+    monkeypatch.setattr(notification_tasks, "claim_pending_risk_event_in_transaction", claim)
+    monkeypatch.setattr(
+        notification_tasks,
+        "load_claimed_risk_send_snapshot",
+        AsyncMock(return_value=_snapshot(event_id)),
+    )
+    monkeypatch.setattr(notification_tasks, "mark_claimed_risk_event_sent_in_transaction", mark_sent)
+    monkeypatch.setattr(notification_tasks, "cancel_unattempted_risk_event_claim_in_transaction", cancel)
+    monkeypatch.setattr(scan_risk_webhook, "validate_https_url", lambda target: target)
+    monkeypatch.setattr(scan_risk_webhook, "post_json", post)
+
+    with pytest.raises(asyncio.CancelledError):
+        await notification_tasks._dispatch_pending_scan_risk_events()
+
+    assert status == "claimed"
+    assert post.await_count == 1
+    assert tracker.open_sessions == tracker.open_transactions == 0
+    expired = True
+
+    next_batch = await notification_tasks._dispatch_pending_scan_risk_events()
+
+    assert next_batch == {
+        "candidates": 0,
+        "outcomes": {},
+        "unresolvedClaimIdsSample": [str(event_id)],
+    }
+    assert post.await_count == 1
+    mark_sent.assert_not_awaited()
+    cancel.assert_not_awaited()
     assert tracker.open_sessions == tracker.open_transactions == 0
 
 
