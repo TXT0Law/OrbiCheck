@@ -10,14 +10,61 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.models.scan import Scan, ScanStatus
+from app.models.report_schedule import ReportScheduleCadence
 from app.services.finding_report_period import (
     REPORT_RISK_PERIOD_SCAN_MAX_LIMIT,
+    first_report_risk_window,
     load_report_risk_period_scans,
 )
 
 START = datetime(2026, 10, 1, tzinfo=timezone.utc)
 END = datetime(2026, 11, 1, tzinfo=timezone.utc)
 PAGE_LIMIT = 2
+
+
+@pytest.mark.unit
+def test_first_weekly_report_window_preserves_local_time_across_dst() -> None:
+    window = first_report_risk_window(
+        cadence=ReportScheduleCadence.WEEKLY,
+        timezone_name="America/New_York",
+        end_at=datetime(2026, 3, 10, 13, 0, tzinfo=timezone.utc),
+    )
+
+    assert window.start_at == datetime(2026, 3, 3, 14, 0, tzinfo=timezone.utc)
+    assert window.end_at == datetime(2026, 3, 10, 13, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.unit
+def test_first_monthly_report_window_clamps_shorter_month_and_year() -> None:
+    window = first_report_risk_window(
+        cadence=ReportScheduleCadence.MONTHLY,
+        timezone_name="UTC",
+        end_at=datetime(2026, 3, 31, 10, 0, tzinfo=timezone.utc),
+    )
+    january_window = first_report_risk_window(
+        cadence=ReportScheduleCadence.MONTHLY,
+        timezone_name="UTC",
+        end_at=datetime(2026, 1, 31, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert window.start_at == datetime(2026, 2, 28, 10, 0, tzinfo=timezone.utc)
+    assert january_window.start_at == datetime(2025, 12, 31, 10, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.unit
+def test_first_report_window_rejects_naive_end_and_invalid_cadence() -> None:
+    with pytest.raises(ValueError, match="timezone"):
+        first_report_risk_window(
+            cadence=ReportScheduleCadence.WEEKLY,
+            timezone_name="UTC",
+            end_at=datetime(2026, 3, 10),
+        )
+    with pytest.raises(ValueError, match="cadence"):
+        first_report_risk_window(
+            cadence="daily",  # type: ignore[arg-type]
+            timezone_name="UTC",
+            end_at=END,
+        )
 
 
 @pytest.mark.unit

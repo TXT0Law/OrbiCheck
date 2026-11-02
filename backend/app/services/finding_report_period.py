@@ -2,16 +2,54 @@
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.report_schedule import ReportScheduleCadence
 from app.models.scan import Scan, ScanStatus
 
 REPORT_RISK_PERIOD_SCAN_LIMIT = 50
 REPORT_RISK_PERIOD_SCAN_MAX_LIMIT = 100
+WEEKLY_REPORT_RISK_LOOKBACK_DAYS = 7
+
+
+@dataclass(frozen=True, slots=True)
+class ReportRiskWindow:
+    start_at: datetime
+    end_at: datetime
+
+
+def first_report_risk_window(
+    *, cadence: ReportScheduleCadence, timezone_name: str, end_at: datetime
+) -> ReportRiskWindow:
+    """Use a local calendar lookback when no earlier successful report exists.
+
+    The end is actual report generation time, after an optional fresh scan.
+    This window is a fallback; later reports should start at the previous
+    successfully delivered report's completion time.
+    """
+    if end_at.tzinfo is None or end_at.utcoffset() is None:
+        raise ValueError("Report risk period end must include a timezone")
+    local_end = end_at.astimezone(ZoneInfo(timezone_name))
+    if cadence == ReportScheduleCadence.WEEKLY:
+        local_start = local_end - timedelta(days=WEEKLY_REPORT_RISK_LOOKBACK_DAYS)
+    elif cadence == ReportScheduleCadence.MONTHLY:
+        year, month = local_end.year, local_end.month - 1
+        if month == 0:
+            year, month = year - 1, 12
+        day = min(local_end.day, calendar.monthrange(year, month)[1])
+        local_start = local_end.replace(year=year, month=month, day=day)
+    else:
+        raise ValueError("Unsupported report risk period cadence")
+    return ReportRiskWindow(
+        start_at=local_start.astimezone(timezone.utc),
+        end_at=end_at.astimezone(timezone.utc),
+    )
 
 
 @dataclass(frozen=True, slots=True)
