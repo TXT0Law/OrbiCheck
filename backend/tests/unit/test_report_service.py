@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from app.services.security_analyzer import SecurityScoreResult
+from app.models.report import Report, ReportFormat
+from app.services.finding_report_presentation import ReportRiskPeriodPresentation
 from app.services import report_service
 from app.services.report_service import (
     _embed_chart,
@@ -152,6 +155,22 @@ def _sample_report_data() -> dict:
     }
 
 
+def _risk_period_view(*, uncertain: bool = True) -> ReportRiskPeriodPresentation:
+    return ReportRiskPeriodPresentation(
+        start_at="2026-10-26T00:00:00+00:00",
+        end_at="2026-11-02T00:00:00+00:00",
+        scanned=2,
+        projected=1,
+        pending=0,
+        failed=0,
+        unusable_ruleset_version=0,
+        unavailable=1,
+        truncated=False,
+        has_unknown_coverage=uncertain,
+        change_counts={"new": 1, "continuing": 0, "resolved": 0, "unknown": 1},
+    )
+
+
 @pytest.mark.unit
 def test_generate_recommendations_detects_dangerous_ports() -> None:
     detail = {
@@ -191,6 +210,73 @@ def test_render_markdown_contains_expected_sections() -> None:
     assert "_JavaScript Framework_" in markdown
     assert "_CDN_" in markdown
     assert "_Web Server_" in markdown
+
+
+@pytest.mark.unit
+def test_scheduled_risk_section_is_visible_in_every_report_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _sample_report_data()
+    risk_period = _risk_period_view()
+    captured_pdf_sections: list[tuple[str, str]] = []
+    original_pdf_section = report_service._pdf_write_section
+
+    def capture_pdf_section(pdf: object, title: str, content: str) -> None:
+        captured_pdf_sections.append((title, content))
+        original_pdf_section(pdf, title, content)
+
+    monkeypatch.setattr(report_service, "_pdf_write_section", capture_pdf_section)
+    monkeypatch.setattr(report_service, "build_report_payload_sync", lambda _db, _report: payload)
+    report = Report(title="Scheduled", format=ReportFormat.ALL)
+
+    markdown, pdf, html, meta = report_service.generate_report_artifacts_sync(
+        MagicMock(), report, risk_period=risk_period
+    )
+
+    assert "## 7. Period Risk Changes" in markdown
+    assert "| new | 1 |" in markdown
+    assert "| unknown | 1 |" in markdown
+    assert "Coverage**: Incomplete or uncertain" in markdown
+    assert "never proves a risk was repaired" in markdown
+    assert pdf is not None and pdf.startswith(b"%PDF")
+    pdf_risk = next(content for title, content in captured_pdf_sections if title == "Period Risk Changes")
+    assert "New: 1" in pdf_risk
+    assert "Unknown: 1" in pdf_risk
+    assert "does not prove a repair" in pdf_risk
+    assert html is not None and "5. Period Risk Changes" in html
+    assert "Coverage incomplete or uncertain" in html
+    assert "does not prove a repair" in html
+    assert meta["riskPeriod"]["status"] == "reported"
+    assert meta["riskPeriod"]["version"] == 1
+    assert meta["riskPeriod"]["endAt"] == risk_period.end_at
+
+
+@pytest.mark.unit
+def test_scheduled_risk_section_exposes_empty_and_truncated_period() -> None:
+    payload = _sample_report_data()
+    risk_period = _risk_period_view()
+    risk_period = ReportRiskPeriodPresentation(
+        start_at=risk_period.start_at,
+        end_at=risk_period.end_at,
+        scanned=0,
+        projected=0,
+        pending=0,
+        failed=0,
+        unusable_ruleset_version=0,
+        unavailable=0,
+        truncated=True,
+        has_unknown_coverage=True,
+        change_counts={"new": 0, "continuing": 0, "resolved": 0, "unknown": 0},
+    )
+    payload["riskPeriod"] = risk_period
+
+    markdown = render_markdown(payload)
+    html = render_html(payload)
+
+    assert "No terminal scans were available" in markdown
+    assert "Scan limit reached" in markdown
+    assert "No terminal scans were available" in html
+    assert "Scan limit reached" in html
 
 
 @pytest.mark.unit

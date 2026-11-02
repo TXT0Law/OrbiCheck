@@ -115,10 +115,22 @@ def test_scheduled_report_uses_new_scan_result(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(report_schedule_tasks, "validate_url_safety", lambda _url: None)
     scan_task = MagicMock()
     monkeypatch.setattr(report_schedule_tasks.execute_scan, "run", scan_task)
+    risk_summary = object()
+    risk_period = object()
+    summary_loader = MagicMock(return_value=risk_summary)
+    monkeypatch.setattr(
+        report_schedule_tasks, "load_scheduled_report_risk_summary", summary_loader
+    )
+    monkeypatch.setattr(
+        report_schedule_tasks,
+        "present_report_risk_period",
+        lambda summary: risk_period if summary is risk_summary else None,
+    )
+    artifact_generator = MagicMock(return_value=("report", b"pdf", "<p>report</p>", {}))
     monkeypatch.setattr(
         report_schedule_tasks,
         "generate_report_artifacts_sync",
-        lambda _db, _report: ("report", b"pdf", "<p>report</p>", {}),
+        artifact_generator,
     )
 
     async def deliver(*_args):
@@ -136,3 +148,7 @@ def test_scheduled_report_uses_new_scan_result(monkeypatch: pytest.MonkeyPatch) 
     assert len(reports) == 1
     assert reports[0].scan_id == run.scan_id
     assert source.status == ScanStatus.COMPLETED
+    assert summary_loader.call_args.kwargs["user_id"] == source.user_id
+    assert summary_loader.call_args.kwargs["domain"] == source.domain
+    assert summary_loader.call_args.kwargs["schedule_id"] == schedule.id
+    assert artifact_generator.call_args.kwargs["risk_period"] is risk_period

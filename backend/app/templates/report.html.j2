@@ -303,6 +303,41 @@
     {% endif %}
   </section>
 
+  {% if risk_period %}
+  <section>
+    <h2>5. Period Risk Changes</h2>
+    <p class="meta">UTC period [{{ risk_period.start_at }}, {{ risk_period.end_at }})</p>
+    <p>Terminal scans reviewed: {{ risk_period.scanned }}</p>
+    <p>Projection coverage: {{ risk_period.projected }} projected;
+      {{ risk_period.pending }} pending; {{ risk_period.failed }} failed;
+      {{ risk_period.unusable_ruleset_version }} invalid ruleset;
+      {{ risk_period.unavailable }} unavailable.</p>
+    <table>
+      <thead><tr><th>Adjacent-scan transition</th><th style="text-align:right">Count</th></tr></thead>
+      <tbody>
+        <tr><td>New</td><td style="text-align:right">{{ risk_period.change_counts.new }}</td></tr>
+        <tr><td>Continuing</td><td style="text-align:right">{{ risk_period.change_counts.continuing }}</td></tr>
+        <tr><td>Resolved</td><td style="text-align:right">{{ risk_period.change_counts.resolved }}</td></tr>
+        <tr><td>Unknown</td><td style="text-align:right">{{ risk_period.change_counts.unknown }}</td></tr>
+      </tbody>
+    </table>
+    {% if risk_period.has_unknown_coverage %}
+    <p><strong>Coverage incomplete or uncertain.</strong> Only evidenced adjacent-scan
+      transitions are counted. Missing, skipped, failed, unprojected, incompatible,
+      or truncated evidence does not prove a repair.</p>
+    {% else %}
+    <p>No evidence gaps were observed in the loaded scans. Counts are adjacent-scan
+      transitions, not distinct or current risks.</p>
+    {% endif %}
+    {% if risk_period.truncated %}
+    <p><strong>Scan limit reached:</strong> Additional scans were not classified.</p>
+    {% endif %}
+    {% if risk_period.scanned == 0 %}
+    <p><strong>No terminal scans were available in this period.</strong></p>
+    {% endif %}
+  </section>
+  {% endif %}
+
   <footer class="footer">
     <p>OrbiCheck Security Report · scan {{ scan.id }} · external-perspective assessment</p>
   </footer>

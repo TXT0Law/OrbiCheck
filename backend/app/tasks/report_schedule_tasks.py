@@ -19,6 +19,8 @@ from app.services.report_schedule_service import (
     dispatch_due_schedules_sync,
 )
 from app.services.report_service import generate_report_artifacts_sync
+from app.services.finding_report_presentation import present_report_risk_period
+from app.services.finding_report_summary import load_scheduled_report_risk_summary
 from app.services.transformers import ALL_MODULES
 from app.tasks.scan_tasks import _get_sync_session, execute_scan
 from app.utils.url_safety import validate_url_safety
@@ -171,9 +173,20 @@ def generate_scheduled_report_run(run_id: str) -> dict:
         db.commit()
 
         try:
+            risk_summary = load_scheduled_report_risk_summary(
+                db,
+                user_id=schedule.user_id,
+                schedule_id=schedule.id,
+                domain=scan.domain,
+                cadence=schedule.cadence,
+                timezone_name=schedule.timezone,
+                end_at=now,
+            )
+            risk_period = present_report_risk_period(risk_summary)
             content_md, content_pdf, content_html, report_meta = generate_report_artifacts_sync(
                 db,
                 report,
+                risk_period=risk_period,
             )
             file_size = len(content_md.encode("utf-8")) + (
                 len(content_pdf) if content_pdf else 0

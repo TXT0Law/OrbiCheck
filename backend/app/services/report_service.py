@@ -4,6 +4,7 @@ import base64
 import logging
 import os
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -21,8 +22,13 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.models.monitor import Monitor, MonitorChange, MonitorCheck
 from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
-from app.services.recommendations import generate_recommendations
+from app.services.finding_report_presentation import ReportRiskPeriodPresentation
+from app.services.finding_report_period import (
+    REPORT_RISK_PERIOD_REPORTED_STATUS,
+    REPORT_RISK_PERIOD_SCHEMA_VERSION,
+)
 from app.services.operational_event_service import record_event
+from app.services.recommendations import generate_recommendations
 from app.services.report_charts import (
     render_module_duration_bar,
     render_score_radar,
@@ -828,6 +834,48 @@ def render_markdown(report_data: dict) -> str:
     if not scan["moduleErrors"]:
         lines.append("| none | none |")
 
+    risk_period: ReportRiskPeriodPresentation | None = report_data.get("riskPeriod")
+    if risk_period is not None:
+        lines.extend(
+            [
+                "",
+                "---",
+                "",
+                "## 7. Period Risk Changes",
+                "",
+                f"**Period (UTC)**: [{risk_period.start_at}, {risk_period.end_at})",
+                f"**Terminal scans reviewed**: {risk_period.scanned}",
+                (
+                    "**Projection coverage**: "
+                    f"{risk_period.projected} projected; {risk_period.pending} pending; "
+                    f"{risk_period.failed} failed; "
+                    f"{risk_period.unusable_ruleset_version} invalid ruleset; "
+                    f"{risk_period.unavailable} unavailable"
+                ),
+                "",
+                "| Adjacent-scan transition | Count |",
+                "|---|---:|",
+                *(
+                    f"| {label} | {risk_period.change_counts[label]} |"
+                    for label in ("new", "continuing", "resolved", "unknown")
+                ),
+                "",
+                (
+                    "**Coverage**: Incomplete or uncertain. These counts describe only "
+                    "observed adjacent-scan transitions; a missing, skipped, failed, "
+                    "unprojected, incompatible, or truncated comparison never proves "
+                    "a risk was repaired."
+                    if risk_period.has_unknown_coverage
+                    else "**Coverage**: No evidence gaps were observed in the loaded scans. "
+                    "Counts describe adjacent-scan transitions, not distinct or current risks."
+                ),
+            ]
+        )
+        if risk_period.truncated:
+            lines.append("**Scan limit reached**: Additional scans in this period were not classified.")
+        if risk_period.scanned == 0:
+            lines.append("**No terminal scans were available in this period.**")
+
     return "\n".join(lines)
 
 
@@ -1144,6 +1192,37 @@ def render_pdf(report_data: dict) -> bytes:
             ),
         )
 
+    risk_period: ReportRiskPeriodPresentation | None = report_data.get("riskPeriod")
+    if risk_period is not None:
+        coverage_note = (
+            "Coverage incomplete or uncertain. Only evidenced adjacent-scan transitions "
+            "are counted; missing, skipped, failed, unprojected, incompatible, or "
+            "truncated evidence does not prove a repair."
+            if risk_period.has_unknown_coverage
+            else "No evidence gaps observed in loaded scans. Counts are adjacent-scan "
+            "transitions, not distinct or current risks."
+        )
+        risk_lines = [
+            f"Period (UTC): [{risk_period.start_at}, {risk_period.end_at})",
+            f"Terminal scans reviewed: {risk_period.scanned}",
+            (
+                f"Projection: {risk_period.projected} projected, "
+                f"{risk_period.pending} pending, {risk_period.failed} failed, "
+                f"{risk_period.unusable_ruleset_version} invalid ruleset, "
+                f"{risk_period.unavailable} unavailable"
+            ),
+        ]
+        risk_lines.extend(
+            f"{label.capitalize()}: {risk_period.change_counts[label]}"
+            for label in ("new", "continuing", "resolved", "unknown")
+        )
+        risk_lines.append(coverage_note)
+        if risk_period.truncated:
+            risk_lines.append("Scan limit reached; additional scans were not classified.")
+        if risk_period.scanned == 0:
+            risk_lines.append("No terminal scans were available in this period.")
+        _pdf_write_section(pdf, "Period Risk Changes", "\n".join(risk_lines))
+
     _pdf_write_section(
         pdf,
         "Recommendations",
@@ -1240,13 +1319,19 @@ def render_html(report_data: dict) -> str:
             "score_radar": _png_to_data_b64(score_radar),
             "module_duration": _png_to_data_b64(module_bar),
         },
+        risk_period=report_data.get("riskPeriod"),
     )
 
 
 def generate_report_artifacts_sync(
-    db: Session, report: Report
+    db: Session,
+    report: Report,
+    *,
+    risk_period: ReportRiskPeriodPresentation | None = None,
 ) -> tuple[str, bytes | None, str | None, dict]:
     report_data = build_report_payload_sync(db, report)
+    if risk_period is not None:
+        report_data["riskPeriod"] = risk_period
     content_md = render_markdown(report_data)
     content_pdf = render_pdf(report_data) if report.format in PDF_ENABLED_FORMATS else None
     content_html = render_html(report_data) if report.format in HTML_ENABLED_FORMATS else None
@@ -1255,6 +1340,13 @@ def generate_report_artifacts_sync(
         "monitorIncluded": report.monitor_id is not None,
         "format": report.format.value,
     }
+    if risk_period is not None:
+        meta["riskPeriod"] = {
+            "status": REPORT_RISK_PERIOD_REPORTED_STATUS,
+            "version": REPORT_RISK_PERIOD_SCHEMA_VERSION,
+            "endAt": risk_period.end_at,
+            "coverage": asdict(risk_period),
+        }
     return content_md, content_pdf, content_html, meta
 
 
