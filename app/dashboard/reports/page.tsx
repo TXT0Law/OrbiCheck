@@ -33,11 +33,11 @@ export default function ReportsPage() {
             {messages.subtitle}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setScheduleDialogOpen(true)}>
+        <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+          <Button className="w-full" variant="outline" onClick={() => setScheduleDialogOpen(true)}>
             {messages.createSchedule}
           </Button>
-          <Button onClick={() => setDialogOpen(true)}>{messages.generateReport}</Button>
+          <Button className="w-full" onClick={() => setDialogOpen(true)}>{messages.generateReport}</Button>
         </div>
       </div>
 
