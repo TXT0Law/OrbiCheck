@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence, Set
 from typing import Literal
 
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanStatus
+from app.services.finding_report_evidence import ReportRiskObservation
 from app.services.transformers import _is_skipped
 
 ReportRuleChange = Literal["new", "continuing", "resolved", "unknown"]
+ReportObservation = ScanFindingObservation | ReportRiskObservation
 
 
-def _ready_pair(previous: Scan, current: Scan) -> bool:
+def _ready_pair(
+    previous: Scan,
+    current: Scan,
+    previous_observations: Sequence[ReportObservation],
+    current_observations: Sequence[ReportObservation],
+) -> bool:
     version = previous.finding_ruleset_version
     return (
         previous.id != current.id
@@ -28,8 +36,8 @@ def _ready_pair(previous: Scan, current: Scan) -> bool:
         and version is not None
         and version > 0
         and version == current.finding_ruleset_version
-        and all(row.ruleset_version == version for row in previous.finding_observations)
-        and all(row.ruleset_version == version for row in current.finding_observations)
+        and all(row.ruleset_version == version for row in previous_observations)
+        and all(row.ruleset_version == version for row in current_observations)
     )
 
 
@@ -43,39 +51,37 @@ def _successful_modules(scan: Scan) -> frozenset[str]:
     )
 
 
-def _observation(scan: Scan, rule_id: str) -> ScanFindingObservation | None:
-    matches = [row for row in scan.finding_observations if row.rule_id == rule_id]
+def _observation(
+    observations: Sequence[ReportObservation], rule_id: str
+) -> ReportObservation | None:
+    matches = [row for row in observations if row.rule_id == rule_id]
     if len(matches) > 1:
         raise ValueError("A scan has duplicate observations for one rule")
     return matches[0] if matches else None
 
 
-def classify_report_rule_change(
-    previous: Scan, current: Scan, *, rule_id: str
+def _classify_rule_evidence(
+    previous_observations: Sequence[ReportObservation],
+    current_observations: Sequence[ReportObservation],
+    previous_success: Set[str],
+    current_success: Set[str],
+    rule_id: str,
 ) -> ReportRuleChange:
-    """Classify one known rule only when its own module evidence is comparable.
-
-    Missing, failed, skipped, or unrelated modules cannot prove absence. The
-    caller must separately report absent scans and truncated period coverage.
-    """
-    if not rule_id or rule_id != rule_id.strip():
-        raise ValueError("A stable rule ID is required")
-    if not _ready_pair(previous, current):
-        return "unknown"
-
     try:
-        before = _observation(previous, rule_id)
-        after = _observation(current, rule_id)
+        before = _observation(previous_observations, rule_id)
+        after = _observation(current_observations, rule_id)
     except ValueError:
         return "unknown"
     if before is None and after is None:
         return "unknown"
 
-    previous_success = _successful_modules(previous)
-    current_success = _successful_modules(current)
-    if before is not None and not set(before.evidence_modules).intersection(previous_success):
+    if before is not None and not set(before.evidence_modules).intersection(
+        previous_success
+    ):
         return "unknown"
-    if after is not None and not set(after.evidence_modules).intersection(current_success):
+    if after is not None and not set(after.evidence_modules).intersection(
+        current_success
+    ):
         return "unknown"
     if before is not None and after is not None:
         return "continuing"
@@ -87,6 +93,61 @@ def classify_report_rule_change(
         )
     return (
         "resolved"
-        if before is not None and set(before.evidence_modules).intersection(current_success)
+        if before is not None
+        and set(before.evidence_modules).intersection(current_success)
         else "unknown"
+    )
+
+
+def classify_report_rule_change(
+    previous: Scan, current: Scan, *, rule_id: str
+) -> ReportRuleChange:
+    """Classify one known rule using the scans' directly loaded evidence."""
+    if not rule_id or rule_id != rule_id.strip():
+        raise ValueError("A stable rule ID is required")
+    if not _ready_pair(
+        previous, current, previous.finding_observations, current.finding_observations
+    ):
+        return "unknown"
+    return _classify_rule_evidence(
+        previous.finding_observations,
+        current.finding_observations,
+        _successful_modules(previous),
+        _successful_modules(current),
+        rule_id,
+    )
+
+
+def classify_report_rule_change_from_evidence(
+    previous: Scan,
+    current: Scan,
+    *,
+    rule_id: str,
+    previous_observations: Sequence[ReportRiskObservation],
+    current_observations: Sequence[ReportRiskObservation],
+    previous_successful_modules: Set[str],
+    current_successful_modules: Set[str],
+    evidence_complete: bool,
+) -> ReportRuleChange:
+    """Classify narrow, bounded evidence only when all pages are complete.
+
+    The caller must pass false if any scan, observation, module, or per-row
+    evidence was truncated. Missing/skipped modules cannot prove absence.
+    """
+    if not rule_id or rule_id != rule_id.strip():
+        raise ValueError("A stable rule ID is required")
+    if not evidence_complete or not _ready_pair(
+        previous, current, previous_observations, current_observations
+    ):
+        return "unknown"
+    if any(row.scan_id != previous.id for row in previous_observations) or any(
+        row.scan_id != current.id for row in current_observations
+    ):
+        return "unknown"
+    return _classify_rule_evidence(
+        previous_observations,
+        current_observations,
+        previous_successful_modules,
+        current_successful_modules,
+        rule_id,
     )
