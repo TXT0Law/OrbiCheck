@@ -396,6 +396,65 @@ def test_scheduled_risk_section_exposes_empty_and_truncated_period() -> None:
 
 
 @pytest.mark.unit
+def test_zero_scan_period_stays_uncertain_in_every_report_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scheduled report with no terminal scans must not imply repaired risks."""
+    end_at = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    period = ReportRiskPeriodScans([], has_more=False)
+    changes = classify_report_risk_period(
+        user_id=7,
+        domain="example.com",
+        predecessor=None,
+        period=period,
+        observations=ReportRiskObservationsPage(
+            [], has_more=False, oversized_evidence=False
+        ),
+        modules=ReportRiskModulesPage({}, has_more=False),
+    )
+    view = present_report_risk_period(
+        ScheduledReportRiskSummary(
+            window=ReportRiskWindow(end_at - timedelta(days=7), end_at),
+            period=period,
+            projection=summarize_report_risk_projection_coverage(period),
+            changes=changes,
+        )
+    )
+    pdf_sections: list[tuple[str, str]] = []
+    original_pdf_section = report_service._pdf_write_section
+
+    def capture_pdf_section(pdf: object, title: str, content: str) -> None:
+        pdf_sections.append((title, content))
+        original_pdf_section(pdf, title, content)
+
+    monkeypatch.setattr(report_service, "_pdf_write_section", capture_pdf_section)
+    monkeypatch.setattr(
+        report_service, "build_report_payload_sync", lambda _db, _report: _sample_report_data()
+    )
+
+    markdown, pdf, html, meta = report_service.generate_report_artifacts_sync(
+        MagicMock(), Report(title="Scheduled", format=ReportFormat.ALL), risk_period=view
+    )
+
+    assert view.scanned == 0 and view.has_unknown_coverage is True
+    assert view.change_counts == {
+        "new": 0, "continuing": 0, "resolved": 0, "unknown": 0,
+    }
+    assert "No terminal scans were available" in markdown
+    assert "| resolved | 0 |" in markdown
+    assert "Coverage**: Incomplete or uncertain" in markdown
+    assert pdf is not None and pdf.startswith(b"%PDF")
+    pdf_risk = next(content for title, content in pdf_sections if title == "Period Risk Changes")
+    assert "No terminal scans were available" in pdf_risk
+    assert "Resolved: 0" in pdf_risk
+    assert "Coverage incomplete or uncertain" in pdf_risk
+    assert html is not None and "No terminal scans were available" in html
+    assert "Coverage incomplete or uncertain" in html
+    assert '<td>Resolved</td><td style="text-align:right">0</td>' in html
+    assert meta["riskPeriod"]["status"] == "reported"
+
+
+@pytest.mark.unit
 def test_truncated_period_never_renders_an_unsupported_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
