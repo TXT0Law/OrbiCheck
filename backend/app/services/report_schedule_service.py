@@ -484,6 +484,15 @@ async def deliver_scheduled_report(
     summary: dict[str, Any] = {"channels": {}, "reportUrl": _report_link(report.id)}
     if "email" in (schedule.delivery_channels or []):
         email_results: list[dict[str, Any]] = []
+        if not schedule.email_recipients:
+            email_results.append(
+                {
+                    "recipient": "",
+                    "success": False,
+                    "error": "email_recipients_missing",
+                    "latencyMs": 0,
+                }
+            )
         for recipient in schedule.email_recipients or []:
             started = time.perf_counter()
             try:

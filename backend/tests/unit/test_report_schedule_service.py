@@ -1,17 +1,26 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from app.models.report_schedule import ReportScheduleCadence, ReportScheduleRunStatus
+from app.models.report import Report
+from app.models.report_schedule import (
+    ReportSchedule,
+    ReportScheduleCadence,
+    ReportScheduleRun,
+    ReportScheduleRunStatus,
+)
+from app.models.scan import Scan
+from app.services import report_schedule_service
 from app.services.report_schedule_service import (
     STALLED_REPORT_RUN_AGE,
     STALLED_REPORT_RUN_SAMPLE_SIZE,
     compute_next_run_at,
+    deliver_scheduled_report,
     list_stalled_report_run_ids_sync,
 )
 
@@ -79,3 +88,36 @@ def test_compute_next_run_monthly_clamps_to_last_day() -> None:
     )
 
     assert result == datetime(2026, 2, 28, 10, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_email_delivery_without_recipients_reports_failure_without_sending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A persisted invalid email schedule must report failure without sending."""
+    send_email = AsyncMock()
+    monkeypatch.setattr(report_schedule_service.email_service, "send_report_email", send_email)
+    schedule = ReportSchedule(
+        id=uuid4(),
+        user_id=7,
+        name="Weekly risk report",
+        delivery_channels=["email"],
+        email_recipients=[],
+    )
+    run = ReportScheduleRun(id=uuid4())
+    report = Report(id=uuid4())
+    scan = Scan(domain="example.com")
+
+    summary = await deliver_scheduled_report(schedule, run, report, scan)
+
+    assert summary["success"] is False
+    assert summary["channels"]["email"] == [
+        {
+            "recipient": "",
+            "success": False,
+            "error": "email_recipients_missing",
+            "latencyMs": 0,
+        }
+    ]
+    send_email.assert_not_awaited()
