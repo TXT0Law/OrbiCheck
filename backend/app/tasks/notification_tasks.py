@@ -143,6 +143,11 @@ async def _dispatch_pending_scan_risk_events() -> dict[str, Any]:
     for event_id in event_ids:
         outcome = await deliver_one_scan_risk_event(event_id)
         outcomes[outcome.value] = outcomes.get(outcome.value, 0) + 1
+        logger.info(
+            "scan_risk_dispatch_event_finished",
+            event_id=str(event_id),
+            outcome=outcome.value,
+        )
     logger.info(
         "scan_risk_dispatch_batch_finished",
         candidates=len(event_ids),

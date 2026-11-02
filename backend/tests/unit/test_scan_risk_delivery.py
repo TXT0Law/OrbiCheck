@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -285,6 +285,8 @@ async def test_risk_dispatch_batch_releases_candidate_session_before_each_delive
     monkeypatch.setattr(notification_tasks, "list_pending_risk_event_ids", candidate_ids)
     monkeypatch.setattr(notification_tasks, "list_expired_claimed_risk_event_ids", expired_claims)
     monkeypatch.setattr(notification_tasks, "deliver_one_scan_risk_event", deliver)
+    log_info = Mock()
+    monkeypatch.setattr(notification_tasks, "logger", SimpleNamespace(info=log_info))
 
     result = await notification_tasks._dispatch_pending_scan_risk_events()
 
@@ -296,6 +298,12 @@ async def test_risk_dispatch_batch_releases_candidate_session_before_each_delive
         "outcomes": {"sent": 1, "unknown": 1},
         "unresolvedClaimIdsSample": [str(unresolved_id)],
     }
+    log_info.assert_any_call(
+        "scan_risk_dispatch_event_finished", event_id=str(event_ids[0]), outcome="sent"
+    )
+    log_info.assert_any_call(
+        "scan_risk_dispatch_event_finished", event_id=str(event_ids[1]), outcome="unknown"
+    )
     assert tracker.open_sessions == tracker.open_transactions == 0
 
 
