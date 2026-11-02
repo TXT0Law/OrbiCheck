@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -158,3 +159,42 @@ async def test_invalid_persisted_delivery_channels_fail_before_any_send(
     send_email.assert_not_awaited()
     send_slack.assert_not_awaited()
     resolve_slack.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_enabled", ["false", 1])
+async def test_scheduled_slack_delivery_requires_boolean_opt_in(
+    monkeypatch: pytest.MonkeyPatch, invalid_enabled: object
+) -> None:
+    redis_client = MagicMock()
+    redis_client.get.return_value = json.dumps({
+        "channels": {
+            "slack": {
+                "enabled": invalid_enabled,
+                "target": "https://hooks.slack.com/services/T/B/key",
+            }
+        }
+    })
+    monkeypatch.setattr(
+        report_schedule_service.redis_sync.Redis,
+        "from_url",
+        MagicMock(return_value=redis_client),
+    )
+    send_slack = AsyncMock()
+    monkeypatch.setattr(report_schedule_service, "post_json", send_slack)
+    schedule = ReportSchedule(
+        id=uuid4(), user_id=7, name="Weekly report", delivery_channels=["slack"]
+    )
+
+    summary = await deliver_scheduled_report(
+        schedule,
+        ReportScheduleRun(id=uuid4()),
+        Report(id=uuid4()),
+        Scan(domain="example.com"),
+    )
+
+    assert summary["success"] is False
+    assert summary["channels"]["slack"]["error"] == "slack_not_configured"
+    send_slack.assert_not_awaited()
+    redis_client.close.assert_called_once()

@@ -437,7 +437,7 @@ def _resolve_slack_target(user_id: int) -> str | None:
     if not isinstance(channels, dict):
         return None
     slack = channels.get("slack")
-    if not isinstance(slack, dict) or not slack.get("enabled"):
+    if not isinstance(slack, dict) or slack.get("enabled") is not True:
         return None
     target = slack.get("target")
     return target.strip() if isinstance(target, str) and target.strip() else None

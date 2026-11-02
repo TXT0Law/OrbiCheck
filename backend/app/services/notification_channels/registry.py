@@ -121,7 +121,7 @@ def resolve_channel_configs(
     out: dict[str, ChannelConfig] = {}
 
     out[WebhookChannel.channel_id] = ChannelConfig(
-        enabled=bool(user_settings.get("webhookEnabled")),
+        enabled=user_settings.get("webhookEnabled") is True,
         target=user_settings.get("webhookUrl"),
         severity_filter=user_settings.get(
             "webhookSeverities",
@@ -129,7 +129,7 @@ def resolve_channel_configs(
         ),
     )
     out[EmailChannel.channel_id] = ChannelConfig(
-        enabled=bool(user_settings.get("emailEnabled")),
+        enabled=user_settings.get("emailEnabled") is True,
         target=user_settings.get("emailAddress"),
         severity_filter=_email_severity_filter(user_settings),
     )
@@ -158,7 +158,7 @@ def _coerce_channel_config(raw: Any) -> ChannelConfig:
         s for s in severity_filter if s in ("critical", "warning", "info")
     ] or ["critical", "warning"]
     return ChannelConfig(
-        enabled=bool(raw.get("enabled")),
+        enabled=raw.get("enabled") is True,
         target=raw.get("target"),
         severity_filter=cleaned,
         options=dict(raw.get("options") or {}),

@@ -94,7 +94,7 @@ def _normalize_channel_block(raw: Any) -> dict[str, Any]:
     if not isinstance(options, dict):
         options = {}
     return {
-        "enabled": bool(raw.get("enabled")),
+        "enabled": raw.get("enabled") is True,
         "target": target,
         "severityFilter": cleaned,
         "options": options,
@@ -127,10 +127,10 @@ def normalize_notification_settings(raw: dict[str, Any] | None) -> dict[str, Any
         email = email.strip() or None
     return {
         "webhookUrl": url,
-        "webhookEnabled": bool(raw.get("webhookEnabled")),
+        "webhookEnabled": raw.get("webhookEnabled") is True,
         "monitorEventsEnabled": bool(raw.get("monitorEventsEnabled", True)),
         "scanRiskEventsEnabled": raw.get("scanRiskEventsEnabled") is True,
-        "emailEnabled": bool(raw.get("emailEnabled")),
+        "emailEnabled": raw.get("emailEnabled") is True,
         "emailAddress": email,
         "emailOnCritical": bool(raw.get("emailOnCritical", True)),
         "emailOnWarning": bool(raw.get("emailOnWarning", True)),

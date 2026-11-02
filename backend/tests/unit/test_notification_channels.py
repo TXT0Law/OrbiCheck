@@ -21,6 +21,7 @@ from app.services.notification_channels import (
     PagerDutyEventAction,
 )
 from app.services.notification_channels._helpers import render_alert_title
+from app.services.notification_channels.registry import resolve_channel_configs
 from app.services.notification_channels.discord import DiscordChannel, validate_target_url as validate_discord
 from app.services.notification_channels.pagerduty import (
     PagerDutyChannel,
@@ -37,6 +38,7 @@ from app.services.notification_channels.teams import (
     validate_target_url as validate_teams,
 )
 from app.services.notification_channels.webhook import WebhookChannel
+from app.services.user_notification_settings import normalize_notification_settings
 
 
 def _payload(**overrides) -> AlertPayload:
@@ -57,6 +59,29 @@ def _payload(**overrides) -> AlertPayload:
     }
     base.update(overrides)
     return AlertPayload(**base)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("invalid_enabled", ["false", 1])
+def test_non_boolean_opt_in_values_do_not_enable_notification_channels(
+    invalid_enabled: object,
+) -> None:
+    settings = {
+        "webhookEnabled": invalid_enabled,
+        "emailEnabled": invalid_enabled,
+        "channels": {
+            channel: {"enabled": invalid_enabled, "target": "configured"}
+            for channel in ("slack", "discord", "teams", "pagerduty")
+        },
+    }
+
+    normalized = normalize_notification_settings(settings)
+    assert normalized["webhookEnabled"] is False
+    assert normalized["emailEnabled"] is False
+    assert all(not channel["enabled"] for channel in normalized["channels"].values())
+
+    resolved = resolve_channel_configs(settings)
+    assert all(not channel.enabled for channel in resolved.values())
 
 
 # ── URL / key validators ──────────────────────────────────────────────
