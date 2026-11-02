@@ -12,13 +12,17 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Any
 
 import structlog
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_app import celery_app
+from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.notification_dispatch import (
     NOTIFICATION_DISPATCH_STATUS_FAILED,
@@ -27,6 +31,16 @@ from app.models.notification_dispatch import (
 from app.services.notification_channels.dispatch_log import (
     list_dispatch_pending,
     replay_dispatch,
+)
+from app.services.finding_notification_event import (
+    cancel_unattempted_risk_event_claim_in_transaction,
+    claim_pending_risk_event_in_transaction,
+    load_claimed_risk_send_snapshot,
+    mark_claimed_risk_event_sent_in_transaction,
+)
+from app.services.notification_channels.scan_risk_webhook import (
+    ScanRiskWebhookOutcome,
+    send_scan_risk_webhook,
 )
 from app.services.notification_channels.registry import get_channel
 from app.services.notification_channels.types import (
@@ -39,6 +53,78 @@ from app.services.user_notification_settings import get_notification_settings
 logger = structlog.get_logger(__name__)
 
 NOTIFICATION_RETRY_BATCH_SIZE: int = 50
+
+
+class ScanRiskDeliveryOutcome(StrEnum):
+    NOT_CLAIMED = "not_claimed"
+    CANCELLED = "cancelled"
+    STALE = "stale"
+    PREFLIGHT_UNAVAILABLE = "preflight_unavailable"
+    UNKNOWN = "unknown"
+    SENT = "sent"
+    CONFIRMATION_UNRECORDED = "confirmation_unrecorded"
+
+
+async def deliver_one_scan_risk_event(event_id: uuid.UUID) -> ScanRiskDeliveryOutcome:
+    """Deliver one evidence-backed event; callers must not auto-retry this.
+
+    Each database phase closes before Redis or webhook I/O. A claimed event
+    with an unknown external outcome is intentionally left claimed for
+    inspection rather than automatically requeued after its lease expires.
+    This function is not registered as a Celery task or scheduled yet.
+    """
+    async with async_session_factory() as db:
+        async with db.begin():
+            claim_token = await claim_pending_risk_event_in_transaction(db, event_id)
+    if claim_token is None:
+        return ScanRiskDeliveryOutcome.NOT_CLAIMED
+
+    async with async_session_factory() as db:
+        snapshot = await load_claimed_risk_send_snapshot(db, event_id, claim_token)
+    if snapshot is None:
+        async with async_session_factory() as db:
+            async with db.begin():
+                cancelled = await cancel_unattempted_risk_event_claim_in_transaction(
+                    db, event_id, claim_token
+                )
+        return ScanRiskDeliveryOutcome.CANCELLED if cancelled else ScanRiskDeliveryOutcome.STALE
+
+    try:
+        redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+        try:
+            user_settings = await get_notification_settings(redis, snapshot.user_id)
+        finally:
+            await redis.aclose()
+    except (RedisError, OSError, ValueError) as exc:
+        logger.warning(
+            "scan_risk_notification_preflight_unavailable",
+            event_id=str(event_id),
+            error_type=type(exc).__name__,
+        )
+        return ScanRiskDeliveryOutcome.PREFLIGHT_UNAVAILABLE
+
+    webhook_outcome = await send_scan_risk_webhook(snapshot.payload, user_settings)
+    if webhook_outcome in (ScanRiskWebhookOutcome.DISABLED, ScanRiskWebhookOutcome.BLOCKED):
+        async with async_session_factory() as db:
+            async with db.begin():
+                cancelled = await cancel_unattempted_risk_event_claim_in_transaction(
+                    db, event_id, claim_token
+                )
+        return ScanRiskDeliveryOutcome.CANCELLED if cancelled else ScanRiskDeliveryOutcome.STALE
+    if webhook_outcome is ScanRiskWebhookOutcome.UNKNOWN:
+        return ScanRiskDeliveryOutcome.UNKNOWN
+    if webhook_outcome is not ScanRiskWebhookOutcome.CONFIRMED:
+        return ScanRiskDeliveryOutcome.UNKNOWN
+
+    async with async_session_factory() as db:
+        async with db.begin():
+            recorded = await mark_claimed_risk_event_sent_in_transaction(
+                db, event_id, claim_token
+            )
+    if not recorded:
+        logger.warning("scan_risk_notification_confirmation_unrecorded", event_id=str(event_id))
+        return ScanRiskDeliveryOutcome.CONFIRMATION_UNRECORDED
+    return ScanRiskDeliveryOutcome.SENT
 
 
 def _payload_from_log(row: NotificationDispatchLog) -> AlertPayload:
