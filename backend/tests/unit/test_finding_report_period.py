@@ -290,7 +290,7 @@ def test_report_projection_coverage_empty_period_is_explicit() -> None:
 
 
 @pytest.mark.unit
-def test_report_risk_period_is_bounded_and_keeps_unprojected_scans_visible() -> None:
+def test_report_risk_period_is_bounded_and_keeps_uncertain_scans_visible() -> None:
     scans = [
         Scan(
             id=uuid4(), user_id=7, domain="example.com", url="https://example.com",
@@ -299,6 +299,8 @@ def test_report_risk_period_is_bounded_and_keeps_unprojected_scans_visible() -> 
         )
         for _ in range(3)
     ]
+    scans[1].status = ScanStatus.FAILED
+    scans[2].status = ScanStatus.CANCELLED
     db = MagicMock()
     db.execute.return_value.scalars.return_value.all.return_value = scans
 
@@ -308,12 +310,17 @@ def test_report_risk_period_is_bounded_and_keeps_unprojected_scans_visible() -> 
 
     assert page.scans == scans[:2]
     assert page.scans[0].finding_observations_projected_at is None
+    assert page.scans[1].status == ScanStatus.FAILED
     assert page.has_more is True
     query = db.execute.call_args.args[0]
-    sql = str(query.compile(dialect=postgresql.dialect()))
+    compiled = query.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
     assert "scans.user_id =" in sql
     assert "scans.domain =" in sql
-    assert "scans.status =" in sql
+    assert "scans.status IN" in sql
+    assert {ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELLED} in [
+        set(value) for value in compiled.params.values() if isinstance(value, (list, tuple))
+    ]
     assert "scans.completed_at >=" in sql
     assert "scans.completed_at <" in sql
     assert "ORDER BY scans.completed_at, scans.id" in sql

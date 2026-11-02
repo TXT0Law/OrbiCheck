@@ -208,8 +208,9 @@ def load_report_risk_period_scans(
     end_at: datetime,
     limit: int = REPORT_RISK_PERIOD_SCAN_LIMIT,
 ) -> ReportRiskPeriodScans:
-    """Load completed scans in [start, end), including unprojected scans.
+    """Load terminal scans in [start, end), including failed scans.
 
+    Failed, cancelled, or unprojected scans interrupt comparable evidence.
     A truncated result cannot prove that a risk was absent or repaired. The
     caller must also inspect each scan's projection and module evidence.
     """
@@ -231,7 +232,9 @@ def load_report_risk_period_scans(
         .where(
             Scan.user_id == user_id,
             Scan.domain == domain,
-            Scan.status == ScanStatus.COMPLETED,
+            Scan.status.in_(
+                (ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELLED)
+            ),
             Scan.completed_at >= start_at,
             Scan.completed_at < end_at,
         )
