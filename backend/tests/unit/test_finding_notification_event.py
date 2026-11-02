@@ -297,6 +297,86 @@ async def test_sent_finalization_requires_matching_unexpired_claim_without_commi
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claimed_event_pre_send_check_reads_fresh_evidence_without_locks(monkeypatch) -> None:
+    baseline = _evidence_scan(risk=False)
+    scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    event = _pending_event(scan, baseline)
+    token = uuid4()
+    event.status = RISK_EVENT_CLAIMED
+    event.claim_token = token
+    event.claim_expires_at = NEXT_COMPLETION + RISK_EVENT_CLAIM_DURATION
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: event),
+                SimpleNamespace(scalar_one_or_none=lambda: scan),
+                SimpleNamespace(scalar_one_or_none=lambda: event),
+            ]
+        ),
+        commit=AsyncMock(),
+    )
+    history = AsyncMock(return_value=RiskHistoryPage(scans=[baseline], complete=True))
+    monkeypatch.setattr(finding_notification_event, "load_recent_risk_history", history)
+
+    assert await finding_notification_event.claimed_risk_event_is_ready_for_send(
+        db, event.id, token
+    )
+    queries = [call.args[0] for call in db.execute.await_args_list]
+    assert len(queries) == 3
+    sql = [str(query.compile(dialect=postgresql.dialect())) for query in queries]
+    assert "claim_expires_at > clock_timestamp()" in sql[0]
+    assert "claim_token =" in sql[0]
+    assert "claim_expires_at > clock_timestamp()" in sql[2]
+    assert all("FOR UPDATE" not in statement for statement in sql)
+    assert all(query._execution_options["populate_existing"] for query in queries)
+    assert token in queries[0].compile().params.values()
+    history.assert_awaited_once_with(db, scan)
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claimed_event_pre_send_check_rejects_missing_claim_or_evidence(monkeypatch) -> None:
+    baseline = _evidence_scan(risk=False)
+    scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    event = _pending_event(scan, baseline)
+    event.status = RISK_EVENT_CLAIMED
+    event.claim_token = uuid4()
+    event.claim_expires_at = NEXT_COMPLETION + RISK_EVENT_CLAIM_DURATION
+    history = AsyncMock(return_value=RiskHistoryPage(scans=[baseline], complete=True))
+    monkeypatch.setattr(finding_notification_event, "load_recent_risk_history", history)
+    db = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None))
+    )
+
+    assert not await finding_notification_event.claimed_risk_event_is_ready_for_send(
+        db, event.id, uuid4()
+    )
+    history.assert_not_awaited()
+
+    db.execute.side_effect = [
+        SimpleNamespace(scalar_one_or_none=lambda: event),
+        SimpleNamespace(scalar_one_or_none=lambda: scan),
+        SimpleNamespace(scalar_one_or_none=lambda: event),
+    ]
+    scan.module_results[0].status = ModuleStatus.FAILED
+    assert not await finding_notification_event.claimed_risk_event_is_ready_for_send(
+        db, event.id, event.claim_token
+    )
+
+    scan.module_results[0].status = ModuleStatus.SUCCESS
+    db.execute.side_effect = [
+        SimpleNamespace(scalar_one_or_none=lambda: event),
+        SimpleNamespace(scalar_one_or_none=lambda: scan),
+        SimpleNamespace(scalar_one_or_none=lambda: None),
+    ]
+    assert not await finding_notification_event.claimed_risk_event_is_ready_for_send(
+        db, event.id, event.claim_token
+    )
+
+
+@pytest.mark.unit
 def test_dispatch_guard_requires_same_live_episode_and_successful_evidence() -> None:
     baseline = _evidence_scan(risk=False)
     current = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)

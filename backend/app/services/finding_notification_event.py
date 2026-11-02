@@ -150,8 +150,37 @@ async def mark_claimed_risk_event_sent_in_transaction(
     return result.rowcount == 1
 
 
+async def claimed_risk_event_is_ready_for_send(
+    db: AsyncSession, event_id: uuid.UUID, claim_token: uuid.UUID
+) -> bool:
+    """Check a live claim and fresh evidence immediately before external I/O.
+
+    This read holds no row locks. The caller must end its read transaction
+    before network I/O; a true result is only a current snapshot, since a
+    rescan or retry may still cancel the claim before delivery completes.
+    """
+    event = (await db.execute(_live_claim_query(event_id, claim_token))).scalar_one_or_none()
+    if event is None:
+        return False
+
+    scan = (await db.execute(_scan_query(event.scan_id, lock=False))).scalar_one_or_none()
+    if scan is None:
+        return False
+    history = await load_recent_risk_history(db, scan)
+    # The read of historical evidence may take time. Check the claim once
+    # more so an intervening cancellation or expiration fails closed.
+    event = (await db.execute(_live_claim_query(event_id, claim_token))).scalar_one_or_none()
+    if event is None:
+        return False
+    return risk_event_is_dispatchable(event, scan, history, required_status=RISK_EVENT_CLAIMED)
+
+
 def risk_event_is_dispatchable(
-    event: ScanRiskNotificationEvent, scan: Scan, history: RiskHistoryPage
+    event: ScanRiskNotificationEvent,
+    scan: Scan,
+    history: RiskHistoryPage,
+    *,
+    required_status: str = RISK_EVENT_PENDING,
 ) -> bool:
     """Revalidate a queued episode against current, evidence-backed history.
 
@@ -160,7 +189,7 @@ def risk_event_is_dispatchable(
     and missing evidence all fail closed instead of sending a stale alert.
     """
     if (
-        event.status != RISK_EVENT_PENDING
+        event.status != required_status
         or event.scan_id != scan.id
         or event.scan_completed_at != scan.completed_at
         or event.ruleset_version != scan.finding_ruleset_version
@@ -180,8 +209,8 @@ def risk_event_is_dispatchable(
     )
 
 
-def _scan_query(scan_id: uuid.UUID) -> Select[tuple[Scan]]:
-    return (
+def _scan_query(scan_id: uuid.UUID, *, lock: bool = True) -> Select[tuple[Scan]]:
+    query = (
         select(Scan)
         .where(Scan.id == scan_id)
         .options(
@@ -189,7 +218,22 @@ def _scan_query(scan_id: uuid.UUID) -> Select[tuple[Scan]]:
             selectinload(Scan.finding_observations),
         )
         .execution_options(populate_existing=True)
-        .with_for_update(of=Scan)
+    )
+    return query.with_for_update(of=Scan) if lock else query
+
+
+def _live_claim_query(
+    event_id: uuid.UUID, claim_token: uuid.UUID
+) -> Select[tuple[ScanRiskNotificationEvent]]:
+    return (
+        select(ScanRiskNotificationEvent)
+        .where(
+            ScanRiskNotificationEvent.id == event_id,
+            ScanRiskNotificationEvent.status == RISK_EVENT_CLAIMED,
+            ScanRiskNotificationEvent.claim_token == claim_token,
+            ScanRiskNotificationEvent.claim_expires_at > func.clock_timestamp(),
+        )
+        .execution_options(populate_existing=True)
     )
 
 
