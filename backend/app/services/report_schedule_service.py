@@ -526,6 +526,28 @@ async def deliver_scheduled_report(
             summary["runId"] = str(run.id)
             return summary
 
+    slack_target = ""
+    if "slack" in channels:
+        target = _resolve_slack_target(schedule.user_id)
+        slack_error: str | None = None
+        if not target:
+            slack_error = "slack_not_configured"
+        else:
+            try:
+                slack_target = validate_target_url(target)
+            except ValueError as exc:
+                slack_error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+        if slack_error:
+            summary["channels"]["slack"] = {
+                "success": False,
+                "error": slack_error,
+                "latencyMs": 0,
+            }
+            summary["success"] = False
+            summary["runId"] = str(run.id)
+            return summary
+
+    if "email" in channels:
         email_results: list[dict[str, Any]] = []
         for recipient in email_recipients:
             started = time.perf_counter()
@@ -554,29 +576,20 @@ async def deliver_scheduled_report(
 
     if "slack" in channels:
         started = time.perf_counter()
-        target = _resolve_slack_target(schedule.user_id)
-        if not target:
+        try:
+            await post_json(slack_target, _build_slack_payload(schedule, report, scan))
+        except (ValueError, httpx.HTTPError) as exc:
             summary["channels"]["slack"] = {
                 "success": False,
-                "error": "slack_not_configured",
-                "latencyMs": 0,
+                "error": f"{exc.__class__.__name__}: {str(exc)[:160]}",
+                "latencyMs": int((time.perf_counter() - started) * 1000),
             }
         else:
-            try:
-                target = validate_target_url(target)
-                await post_json(target, _build_slack_payload(schedule, report, scan))
-            except (ValueError, httpx.HTTPError) as exc:
-                summary["channels"]["slack"] = {
-                    "success": False,
-                    "error": f"{exc.__class__.__name__}: {str(exc)[:160]}",
-                    "latencyMs": int((time.perf_counter() - started) * 1000),
-                }
-            else:
-                summary["channels"]["slack"] = {
-                    "success": True,
-                    "error": None,
-                    "latencyMs": int((time.perf_counter() - started) * 1000),
-                }
+            summary["channels"]["slack"] = {
+                "success": True,
+                "error": None,
+                "latencyMs": int((time.perf_counter() - started) * 1000),
+            }
 
     failures = [
         value

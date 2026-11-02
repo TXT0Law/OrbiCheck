@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.api.v1.schemas.report_schedule import REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT
-from app.models.report import Report
+from app.models.report import Report, ReportFormat
 from app.models.report_schedule import (
     ReportSchedule,
     ReportScheduleCadence,
@@ -185,6 +185,72 @@ async def test_persisted_email_recipients_are_normalized_before_send(
     assert summary["success"] is True
     assert summary["channels"]["email"][0]["recipient"] == "ops@example.com"
     assert send_email.await_args.kwargs["to_email"] == "ops@example.com"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slack_target", [None, "https://example.com/webhook"])
+async def test_invalid_slack_target_prevents_partial_email_delivery(
+    monkeypatch: pytest.MonkeyPatch, slack_target: str | None
+) -> None:
+    send_email = AsyncMock(return_value=True)
+    send_slack = AsyncMock()
+    monkeypatch.setattr(report_schedule_service.email_service, "send_report_email", send_email)
+    monkeypatch.setattr(report_schedule_service, "post_json", send_slack)
+    monkeypatch.setattr(
+        report_schedule_service, "_resolve_slack_target", MagicMock(return_value=slack_target)
+    )
+    schedule = ReportSchedule(
+        id=uuid4(),
+        user_id=7,
+        name="Weekly risk report",
+        delivery_channels=["email", "slack"],
+        email_recipients=["ops@example.com"],
+    )
+
+    summary = await deliver_scheduled_report(
+        schedule, ReportScheduleRun(id=uuid4()), Report(id=uuid4()), Scan(domain="example.com")
+    )
+
+    assert summary["success"] is False
+    assert summary["channels"]["slack"]["success"] is False
+    assert "email" not in summary["channels"]
+    send_email.assert_not_awaited()
+    send_slack.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_valid_mixed_delivery_sends_each_channel_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    send_email = AsyncMock(return_value=True)
+    send_slack = AsyncMock()
+    slack_target = "https://hooks.slack.com/services/T/B/key"
+    monkeypatch.setattr(report_schedule_service.email_service, "send_report_email", send_email)
+    monkeypatch.setattr(report_schedule_service, "post_json", send_slack)
+    monkeypatch.setattr(
+        report_schedule_service, "_resolve_slack_target", MagicMock(return_value=slack_target)
+    )
+    schedule = ReportSchedule(
+        id=uuid4(),
+        user_id=7,
+        name="Weekly risk report",
+        delivery_channels=["email", "slack"],
+        email_recipients=["ops@example.com"],
+    )
+
+    summary = await deliver_scheduled_report(
+        schedule,
+        ReportScheduleRun(id=uuid4()),
+        Report(id=uuid4(), format=ReportFormat.PDF),
+        Scan(domain="example.com"),
+    )
+
+    assert summary["success"] is True
+    send_email.assert_awaited_once()
+    send_slack.assert_awaited_once()
+    assert send_slack.await_args.args[0] == slack_target
 
 
 @pytest.mark.unit
