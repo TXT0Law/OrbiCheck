@@ -163,6 +163,33 @@ async def mark_claimed_risk_event_sent_in_transaction(
     return result.rowcount == 1
 
 
+async def cancel_unattempted_risk_event_claim_in_transaction(
+    db: AsyncSession, event_id: uuid.UUID, claim_token: uuid.UUID
+) -> bool:
+    """Cancel an opted-out or blocked claim before any external I/O.
+
+    Call this only when the webhook adapter has not attempted a request.
+    Unknown network outcomes must retain their claim for manual resolution;
+    an expired or replaced token must not cancel another worker's event.
+    The caller owns the transaction.
+    """
+    result = await db.execute(
+        update(ScanRiskNotificationEvent)
+        .where(
+            ScanRiskNotificationEvent.id == event_id,
+            ScanRiskNotificationEvent.status == RISK_EVENT_CLAIMED,
+            ScanRiskNotificationEvent.claim_token == claim_token,
+            ScanRiskNotificationEvent.claim_expires_at > func.clock_timestamp(),
+        )
+        .values(
+            status=RISK_EVENT_CANCELLED,
+            claim_token=None,
+            claim_expires_at=None,
+        )
+    )
+    return result.rowcount == 1
+
+
 async def claimed_risk_event_is_ready_for_send(
     db: AsyncSession, event_id: uuid.UUID, claim_token: uuid.UUID
 ) -> bool:

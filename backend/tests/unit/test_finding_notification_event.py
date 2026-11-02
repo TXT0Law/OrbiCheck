@@ -298,6 +298,40 @@ async def test_sent_finalization_requires_matching_unexpired_claim_without_commi
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_unattempted_claim_cancellation_requires_live_token_without_committing() -> None:
+    event_id = uuid4()
+    token = uuid4()
+    db = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(rowcount=1)),
+        commit=AsyncMock(),
+    )
+
+    assert await finding_notification_event.cancel_unattempted_risk_event_claim_in_transaction(
+        db, event_id, token
+    )
+    statement = db.execute.await_args.args[0]
+    assert isinstance(statement, Update)
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "scan_risk_notification_events.id =" in sql
+    assert "scan_risk_notification_events.status =" in sql
+    assert "scan_risk_notification_events.claim_token =" in sql
+    assert "scan_risk_notification_events.claim_expires_at > clock_timestamp()" in sql
+    params = statement.compile().params
+    assert event_id in params.values()
+    assert token in params.values()
+    assert params["status"] == RISK_EVENT_CANCELLED
+    assert params["claim_token"] is None
+    assert params["claim_expires_at"] is None
+    db.commit.assert_not_awaited()
+
+    db.execute.return_value = SimpleNamespace(rowcount=0)
+    assert not await finding_notification_event.cancel_unattempted_risk_event_claim_in_transaction(
+        db, event_id, uuid4()
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_claimed_event_pre_send_check_reads_fresh_evidence_without_locks(monkeypatch) -> None:
     baseline = _evidence_scan(risk=False)
     scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
