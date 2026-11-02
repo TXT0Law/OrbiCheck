@@ -29,3 +29,25 @@ test("quick scan keeps its content height beside a taller monitor card", async (
   const monitorHeight = (await monitorCard.boundingBox())?.height ?? 0;
   expect(quickScanHeight).toBeLessThan(monitorHeight);
 });
+
+test("SSL watchlist loading rows stay inside the card at mobile width", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.route("**/api/v1/monitors?**", () => {});
+  await navigateTo(page, "/dashboard");
+
+  const watchlistCard = page
+    .getByText("SSL Expiry Watchlist", { exact: true })
+    .locator("../..");
+  await expect(watchlistCard).toBeVisible();
+
+  const firstRow = watchlistCard.locator(".grid").first();
+  const rowBox = await firstRow.boundingBox();
+  expect(rowBox).not.toBeNull();
+  const rowRight = (rowBox?.x ?? 0) + (rowBox?.width ?? 0);
+
+  for (const skeleton of await firstRow.locator(".animate-pulse").all()) {
+    const box = await skeleton.boundingBox();
+    expect(box).not.toBeNull();
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(rowRight);
+  }
+});
