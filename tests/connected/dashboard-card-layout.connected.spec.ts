@@ -51,3 +51,23 @@ test("SSL watchlist loading rows stay inside the card at mobile width", async ({
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(rowRight);
   }
 });
+
+test("recent scans loading rows stay inside the card at mobile width", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.route("**/api/v1/scans?**", () => {});
+  await navigateTo(page, "/dashboard");
+
+  const recentScansCard = page.getByText("Recent Scans", { exact: true }).locator("../..");
+  await expect(recentScansCard).toBeVisible();
+
+  const firstRow = recentScansCard.locator(".flex.items-center.gap-3").first();
+  const rowBox = await firstRow.boundingBox();
+  expect(rowBox).not.toBeNull();
+  const rowRight = (rowBox?.x ?? 0) + (rowBox?.width ?? 0);
+
+  for (const skeleton of await firstRow.locator(".animate-pulse").all()) {
+    const box = await skeleton.boundingBox();
+    expect(box).not.toBeNull();
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(rowRight);
+  }
+});
