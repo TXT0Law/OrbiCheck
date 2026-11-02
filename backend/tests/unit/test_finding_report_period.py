@@ -14,6 +14,7 @@ from app.models.report_schedule import ReportScheduleCadence
 from app.services.finding_report_period import (
     REPORT_RISK_PERIOD_SCAN_MAX_LIMIT,
     first_report_risk_window,
+    load_previous_delivered_report_boundary,
     load_report_risk_period_scans,
 )
 
@@ -65,6 +66,68 @@ def test_first_report_window_rejects_naive_end_and_invalid_cadence() -> None:
             timezone_name="UTC",
             end_at=END,
         )
+
+
+@pytest.mark.unit
+def test_previous_delivered_boundary_is_scoped_and_uses_report_content_time() -> None:
+    db = MagicMock()
+    schedule_id = uuid4()
+    previous_content_time = datetime(2026, 10, 20, tzinfo=timezone.utc)
+    db.scalar.return_value = previous_content_time
+
+    boundary = load_previous_delivered_report_boundary(
+        db, user_id=7, schedule_id=schedule_id, domain="example.com", end_at=END
+    )
+
+    assert boundary == previous_content_time
+    query = db.scalar.call_args.args[0]
+    compiled = query.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "SELECT reports.completed_at" in sql
+    assert "report_schedule_runs.report_id = reports.id" in sql
+    assert "report_schedule_runs.schedule_id =" in sql
+    assert "report_schedule_runs.status =" in sql
+    assert "report_schedule_runs.completed_at <" in sql
+    assert "reports.user_id =" in sql
+    assert "reports.status =" in sql
+    assert "reports.completed_at <" in sql
+    assert "reports.report_meta ->>" in sql
+    assert "ORDER BY reports.completed_at DESC, report_schedule_runs.id DESC" in sql
+    assert schedule_id in compiled.params.values()
+    assert "example.com" in compiled.params.values()
+    assert 1 in compiled.params.values()
+
+
+@pytest.mark.unit
+def test_previous_delivered_boundary_returns_none_without_matching_run() -> None:
+    db = MagicMock()
+    db.scalar.return_value = None
+
+    assert load_previous_delivered_report_boundary(
+        db, user_id=7, schedule_id=uuid4(), domain="example.com", end_at=END
+    ) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"user_id": 0},
+        {"schedule_id": "invalid"},
+        {"domain": " "},
+        {"domain": " example.com "},
+        {"end_at": datetime(2026, 11, 1)},
+    ],
+)
+def test_previous_delivered_boundary_rejects_invalid_scope(change: dict) -> None:
+    db = MagicMock()
+    args = {"user_id": 7, "schedule_id": uuid4(), "domain": "example.com", "end_at": END}
+    args.update(change)
+
+    with pytest.raises(ValueError):
+        load_previous_delivered_report_boundary(db, **args)
+
+    db.scalar.assert_not_called()
 
 
 @pytest.mark.unit

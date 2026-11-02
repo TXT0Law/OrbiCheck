@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -10,7 +11,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.report_schedule import ReportScheduleCadence
+from app.models.report import Report, ReportStatus
+from app.models.report_schedule import (
+    ReportScheduleCadence,
+    ReportScheduleRun,
+    ReportScheduleRunStatus,
+)
 from app.models.scan import Scan, ScanStatus
 
 REPORT_RISK_PERIOD_SCAN_LIMIT = 50
@@ -56,6 +62,47 @@ def first_report_risk_window(
 class ReportRiskPeriodScans:
     scans: list[Scan]
     has_more: bool
+
+
+def load_previous_delivered_report_boundary(
+    db: Session,
+    *,
+    user_id: int,
+    schedule_id: uuid.UUID,
+    domain: str,
+    end_at: datetime,
+) -> datetime | None:
+    """Find the last delivered report's generation time for this target.
+
+    Delivery can finish after generation. Starting at the report's content
+    timestamp preserves scans completed while the previous delivery ran.
+    Failed runs and reports for a prior schedule target never close a period.
+    """
+    if user_id <= 0 or not isinstance(schedule_id, uuid.UUID):
+        raise ValueError("Report risk period requires an owner and schedule")
+    if not domain or domain != domain.strip():
+        raise ValueError("Report risk period requires a domain")
+    if end_at.tzinfo is None or end_at.utcoffset() is None:
+        raise ValueError("Report risk period end must include a timezone")
+
+    query = (
+        select(Report.completed_at)
+        .join(ReportScheduleRun, ReportScheduleRun.report_id == Report.id)
+        .where(
+            ReportScheduleRun.schedule_id == schedule_id,
+            ReportScheduleRun.status == ReportScheduleRunStatus.COMPLETED,
+            ReportScheduleRun.completed_at.is_not(None),
+            ReportScheduleRun.completed_at < end_at,
+            Report.user_id == user_id,
+            Report.status == ReportStatus.COMPLETED,
+            Report.completed_at.is_not(None),
+            Report.completed_at < end_at,
+            Report.report_meta["scanDomain"].astext == domain,
+        )
+        .order_by(Report.completed_at.desc(), ReportScheduleRun.id.desc())
+        .limit(1)
+    )
+    return db.scalar(query)
 
 
 def load_report_risk_period_scans(
