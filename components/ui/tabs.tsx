@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import { cn } from "@/lib/utils";
+
 interface TabsContextValue {
   activeValue: string;
   setActiveValue: (value: string) => void;
@@ -49,7 +51,10 @@ export const TabsList = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HT
     return (
       <div
         ref={ref}
-        className={`inline-flex h-12 flex-wrap items-center gap-0.5 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-900 ${className}`}
+        className={cn(
+          "inline-flex h-12 flex-wrap items-center gap-0.5 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-900",
+          className
+        )}
         {...props}
       />
     );

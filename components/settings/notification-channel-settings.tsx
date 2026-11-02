@@ -237,7 +237,11 @@ export function NotificationChannelSettings() {
       </div>
 
       <Tabs defaultValue="webhook">
-        <TabsList>
+        <TabsList
+          role="group"
+          aria-label="Notification channels"
+          className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-3 xl:grid-cols-6"
+        >
           <TabsTrigger value="webhook">Webhook</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="slack">Slack</TabsTrigger>
