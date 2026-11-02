@@ -34,6 +34,7 @@ from app.services.finding_transition import (
 
 RISK_EVENT_DISPATCH_BATCH_SIZE = 50
 RISK_EVENT_DISPATCH_MAX_BATCH_SIZE = 100
+RISK_EVENT_UNRESOLVED_SAMPLE_SIZE = 25
 RISK_EVENT_CLAIM_DURATION = timedelta(minutes=15)
 
 
@@ -58,6 +59,31 @@ async def list_pending_risk_event_ids(
     query = (
         select(ScanRiskNotificationEvent.id)
         .where(ScanRiskNotificationEvent.status == RISK_EVENT_PENDING)
+        .order_by(
+            ScanRiskNotificationEvent.created_at,
+            ScanRiskNotificationEvent.id,
+        )
+        .limit(limit)
+    )
+    return list((await db.execute(query)).scalars().all())
+
+
+async def list_expired_claimed_risk_event_ids(
+    db: AsyncSession, limit: int = RISK_EVENT_UNRESOLVED_SAMPLE_SIZE
+) -> list[uuid.UUID]:
+    """Return a bounded sample for manual review, never for automatic retry.
+
+    An expired claim may represent an uncertain webhook delivery or a worker
+    crash. The query reads IDs only and does not lock or change any event.
+    """
+    if not 1 <= limit <= RISK_EVENT_DISPATCH_MAX_BATCH_SIZE:
+        raise ValueError("Unresolved risk event sample limit is outside the allowed range")
+    query = (
+        select(ScanRiskNotificationEvent.id)
+        .where(
+            ScanRiskNotificationEvent.status == RISK_EVENT_CLAIMED,
+            ScanRiskNotificationEvent.claim_expires_at <= func.clock_timestamp(),
+        )
         .order_by(
             ScanRiskNotificationEvent.created_at,
             ScanRiskNotificationEvent.id,

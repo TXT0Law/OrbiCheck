@@ -13,6 +13,7 @@ from redis.exceptions import RedisError
 
 from app.services.finding_notification_event import (
     RISK_EVENT_DISPATCH_BATCH_SIZE,
+    RISK_EVENT_UNRESOLVED_SAMPLE_SIZE,
     ClaimedRiskSendSnapshot,
 )
 from app.services.finding_notification_payload import ScanRiskNotificationPayload
@@ -265,7 +266,9 @@ async def test_risk_dispatch_batch_releases_candidate_session_before_each_delive
 ) -> None:
     tracker = _SessionTracker()
     event_ids = [uuid4(), uuid4()]
+    unresolved_id = uuid4()
     candidate_ids = AsyncMock(return_value=event_ids)
+    expired_claims = AsyncMock(return_value=[unresolved_id])
     delivered: list[UUID] = []
 
     async def deliver(event_id: UUID) -> notification_tasks.ScanRiskDeliveryOutcome:
@@ -280,13 +283,19 @@ async def test_risk_dispatch_batch_releases_candidate_session_before_each_delive
 
     monkeypatch.setattr(notification_tasks, "async_session_factory", tracker)
     monkeypatch.setattr(notification_tasks, "list_pending_risk_event_ids", candidate_ids)
+    monkeypatch.setattr(notification_tasks, "list_expired_claimed_risk_event_ids", expired_claims)
     monkeypatch.setattr(notification_tasks, "deliver_one_scan_risk_event", deliver)
 
     result = await notification_tasks._dispatch_pending_scan_risk_events()
 
     assert delivered == event_ids
     candidate_ids.assert_awaited_once_with(tracker, RISK_EVENT_DISPATCH_BATCH_SIZE)
-    assert result == {"candidates": 2, "outcomes": {"sent": 1, "unknown": 1}}
+    expired_claims.assert_awaited_once_with(tracker, RISK_EVENT_UNRESOLVED_SAMPLE_SIZE)
+    assert result == {
+        "candidates": 2,
+        "outcomes": {"sent": 1, "unknown": 1},
+        "unresolvedClaimIdsSample": [str(unresolved_id)],
+    }
     assert tracker.open_sessions == tracker.open_transactions == 0
 
 

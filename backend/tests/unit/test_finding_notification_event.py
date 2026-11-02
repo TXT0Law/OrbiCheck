@@ -24,6 +24,7 @@ from app.services import finding_notification_event
 from app.services.finding_notification_event import (
     RISK_EVENT_CLAIM_DURATION,
     RISK_EVENT_DISPATCH_MAX_BATCH_SIZE,
+    RISK_EVENT_UNRESOLVED_SAMPLE_SIZE,
 )
 from app.services.finding_identity import FINDING_RULESET_VERSION
 from app.services.finding_transition import HighRiskTransition, RiskHistoryPage
@@ -74,6 +75,48 @@ async def test_pending_event_id_limit_rejects_unbounded_requests(limit: int) -> 
 
     with pytest.raises(ValueError, match="limit"):
         await finding_notification_event.list_pending_risk_event_ids(_Session(), limit)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_expired_claim_sample_is_bounded_stable_read_only() -> None:
+    event_ids = [uuid4(), uuid4()]
+
+    class _Result:
+        def scalars(self) -> _Result:
+            return self
+
+        def all(self) -> list[UUID]:
+            return event_ids
+
+    class _Session:
+        def __init__(self) -> None:
+            self.query: Any = None
+
+        async def execute(self, query: Any) -> _Result:
+            self.query = query
+            return _Result()
+
+    db = _Session()
+    assert await finding_notification_event.list_expired_claimed_risk_event_ids(db) == event_ids
+    sql = str(db.query.compile(dialect=postgresql.dialect()))
+    assert "scan_risk_notification_events.status =" in sql
+    assert "scan_risk_notification_events.claim_expires_at <= clock_timestamp()" in sql
+    assert "ORDER BY scan_risk_notification_events.created_at, scan_risk_notification_events.id" in sql
+    assert "FOR UPDATE" not in sql
+    assert RISK_EVENT_UNRESOLVED_SAMPLE_SIZE in db.query.compile().params.values()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, RISK_EVENT_DISPATCH_MAX_BATCH_SIZE + 1])
+async def test_expired_claim_sample_rejects_unbounded_requests(limit: int) -> None:
+    class _Session:
+        async def execute(self, _query: Any) -> None:
+            raise AssertionError("Invalid limit should not reach the database")
+
+    with pytest.raises(ValueError, match="limit"):
+        await finding_notification_event.list_expired_claimed_risk_event_ids(_Session(), limit)
 
 
 def _evidence_scan(*, risk: bool, completed_at: datetime = COMPLETED_AT) -> Scan:

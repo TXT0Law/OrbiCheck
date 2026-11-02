@@ -34,8 +34,10 @@ from app.services.notification_channels.dispatch_log import (
 )
 from app.services.finding_notification_event import (
     RISK_EVENT_DISPATCH_BATCH_SIZE,
+    RISK_EVENT_UNRESOLVED_SAMPLE_SIZE,
     cancel_unattempted_risk_event_claim_in_transaction,
     claim_pending_risk_event_in_transaction,
+    list_expired_claimed_risk_event_ids,
     list_pending_risk_event_ids,
     load_claimed_risk_send_snapshot,
     mark_claimed_risk_event_sent_in_transaction,
@@ -133,6 +135,9 @@ async def _dispatch_pending_scan_risk_events() -> dict[str, Any]:
     """Read one bounded candidate page, then release the session before delivery."""
     async with async_session_factory() as db:
         event_ids = await list_pending_risk_event_ids(db, RISK_EVENT_DISPATCH_BATCH_SIZE)
+        unresolved_ids = await list_expired_claimed_risk_event_ids(
+            db, RISK_EVENT_UNRESOLVED_SAMPLE_SIZE
+        )
 
     outcomes: dict[str, int] = {}
     for event_id in event_ids:
@@ -142,8 +147,13 @@ async def _dispatch_pending_scan_risk_events() -> dict[str, Any]:
         "scan_risk_dispatch_batch_finished",
         candidates=len(event_ids),
         outcomes=outcomes,
+        unresolved_claims_sample=len(unresolved_ids),
     )
-    return {"candidates": len(event_ids), "outcomes": outcomes}
+    return {
+        "candidates": len(event_ids),
+        "outcomes": outcomes,
+        "unresolvedClaimIdsSample": [str(event_id) for event_id in unresolved_ids],
+    }
 
 
 @celery_app.task(
