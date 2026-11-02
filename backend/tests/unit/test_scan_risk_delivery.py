@@ -11,7 +11,10 @@ from uuid import UUID, uuid4
 import pytest
 from redis.exceptions import RedisError
 
-from app.services.finding_notification_event import ClaimedRiskSendSnapshot
+from app.services.finding_notification_event import (
+    RISK_EVENT_DISPATCH_BATCH_SIZE,
+    ClaimedRiskSendSnapshot,
+)
 from app.services.finding_notification_payload import ScanRiskNotificationPayload
 from app.services.notification_channels.scan_risk_webhook import ScanRiskWebhookOutcome
 from app.tasks import notification_tasks
@@ -253,3 +256,54 @@ async def test_single_risk_delivery_does_not_claim_sent_when_confirmation_races(
     assert outcome is notification_tasks.ScanRiskDeliveryOutcome.CONFIRMATION_UNRECORDED
     mark_sent.assert_awaited_once()
     assert tracker.open_sessions == tracker.open_transactions == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_risk_dispatch_batch_releases_candidate_session_before_each_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _SessionTracker()
+    event_ids = [uuid4(), uuid4()]
+    candidate_ids = AsyncMock(return_value=event_ids)
+    delivered: list[UUID] = []
+
+    async def deliver(event_id: UUID) -> notification_tasks.ScanRiskDeliveryOutcome:
+        assert tracker.open_sessions == 0
+        assert tracker.open_transactions == 0
+        delivered.append(event_id)
+        return (
+            notification_tasks.ScanRiskDeliveryOutcome.SENT
+            if event_id == event_ids[0]
+            else notification_tasks.ScanRiskDeliveryOutcome.UNKNOWN
+        )
+
+    monkeypatch.setattr(notification_tasks, "async_session_factory", tracker)
+    monkeypatch.setattr(notification_tasks, "list_pending_risk_event_ids", candidate_ids)
+    monkeypatch.setattr(notification_tasks, "deliver_one_scan_risk_event", deliver)
+
+    result = await notification_tasks._dispatch_pending_scan_risk_events()
+
+    assert delivered == event_ids
+    candidate_ids.assert_awaited_once_with(tracker, RISK_EVENT_DISPATCH_BATCH_SIZE)
+    assert result == {"candidates": 2, "outcomes": {"sent": 1, "unknown": 1}}
+    assert tracker.open_sessions == tracker.open_transactions == 0
+
+
+@pytest.mark.unit
+def test_risk_dispatch_task_has_no_automatic_retry_or_beat_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_batch = AsyncMock(return_value={"candidates": 0, "outcomes": {}})
+    monkeypatch.setattr(notification_tasks, "_dispatch_pending_scan_risk_events", run_batch)
+
+    assert notification_tasks.dispatch_pending_scan_risk_events.max_retries == 0
+    assert notification_tasks.dispatch_pending_scan_risk_events.run() == {
+        "candidates": 0,
+        "outcomes": {},
+    }
+    run_batch.assert_awaited_once()
+    assert all(
+        entry["task"] != notification_tasks.dispatch_pending_scan_risk_events.name
+        for entry in notification_tasks.celery_app.conf.beat_schedule.values()
+    )

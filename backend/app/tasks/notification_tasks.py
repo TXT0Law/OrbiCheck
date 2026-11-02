@@ -33,8 +33,10 @@ from app.services.notification_channels.dispatch_log import (
     replay_dispatch,
 )
 from app.services.finding_notification_event import (
+    RISK_EVENT_DISPATCH_BATCH_SIZE,
     cancel_unattempted_risk_event_claim_in_transaction,
     claim_pending_risk_event_in_transaction,
+    list_pending_risk_event_ids,
     load_claimed_risk_send_snapshot,
     mark_claimed_risk_event_sent_in_transaction,
 )
@@ -125,6 +127,37 @@ async def deliver_one_scan_risk_event(event_id: uuid.UUID) -> ScanRiskDeliveryOu
         logger.warning("scan_risk_notification_confirmation_unrecorded", event_id=str(event_id))
         return ScanRiskDeliveryOutcome.CONFIRMATION_UNRECORDED
     return ScanRiskDeliveryOutcome.SENT
+
+
+async def _dispatch_pending_scan_risk_events() -> dict[str, Any]:
+    """Read one bounded candidate page, then release the session before delivery."""
+    async with async_session_factory() as db:
+        event_ids = await list_pending_risk_event_ids(db, RISK_EVENT_DISPATCH_BATCH_SIZE)
+
+    outcomes: dict[str, int] = {}
+    for event_id in event_ids:
+        outcome = await deliver_one_scan_risk_event(event_id)
+        outcomes[outcome.value] = outcomes.get(outcome.value, 0) + 1
+    logger.info(
+        "scan_risk_dispatch_batch_finished",
+        candidates=len(event_ids),
+        outcomes=outcomes,
+    )
+    return {"candidates": len(event_ids), "outcomes": outcomes}
+
+
+@celery_app.task(
+    name="app.tasks.notification_tasks.dispatch_pending_scan_risk_events",
+    max_retries=0,
+)
+def dispatch_pending_scan_risk_events() -> dict[str, Any]:
+    """Manually callable batch; deliberately absent from the Beat schedule.
+
+    Broker redelivery after a worker crash cannot re-send a claimed event,
+    since only pending IDs are selected and every delivery claims atomically.
+    Unknown external outcomes are never requeued automatically.
+    """
+    return asyncio.run(_dispatch_pending_scan_risk_events())
 
 
 def _payload_from_log(row: NotificationDispatchLog) -> AlertPayload:
