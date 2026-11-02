@@ -5,20 +5,22 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.scan import Scan, ScanFindingObservation
+from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult
 from app.services.finding_report_period import (
     REPORT_RISK_PERIOD_PREDECESSOR_LIMIT,
     REPORT_RISK_PERIOD_SCAN_MAX_LIMIT,
 )
+from app.services.transformers import SKIPPED_INDICATORS
 
 REPORT_RISK_EVIDENCE_MAX_SCANS = (
     REPORT_RISK_PERIOD_SCAN_MAX_LIMIT + REPORT_RISK_PERIOD_PREDECESSOR_LIMIT
 )
 REPORT_RISK_OBSERVATION_LIMIT = 5000
 REPORT_RISK_OBSERVATION_MAX_MODULES = 16
+REPORT_RISK_MODULE_RESULT_LIMIT = 5000
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +37,12 @@ class ReportRiskObservationsPage:
     observations: list[ReportRiskObservation]
     has_more: bool
     oversized_evidence: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ReportRiskModulesPage:
+    successful_modules: dict[uuid.UUID, frozenset[str]]
+    has_more: bool
 
 
 def load_report_risk_observations(
@@ -93,4 +101,77 @@ def load_report_risk_observations(
             module_count > REPORT_RISK_OBSERVATION_MAX_MODULES
             for _, _, _, _, _, module_count in selected
         ),
+    )
+
+
+def load_report_risk_successful_modules(
+    db: Session, *, user_id: int, domain: str, scan_ids: tuple[uuid.UUID, ...]
+) -> ReportRiskModulesPage:
+    """Load only proven successful module names, without transferring raw JSONB.
+
+    Malformed skip markers and notes are excluded. That can make a comparison
+    unknown, but cannot make a skipped module prove that a finding was fixed.
+    A truncated result must also make downstream comparisons unknown.
+    """
+    if user_id <= 0 or not domain or domain != domain.strip():
+        raise ValueError("Report risk modules require an owner and domain")
+    if (
+        not scan_ids
+        or len(scan_ids) > REPORT_RISK_EVIDENCE_MAX_SCANS
+        or any(not isinstance(scan_id, uuid.UUID) for scan_id in scan_ids)
+        or len(set(scan_ids)) != len(scan_ids)
+    ):
+        raise ValueError("Report risk modules require bounded unique scan IDs")
+
+    raw = ScanModuleResult.raw_result
+    skipped = raw["skipped"]
+    skipped_type = func.jsonb_typeof(skipped)
+    data = raw["data"]
+    data_type = func.jsonb_typeof(data)
+    note_type = case(
+        (data_type == "object", func.jsonb_typeof(data["note"])),
+        (data_type.is_(None), func.jsonb_typeof(raw["note"])),
+    )
+    note_text = case(
+        (data_type == "object", data["note"].astext),
+        (data_type.is_(None), raw["note"].astext),
+    )
+    safe_note = or_(
+        note_type.is_(None),
+        and_(
+            note_type == "string",
+            *(
+                func.strpos(func.lower(note_text), indicator.lower()) == 0
+                for indicator in SKIPPED_INDICATORS
+            ),
+        ),
+    )
+    query = (
+        select(ScanModuleResult.scan_id, ScanModuleResult.module_name)
+        .join(Scan, Scan.id == ScanModuleResult.scan_id)
+        .where(
+            Scan.user_id == user_id,
+            Scan.domain == domain,
+            Scan.id.in_(scan_ids),
+            ScanModuleResult.status == ModuleStatus.SUCCESS,
+            func.jsonb_typeof(raw) == "object",
+            or_(
+                skipped_type.is_(None),
+                and_(skipped_type == "boolean", skipped.astext == "false"),
+            ),
+            or_(data_type.is_(None), data_type == "object"),
+            safe_note,
+        )
+        .order_by(ScanModuleResult.scan_id, ScanModuleResult.module_name)
+        .limit(REPORT_RISK_MODULE_RESULT_LIMIT + 1)
+    )
+    rows = db.execute(query).all()
+    successful: dict[uuid.UUID, set[str]] = {}
+    for scan_id, module_name in rows[:REPORT_RISK_MODULE_RESULT_LIMIT]:
+        successful.setdefault(scan_id, set()).add(module_name)
+    return ReportRiskModulesPage(
+        successful_modules={
+            scan_id: frozenset(names) for scan_id, names in successful.items()
+        },
+        has_more=len(rows) > REPORT_RISK_MODULE_RESULT_LIMIT,
     )
