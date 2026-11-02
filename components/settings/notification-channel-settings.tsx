@@ -231,8 +231,8 @@ export function NotificationChannelSettings() {
           </span>
         </label>
         <p className="text-xs text-muted-foreground">
-          For new or returning high-risk scan findings. Delivery is not active yet;
-          this saves your preference for when it becomes available.
+          Sends new or returning high-risk scan findings to your enabled HTTPS
+          webhook. Pending findings may be delivered after you opt in.
         </p>
       </div>
 

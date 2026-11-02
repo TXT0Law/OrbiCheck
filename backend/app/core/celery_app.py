@@ -4,6 +4,7 @@ from celery.schedules import crontab
 from app.core.config import settings
 
 SCAN_FINDING_BACKFILL_INTERVAL_SECONDS = 300.0
+SCAN_RISK_DISPATCH_INTERVAL_SECONDS = 300.0
 
 celery_app = Celery(
     "orbicheck",
@@ -48,6 +49,10 @@ celery_app.conf.update(
         "backfill-scan-finding-observations": {
             "task": "app.tasks.scan_tasks.backfill_scan_finding_observations",
             "schedule": SCAN_FINDING_BACKFILL_INTERVAL_SECONDS,
+        },
+        "dispatch-pending-scan-risk-events": {
+            "task": "app.tasks.notification_tasks.dispatch_pending_scan_risk_events",
+            "schedule": SCAN_RISK_DISPATCH_INTERVAL_SECONDS,
         },
     },
 )

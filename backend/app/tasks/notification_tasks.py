@@ -77,7 +77,7 @@ async def deliver_one_scan_risk_event(event_id: uuid.UUID) -> ScanRiskDeliveryOu
     Each database phase closes before Redis or webhook I/O. A claimed event
     with an unknown external outcome is intentionally left claimed for
     inspection rather than automatically requeued after its lease expires.
-    This function is not registered as a Celery task or scheduled yet.
+    The bounded batch task invokes this function for each pending candidate.
     """
     async with async_session_factory() as db:
         async with db.begin():
@@ -174,7 +174,7 @@ async def _dispatch_pending_scan_risk_events() -> dict[str, Any]:
     max_retries=0,
 )
 def dispatch_pending_scan_risk_events() -> dict[str, Any]:
-    """Manually callable batch; deliberately absent from the Beat schedule.
+    """Run one bounded Beat batch without retrying uncertain deliveries.
 
     Broker redelivery after a worker crash cannot re-send a claimed event,
     since only pending IDs are selected and every delivery claims atomically.

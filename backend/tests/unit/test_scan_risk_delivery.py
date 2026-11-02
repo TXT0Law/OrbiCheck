@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 from redis.exceptions import RedisError
 
+from app.core.celery_app import SCAN_RISK_DISPATCH_INTERVAL_SECONDS
 from app.services.finding_notification_event import (
     RISK_EVENT_DISPATCH_BATCH_SIZE,
     RISK_EVENT_UNRESOLVED_SAMPLE_SIZE,
@@ -339,7 +340,7 @@ async def test_risk_dispatch_batch_releases_candidate_session_before_each_delive
 
 
 @pytest.mark.unit
-def test_risk_dispatch_task_has_no_automatic_retry_or_beat_schedule(
+def test_risk_dispatch_task_has_no_automatic_retry_and_bounded_beat_schedule(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run_batch = AsyncMock(return_value={"candidates": 0, "outcomes": {}})
@@ -351,7 +352,8 @@ def test_risk_dispatch_task_has_no_automatic_retry_or_beat_schedule(
         "outcomes": {},
     }
     run_batch.assert_awaited_once()
-    assert all(
-        entry["task"] != notification_tasks.dispatch_pending_scan_risk_events.name
-        for entry in notification_tasks.celery_app.conf.beat_schedule.values()
-    )
+    schedule = notification_tasks.celery_app.conf.beat_schedule[
+        "dispatch-pending-scan-risk-events"
+    ]
+    assert schedule["task"] == notification_tasks.dispatch_pending_scan_risk_events.name
+    assert schedule["schedule"] == SCAN_RISK_DISPATCH_INTERVAL_SECONDS

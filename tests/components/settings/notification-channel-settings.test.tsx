@@ -99,7 +99,7 @@ describe("NotificationChannelSettings", () => {
     )) as HTMLInputElement;
     expect(toggle.checked).toBe(false);
     expect(
-      screen.getByText(/Delivery is not active yet/),
+      screen.getByText(/Pending findings may be delivered after you opt in/),
     ).toBeInTheDocument();
 
     fireEvent.click(toggle);
