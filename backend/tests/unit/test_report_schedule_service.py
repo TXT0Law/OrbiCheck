@@ -121,3 +121,40 @@ async def test_email_delivery_without_recipients_reports_failure_without_sending
         }
     ]
     send_email.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "channels",
+    [["unsupported"], ["email", "unsupported"], "email", None],
+)
+async def test_invalid_persisted_delivery_channels_fail_before_any_send(
+    monkeypatch: pytest.MonkeyPatch, channels: object
+) -> None:
+    send_email = AsyncMock()
+    send_slack = AsyncMock()
+    resolve_slack = MagicMock()
+    monkeypatch.setattr(report_schedule_service.email_service, "send_report_email", send_email)
+    monkeypatch.setattr(report_schedule_service, "post_json", send_slack)
+    monkeypatch.setattr(report_schedule_service, "_resolve_slack_target", resolve_slack)
+    schedule = ReportSchedule(
+        id=uuid4(),
+        user_id=7,
+        name="Weekly risk report",
+        delivery_channels=channels,
+        email_recipients=["ops@example.com"],
+    )
+    run = ReportScheduleRun(id=uuid4())
+    report = Report(id=uuid4())
+    scan = Scan(domain="example.com")
+
+    summary = await deliver_scheduled_report(schedule, run, report, scan)
+
+    assert summary["success"] is False
+    assert summary["error"] == "invalid_delivery_channels"
+    assert summary["channels"] == {}
+    assert summary["runId"] == str(run.id)
+    send_email.assert_not_awaited()
+    send_slack.assert_not_awaited()
+    resolve_slack.assert_not_called()

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.schemas.report_schedule import (
+    REPORT_SCHEDULE_DELIVERY_CHANNELS,
     ReportScheduleCreateRequest,
     ReportScheduleResponse,
     ReportScheduleRunResponse,
@@ -482,7 +483,18 @@ async def deliver_scheduled_report(
     scan: Scan,
 ) -> dict[str, Any]:
     summary: dict[str, Any] = {"channels": {}, "reportUrl": _report_link(report.id)}
-    if "email" in (schedule.delivery_channels or []):
+    channels = schedule.delivery_channels
+    if not isinstance(channels, list) or any(
+        not isinstance(channel, str)
+        or channel not in REPORT_SCHEDULE_DELIVERY_CHANNELS
+        for channel in channels
+    ):
+        summary["success"] = False
+        summary["error"] = "invalid_delivery_channels"
+        summary["runId"] = str(run.id)
+        return summary
+
+    if "email" in channels:
         email_results: list[dict[str, Any]] = []
         if not schedule.email_recipients:
             email_results.append(
@@ -518,7 +530,7 @@ async def deliver_scheduled_report(
             )
         summary["channels"]["email"] = email_results
 
-    if "slack" in (schedule.delivery_channels or []):
+    if "slack" in channels:
         started = time.perf_counter()
         target = _resolve_slack_target(schedule.user_id)
         if not target:
