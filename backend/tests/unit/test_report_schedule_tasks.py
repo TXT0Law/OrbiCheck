@@ -38,6 +38,43 @@ def _source_scan() -> Scan:
     return source
 
 
+def test_dispatch_reports_stalled_runs_without_restarting_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = MagicMock()
+    db.__enter__.return_value = db
+    session_closed = False
+
+    def close_session(*_args: object) -> None:
+        nonlocal session_closed
+        session_closed = True
+
+    db.__exit__.side_effect = close_session
+    stalled_id = uuid.uuid4()
+    pending_id = uuid.uuid4()
+    monkeypatch.setattr(report_schedule_tasks, "_get_sync_session", lambda: db)
+    dispatch = MagicMock(return_value=[MagicMock(id=pending_id)])
+    monkeypatch.setattr(report_schedule_tasks, "dispatch_due_schedules_sync", dispatch)
+    sample = MagicMock(return_value=[stalled_id])
+    monkeypatch.setattr(report_schedule_tasks, "list_stalled_report_run_ids_sync", sample)
+    enqueue = MagicMock()
+
+    def assert_session_closed(_run_id: str) -> None:
+        assert session_closed
+
+    enqueue.side_effect = assert_session_closed
+    monkeypatch.setattr(report_schedule_tasks.generate_scheduled_report_run, "delay", enqueue)
+
+    result = report_schedule_tasks.dispatch_due_report_schedules.run()
+
+    assert result["dispatched"] == 1
+    assert result["stalledRunIdsSample"] == [str(stalled_id)]
+    sample.assert_called_once()
+    assert sample.call_args.args[0] is db
+    enqueue.assert_called_once_with(str(pending_id))
+    db.commit.assert_called_once()
+
+
 def test_fresh_scan_preserves_source_and_selected_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(report_schedule_tasks, "validate_url_safety", lambda _url: None)
     db = MagicMock()

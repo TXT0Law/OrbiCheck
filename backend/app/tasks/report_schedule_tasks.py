@@ -17,6 +17,7 @@ from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.services.report_schedule_service import (
     deliver_scheduled_report,
     dispatch_due_schedules_sync,
+    list_stalled_report_run_ids_sync,
 )
 from app.services.report_service import generate_report_artifacts_sync
 from app.services.finding_report_presentation import present_report_risk_period
@@ -86,11 +87,19 @@ def dispatch_due_report_schedules() -> dict:
     now = datetime.now(timezone.utc)
     with _get_sync_session() as db:
         runs = dispatch_due_schedules_sync(db, now)
+        run_ids = [str(run.id) for run in runs]
         db.commit()
-        for run in runs:
-            generate_scheduled_report_run.delay(str(run.id))
-            dispatched += 1
-    return {"dispatched": dispatched, "checked_at": now.isoformat()}
+        stalled_ids = list_stalled_report_run_ids_sync(db, now)
+    for run_id in run_ids:
+        generate_scheduled_report_run.delay(run_id)
+        dispatched += 1
+    if stalled_ids:
+        logger.warning("scheduled_report_stalled_runs", run_ids=[str(run_id) for run_id in stalled_ids])
+    return {
+        "dispatched": dispatched,
+        "checked_at": now.isoformat(),
+        "stalledRunIdsSample": [str(run_id) for run_id in stalled_ids],
+    }
 
 
 @celery_app.task(name="app.tasks.report_schedule_tasks.generate_scheduled_report_run")

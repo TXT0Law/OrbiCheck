@@ -43,6 +43,8 @@ logger = structlog.get_logger(__name__)
 RECENT_RUN_LIMIT = 5
 LIST_RUN_LIMIT = 50
 DISPATCH_BATCH_LIMIT = 25
+STALLED_REPORT_RUN_SAMPLE_SIZE = 25
+STALLED_REPORT_RUN_AGE = timedelta(hours=6)
 MONTHLY_LOOKAHEAD_MONTHS = 24
 WEEKLY_LOOKAHEAD_DAYS = 14
 REPORT_LINK_FALLBACK = "/dashboard/reports"
@@ -390,6 +392,27 @@ def dispatch_due_schedules_sync(db: Session, now: datetime | None = None) -> lis
         runs.append(run)
     db.flush()
     return runs
+
+
+def list_stalled_report_run_ids_sync(db: Session, now: datetime) -> list[uuid.UUID]:
+    """Sample unfinished old runs for inspection without restarting delivery."""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("Report run inspection time must include a timezone")
+    cutoff = now - STALLED_REPORT_RUN_AGE
+    query = (
+        select(ReportScheduleRun.id)
+        .where(
+            ReportScheduleRun.status.in_(
+                (ReportScheduleRunStatus.GENERATING, ReportScheduleRunStatus.DELIVERING)
+            ),
+            ReportScheduleRun.started_at.is_not(None),
+            ReportScheduleRun.started_at < cutoff,
+            ReportScheduleRun.completed_at.is_(None),
+        )
+        .order_by(ReportScheduleRun.started_at, ReportScheduleRun.id)
+        .limit(STALLED_REPORT_RUN_SAMPLE_SIZE)
+    )
+    return list(db.scalars(query).all())
 
 
 def _notification_settings_key(user_id: int) -> str:
