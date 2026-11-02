@@ -13,10 +13,12 @@ from app.models.scan import Scan, ScanStatus
 from app.models.report_schedule import ReportScheduleCadence
 from app.services.finding_report_period import (
     REPORT_RISK_PERIOD_SCAN_MAX_LIMIT,
+    ReportRiskPeriodScans,
     first_report_risk_window,
     load_previous_delivered_report_boundary,
     load_report_risk_period_scans,
     resolve_scheduled_report_risk_window,
+    summarize_report_risk_projection_coverage,
 )
 
 START = datetime(2026, 10, 1, tzinfo=timezone.utc)
@@ -230,6 +232,59 @@ def test_scheduled_report_window_rejects_invalid_end_before_query() -> None:
         )
 
     db.scalar.assert_not_called()
+
+
+@pytest.mark.unit
+def test_report_projection_coverage_keeps_missing_and_truncated_states() -> None:
+    def scan(
+        *,
+        status: ScanStatus = ScanStatus.COMPLETED,
+        completed_at: datetime | None = START,
+        projected_at: datetime | None = None,
+        failed_at: datetime | None = None,
+        ruleset_version: int | None = None,
+    ) -> Scan:
+        return Scan(
+            id=uuid4(), user_id=7, domain="example.com", url="https://example.com",
+            status=status, completed_at=completed_at,
+            finding_observations_projected_at=projected_at,
+            finding_observations_projection_failed_at=failed_at,
+            finding_ruleset_version=ruleset_version,
+        )
+
+    page = ReportRiskPeriodScans(
+        scans=[
+            scan(projected_at=START, ruleset_version=1),
+            scan(),
+            scan(projected_at=START, failed_at=START, ruleset_version=1),
+            scan(projected_at=START),
+            scan(projected_at=START, ruleset_version=0),
+            scan(status=ScanStatus.FAILED),
+            scan(completed_at=None),
+        ],
+        has_more=True,
+    )
+
+    coverage = summarize_report_risk_projection_coverage(page)
+
+    assert coverage.scanned == 7
+    assert coverage.projected == 1
+    assert coverage.pending == 1
+    assert coverage.failed == 1
+    assert coverage.unusable_ruleset_version == 2
+    assert coverage.unavailable == 2
+    assert coverage.truncated is True
+
+
+@pytest.mark.unit
+def test_report_projection_coverage_empty_period_is_explicit() -> None:
+    coverage = summarize_report_risk_projection_coverage(
+        ReportRiskPeriodScans(scans=[], has_more=False)
+    )
+
+    assert coverage.scanned == 0
+    assert coverage.projected == 0
+    assert coverage.truncated is False
 
 
 @pytest.mark.unit

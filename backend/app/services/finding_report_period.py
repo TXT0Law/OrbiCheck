@@ -66,6 +66,44 @@ class ReportRiskPeriodScans:
     has_more: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ReportRiskProjectionCoverage:
+    scanned: int
+    projected: int
+    pending: int
+    failed: int
+    unusable_ruleset_version: int
+    unavailable: int
+    truncated: bool
+
+
+def summarize_report_risk_projection_coverage(
+    page: ReportRiskPeriodScans,
+) -> ReportRiskProjectionCoverage:
+    """Describe projection gaps without claiming rule or module comparability."""
+    projected = pending = failed = unusable_ruleset_version = unavailable = 0
+    for scan in page.scans:
+        if scan.status != ScanStatus.COMPLETED or scan.completed_at is None:
+            unavailable += 1
+        elif scan.finding_observations_projection_failed_at is not None:
+            failed += 1
+        elif scan.finding_observations_projected_at is None:
+            pending += 1
+        elif scan.finding_ruleset_version is None or scan.finding_ruleset_version <= 0:
+            unusable_ruleset_version += 1
+        else:
+            projected += 1
+    return ReportRiskProjectionCoverage(
+        scanned=len(page.scans),
+        projected=projected,
+        pending=pending,
+        failed=failed,
+        unusable_ruleset_version=unusable_ruleset_version,
+        unavailable=unavailable,
+        truncated=page.has_more,
+    )
+
+
 def load_previous_delivered_report_boundary(
     db: Session,
     *,
