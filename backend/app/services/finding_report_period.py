@@ -36,8 +36,8 @@ def first_report_risk_window(
     """Use a local calendar lookback when no earlier successful report exists.
 
     The end is actual report generation time, after an optional fresh scan.
-    This window is a fallback; later reports should start at the previous
-    successfully delivered report's completion time.
+    This window is a fallback; later reports should start at the content
+    generation time of the previous successfully delivered report.
     """
     if end_at.tzinfo is None or end_at.utcoffset() is None:
         raise ValueError("Report risk period end must include a timezone")
@@ -103,6 +103,46 @@ def load_previous_delivered_report_boundary(
         .limit(1)
     )
     return db.scalar(query)
+
+
+def resolve_scheduled_report_risk_window(
+    db: Session,
+    *,
+    user_id: int,
+    schedule_id: uuid.UUID,
+    domain: str,
+    cadence: ReportScheduleCadence,
+    timezone_name: str,
+    end_at: datetime,
+) -> ReportRiskWindow:
+    """Cover the time since the last delivered report, or the first lookback.
+
+    The caller supplies actual generation time after any fresh scan. A failed
+    or still-delivering run does not advance the start, so delayed runs retain
+    their uncovered interval.
+    """
+    fallback = first_report_risk_window(
+        cadence=cadence, timezone_name=timezone_name, end_at=end_at
+    )
+    previous_end = load_previous_delivered_report_boundary(
+        db,
+        user_id=user_id,
+        schedule_id=schedule_id,
+        domain=domain,
+        end_at=fallback.end_at,
+    )
+    if previous_end is None:
+        return fallback
+    if (
+        previous_end.tzinfo is None
+        or previous_end.utcoffset() is None
+        or previous_end >= fallback.end_at
+    ):
+        raise ValueError("Previous delivered report has an invalid risk boundary")
+    return ReportRiskWindow(
+        start_at=previous_end.astimezone(timezone.utc),
+        end_at=fallback.end_at,
+    )
 
 
 def load_report_risk_period_scans(

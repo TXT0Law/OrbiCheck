@@ -16,6 +16,7 @@ from app.services.finding_report_period import (
     first_report_risk_window,
     load_previous_delivered_report_boundary,
     load_report_risk_period_scans,
+    resolve_scheduled_report_risk_window,
 )
 
 START = datetime(2026, 10, 1, tzinfo=timezone.utc)
@@ -126,6 +127,88 @@ def test_previous_delivered_boundary_rejects_invalid_scope(change: dict) -> None
 
     with pytest.raises(ValueError):
         load_previous_delivered_report_boundary(db, **args)
+
+    db.scalar.assert_not_called()
+
+
+@pytest.mark.unit
+def test_scheduled_report_window_starts_at_previous_delivered_content() -> None:
+    db = MagicMock()
+    db.scalar.return_value = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    schedule_id = uuid4()
+
+    window = resolve_scheduled_report_risk_window(
+        db,
+        user_id=7,
+        schedule_id=schedule_id,
+        domain="example.com",
+        cadence=ReportScheduleCadence.WEEKLY,
+        timezone_name="UTC",
+        end_at=END,
+    )
+
+    assert window.start_at == datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+    assert window.end_at == END
+    query = db.scalar.call_args.args[0]
+    assert schedule_id in query.compile().params.values()
+
+
+@pytest.mark.unit
+def test_scheduled_report_window_uses_local_lookback_without_delivery() -> None:
+    db = MagicMock()
+    db.scalar.return_value = None
+
+    window = resolve_scheduled_report_risk_window(
+        db,
+        user_id=7,
+        schedule_id=uuid4(),
+        domain="example.com",
+        cadence=ReportScheduleCadence.MONTHLY,
+        timezone_name="UTC",
+        end_at=datetime(2026, 3, 31, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert window.start_at == datetime(2026, 2, 28, 10, 0, tzinfo=timezone.utc)
+    assert window.end_at == datetime(2026, 3, 31, 10, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "previous",
+    [datetime(2026, 10, 1), END, datetime(2026, 11, 2, tzinfo=timezone.utc)],
+)
+def test_scheduled_report_window_rejects_invalid_previous_boundary(
+    previous: datetime,
+) -> None:
+    db = MagicMock()
+    db.scalar.return_value = previous
+
+    with pytest.raises(ValueError, match="invalid risk boundary"):
+        resolve_scheduled_report_risk_window(
+            db,
+            user_id=7,
+            schedule_id=uuid4(),
+            domain="example.com",
+            cadence=ReportScheduleCadence.WEEKLY,
+            timezone_name="UTC",
+            end_at=END,
+        )
+
+
+@pytest.mark.unit
+def test_scheduled_report_window_rejects_invalid_end_before_query() -> None:
+    db = MagicMock()
+
+    with pytest.raises(ValueError, match="timezone"):
+        resolve_scheduled_report_risk_window(
+            db,
+            user_id=7,
+            schedule_id=uuid4(),
+            domain="example.com",
+            cadence=ReportScheduleCadence.WEEKLY,
+            timezone_name="UTC",
+            end_at=datetime(2026, 11, 1),
+        )
 
     db.scalar.assert_not_called()
 
