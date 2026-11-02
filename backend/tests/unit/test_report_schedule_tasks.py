@@ -1,7 +1,7 @@
 """Fresh scheduled scan planning keeps history and respects module choices."""
 
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.dialects import postgresql
@@ -158,6 +158,80 @@ def test_redelivered_report_run_never_replays_delivery(
     db.commit.assert_not_called()
 
 
+def test_paused_schedule_does_not_generate_queued_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schedule = ReportSchedule(id=uuid.uuid4(), is_enabled=False)
+    run = ReportScheduleRun(
+        id=uuid.uuid4(), schedule=schedule, status=ReportScheduleRunStatus.PENDING
+    )
+    db = MagicMock()
+    db.__enter__.return_value = db
+    db.execute.return_value.scalar_one_or_none.return_value = run
+    monkeypatch.setattr(report_schedule_tasks, "_get_sync_session", lambda: db)
+    generate = MagicMock()
+    monkeypatch.setattr(report_schedule_tasks, "generate_report_artifacts_sync", generate)
+    deliver = AsyncMock()
+    monkeypatch.setattr(report_schedule_tasks, "deliver_scheduled_report", deliver)
+
+    result = report_schedule_tasks.generate_scheduled_report_run.run(str(run.id))
+
+    assert result["status"] == ReportScheduleRunStatus.FAILED.value
+    assert run.error_message == "Scheduled report was paused before generation"
+    assert run.report_id is None
+    generate.assert_not_called()
+    deliver.assert_not_awaited()
+
+
+def test_pause_during_generation_prevents_external_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scan = _source_scan()
+    schedule = ReportSchedule(
+        id=uuid.uuid4(),
+        user_id=scan.user_id,
+        name="Weekly report",
+        scan_id=scan.id,
+        format=ReportFormat.PDF,
+        is_enabled=True,
+        rescan_before_report=False,
+    )
+    run = ReportScheduleRun(
+        id=uuid.uuid4(), schedule=schedule, status=ReportScheduleRunStatus.PENDING
+    )
+    db = MagicMock()
+    db.__enter__.return_value = db
+    db.execute.return_value.scalar_one_or_none.return_value = run
+    db.get.return_value = scan
+
+    def pause_schedule(entity: object, *, attribute_names: list[str]) -> None:
+        assert entity is schedule
+        assert attribute_names == ["is_enabled"]
+        schedule.is_enabled = False
+
+    db.refresh.side_effect = pause_schedule
+    monkeypatch.setattr(report_schedule_tasks, "_get_sync_session", lambda: db)
+    monkeypatch.setattr(report_schedule_tasks, "load_scheduled_report_risk_summary", MagicMock())
+    monkeypatch.setattr(report_schedule_tasks, "present_report_risk_period", MagicMock())
+    monkeypatch.setattr(
+        report_schedule_tasks,
+        "generate_report_artifacts_sync",
+        MagicMock(return_value=("report", b"pdf", "<p>report</p>", {})),
+    )
+    deliver = AsyncMock()
+    monkeypatch.setattr(report_schedule_tasks, "deliver_scheduled_report", deliver)
+
+    result = report_schedule_tasks.generate_scheduled_report_run.run(str(run.id))
+
+    assert result["status"] == ReportScheduleRunStatus.FAILED.value
+    assert run.error_message == "Scheduled report was paused before delivery"
+    assert run.delivery_summary is None
+    reports = [call.args[0] for call in db.add.call_args_list if isinstance(call.args[0], Report)]
+    assert len(reports) == 1
+    assert reports[0].status == ReportStatus.COMPLETED
+    deliver.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     ("delivery_response", "delivery_succeeds"),
     [
@@ -181,6 +255,7 @@ def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
         monitor_id=None,
         monitor_period=None,
         format=ReportFormat.PDF,
+        is_enabled=True,
         rescan_before_report=True,
         delivery_channels=["email"],
         email_recipients=["ops@example.com"],
@@ -192,10 +267,16 @@ def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
     commit_states: list[tuple[ReportScheduleRunStatus, uuid.UUID | None]] = []
     db.commit.side_effect = lambda: commit_states.append((run.status, run.report_id))
 
-    def mark_scan_complete(scan: Scan) -> None:
-        scan.status = ScanStatus.COMPLETED
+    def refresh_state(
+        entity: Scan | ReportSchedule, *, attribute_names: list[str] | None = None
+    ) -> None:
+        if isinstance(entity, Scan):
+            entity.status = ScanStatus.COMPLETED
+        else:
+            assert entity is schedule
+            assert attribute_names == ["is_enabled"]
 
-    db.refresh.side_effect = mark_scan_complete
+    db.refresh.side_effect = refresh_state
     monkeypatch.setattr(report_schedule_tasks, "_get_sync_session", lambda: db)
     monkeypatch.setattr(report_schedule_tasks, "validate_url_safety", lambda _url: None)
     scan_task = MagicMock()

@@ -127,6 +127,9 @@ def generate_scheduled_report_run(run_id: str) -> dict:
         run.started_at = run.started_at or datetime.now(timezone.utc)
         db.commit()  # Release the claim lock before scanning or external delivery.
         schedule = run.schedule
+        if schedule.is_enabled is False:
+            _fail_run(db, run, "Scheduled report was paused before generation")
+            return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}
         if schedule.scan_id and schedule.rescan_before_report:
             scan = db.execute(
                 select(Scan)
@@ -224,6 +227,13 @@ def generate_scheduled_report_run(run_id: str) -> dict:
             report.error_message = None
             run.status = ReportScheduleRunStatus.DELIVERING
             db.commit()
+
+            # The owner may pause the schedule while report generation runs.
+            # Recheck persisted state before any external channel is attempted.
+            db.refresh(schedule, attribute_names=["is_enabled"])
+            if schedule.is_enabled is False:
+                _fail_run(db, run, "Scheduled report was paused before delivery")
+                return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}
 
             delivery_summary = asyncio.run(
                 deliver_scheduled_report(schedule, run, report, scan)
