@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
-from app.models.report import Report, ReportFormat
+from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.report_schedule import ReportSchedule, ReportScheduleRun, ReportScheduleRunStatus
 from app.tasks import report_schedule_tasks
 
@@ -88,7 +88,10 @@ def test_fresh_scan_rejects_empty_module_selection(monkeypatch: pytest.MonkeyPat
     db.add.assert_not_called()
 
 
-def test_scheduled_report_uses_new_scan_result(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("delivery_succeeds", [True, False])
+def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
+    monkeypatch: pytest.MonkeyPatch, delivery_succeeds: bool
+) -> None:
     source = _source_scan()
     schedule = ReportSchedule(
         id=uuid.uuid4(),
@@ -99,8 +102,8 @@ def test_scheduled_report_uses_new_scan_result(monkeypatch: pytest.MonkeyPatch) 
         monitor_period=None,
         format=ReportFormat.PDF,
         rescan_before_report=True,
-        delivery_channels=[],
-        email_recipients=[],
+        delivery_channels=["email"],
+        email_recipients=["ops@example.com"],
     )
     run = ReportScheduleRun(id=uuid.uuid4(), schedule=schedule, status=ReportScheduleRunStatus.PENDING)
     db = MagicMock()
@@ -126,7 +129,14 @@ def test_scheduled_report_uses_new_scan_result(monkeypatch: pytest.MonkeyPatch) 
         "present_report_risk_period",
         lambda summary: risk_period if summary is risk_summary else None,
     )
-    artifact_generator = MagicMock(return_value=("report", b"pdf", "<p>report</p>", {}))
+    artifact_generator = MagicMock(
+        return_value=(
+            "report",
+            b"pdf",
+            "<p>report</p>",
+            {"riskPeriod": {"status": "reported", "version": 1, "endAt": "2026-11-02T00:00:00+00:00"}},
+        )
+    )
     monkeypatch.setattr(
         report_schedule_tasks,
         "generate_report_artifacts_sync",
@@ -134,19 +144,28 @@ def test_scheduled_report_uses_new_scan_result(monkeypatch: pytest.MonkeyPatch) 
     )
 
     async def deliver(*_args):
-        return {"success": True}
+        return {"success": delivery_succeeds}
 
     monkeypatch.setattr(report_schedule_tasks, "deliver_scheduled_report", deliver)
 
     result = report_schedule_tasks.generate_scheduled_report_run.run(str(run.id))
 
-    assert result["status"] == ReportScheduleRunStatus.COMPLETED.value
+    expected_status = (
+        ReportScheduleRunStatus.COMPLETED
+        if delivery_succeeds
+        else ReportScheduleRunStatus.FAILED
+    )
+    assert result["status"] == expected_status.value
+    assert run.status == expected_status
+    assert run.error_message == (None if delivery_succeeds else "Delivery failed")
     assert run.scan_id != source.id
     scan_task.assert_called_once()
     assert scan_task.call_args.args[0] == str(run.scan_id)
     reports = [call.args[0] for call in db.add.call_args_list if isinstance(call.args[0], Report)]
     assert len(reports) == 1
     assert reports[0].scan_id == run.scan_id
+    assert reports[0].status == ReportStatus.COMPLETED
+    assert reports[0].report_meta["riskPeriod"]["status"] == "reported"
     assert source.status == ScanStatus.COMPLETED
     assert summary_loader.call_args.kwargs["user_id"] == source.user_id
     assert summary_loader.call_args.kwargs["domain"] == source.domain
