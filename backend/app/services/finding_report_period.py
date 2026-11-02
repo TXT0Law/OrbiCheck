@@ -22,6 +22,8 @@ from app.models.scan import Scan, ScanStatus
 REPORT_RISK_PERIOD_SCAN_LIMIT = 50
 REPORT_RISK_PERIOD_SCAN_MAX_LIMIT = 100
 WEEKLY_REPORT_RISK_LOOKBACK_DAYS = 7
+REPORT_RISK_PERIOD_SCHEMA_VERSION = 1
+REPORT_RISK_PERIOD_REPORTED_STATUS = "reported"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,10 +74,10 @@ def load_previous_delivered_report_boundary(
     domain: str,
     end_at: datetime,
 ) -> datetime | None:
-    """Find the last delivered report's generation time for this target.
+    """Find the last delivered report's explicitly reported risk-period end.
 
-    Delivery can finish after generation. Starting at the report's content
-    timestamp preserves scans completed while the previous delivery ran.
+    Old reports without a risk section cannot establish coverage. A reported
+    period may include unknown changes, but it must state them explicitly.
     Failed runs and reports for a prior schedule target never close a period.
     """
     if user_id <= 0 or not isinstance(schedule_id, uuid.UUID):
@@ -86,7 +88,7 @@ def load_previous_delivered_report_boundary(
         raise ValueError("Report risk period end must include a timezone")
 
     query = (
-        select(Report.completed_at)
+        select(Report.report_meta["riskPeriod"]["endAt"].astext)
         .join(ReportScheduleRun, ReportScheduleRun.report_id == Report.id)
         .where(
             ReportScheduleRun.schedule_id == schedule_id,
@@ -98,11 +100,30 @@ def load_previous_delivered_report_boundary(
             Report.completed_at.is_not(None),
             Report.completed_at < end_at,
             Report.report_meta["scanDomain"].astext == domain,
+            Report.report_meta["riskPeriod"]["status"].astext
+            == REPORT_RISK_PERIOD_REPORTED_STATUS,
+            Report.report_meta["riskPeriod"]["version"].astext
+            == str(REPORT_RISK_PERIOD_SCHEMA_VERSION),
         )
         .order_by(Report.completed_at.desc(), ReportScheduleRun.id.desc())
         .limit(1)
     )
-    return db.scalar(query)
+    raw_end = db.scalar(query)
+    if raw_end is None:
+        return None
+    if not isinstance(raw_end, str):
+        raise ValueError("Previous reported risk period has an invalid end")
+    try:
+        previous_end = datetime.fromisoformat(raw_end)
+    except ValueError as exc:
+        raise ValueError("Previous reported risk period has an invalid end") from exc
+    if (
+        previous_end.tzinfo is None
+        or previous_end.utcoffset() is None
+        or previous_end >= end_at
+    ):
+        raise ValueError("Previous reported risk period has an invalid end")
+    return previous_end.astimezone(timezone.utc)
 
 
 def resolve_scheduled_report_risk_window(
@@ -133,12 +154,6 @@ def resolve_scheduled_report_risk_window(
     )
     if previous_end is None:
         return fallback
-    if (
-        previous_end.tzinfo is None
-        or previous_end.utcoffset() is None
-        or previous_end >= fallback.end_at
-    ):
-        raise ValueError("Previous delivered report has an invalid risk boundary")
     return ReportRiskWindow(
         start_at=previous_end.astimezone(timezone.utc),
         end_at=fallback.end_at,
