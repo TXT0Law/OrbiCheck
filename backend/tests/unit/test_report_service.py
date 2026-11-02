@@ -1,14 +1,31 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
 from app.services.security_analyzer import SecurityScoreResult
 from app.models.report import Report, ReportFormat
-from app.services.finding_report_presentation import ReportRiskPeriodPresentation
+from app.models.scan import Scan, ScanStatus
+from app.services.finding_report_evidence import (
+    ReportRiskModulesPage,
+    ReportRiskObservation,
+    ReportRiskObservationsPage,
+)
+from app.services.finding_report_period import (
+    ReportRiskPeriodScans,
+    ReportRiskWindow,
+    summarize_report_risk_projection_coverage,
+)
+from app.services.finding_report_presentation import (
+    ReportRiskPeriodPresentation,
+    present_report_risk_period,
+)
+from app.services.finding_report_sequence import classify_report_risk_period
+from app.services.finding_report_summary import ScheduledReportRiskSummary
 from app.services import report_service
 from app.services.report_service import (
     _embed_chart,
@@ -249,6 +266,105 @@ def test_scheduled_risk_section_is_visible_in_every_report_format(
     assert meta["riskPeriod"]["status"] == "reported"
     assert meta["riskPeriod"]["version"] == 1
     assert meta["riskPeriod"]["endAt"] == risk_period.end_at
+
+
+@pytest.mark.unit
+def test_failed_scan_gap_never_renders_as_a_repaired_risk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise the classifier through all report formats with an uncertain gap."""
+    end_at = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    start_at = end_at - timedelta(days=7)
+
+    def scan_at(offset: timedelta, status: ScanStatus) -> Scan:
+        completed_at = end_at + offset
+        return Scan(
+            id=uuid4(),
+            user_id=7,
+            domain="example.com",
+            url="https://example.com",
+            status=status,
+            completed_at=completed_at,
+            finding_observations_projected_at=(
+                completed_at if status == ScanStatus.COMPLETED else None
+            ),
+            finding_ruleset_version=1,
+        )
+
+    predecessor = scan_at(-timedelta(days=8), ScanStatus.COMPLETED)
+    failed = scan_at(-timedelta(days=2), ScanStatus.FAILED)
+    current = scan_at(-timedelta(days=1), ScanStatus.COMPLETED)
+    period = ReportRiskPeriodScans([failed, current], has_more=False)
+    observations = ReportRiskObservationsPage(
+        [
+            ReportRiskObservation(
+                scan_id=predecessor.id,
+                rule_id="ssl.certificate_expiry",
+                ruleset_version=1,
+                severity="high",
+                evidence_modules=("ssl",),
+            )
+        ],
+        has_more=False,
+        oversized_evidence=False,
+    )
+    modules = ReportRiskModulesPage(
+        {
+            predecessor.id: frozenset({"ssl"}),
+            current.id: frozenset({"ssl"}),
+        },
+        has_more=False,
+    )
+    changes = classify_report_risk_period(
+        user_id=7,
+        domain="example.com",
+        predecessor=predecessor,
+        period=period,
+        observations=observations,
+        modules=modules,
+    )
+    view = present_report_risk_period(
+        ScheduledReportRiskSummary(
+            window=ReportRiskWindow(start_at, end_at),
+            period=period,
+            projection=summarize_report_risk_projection_coverage(period),
+            changes=changes,
+        )
+    )
+    pdf_sections: list[tuple[str, str]] = []
+    original_pdf_section = report_service._pdf_write_section
+
+    def capture_pdf_section(pdf: object, title: str, content: str) -> None:
+        pdf_sections.append((title, content))
+        original_pdf_section(pdf, title, content)
+
+    monkeypatch.setattr(report_service, "_pdf_write_section", capture_pdf_section)
+    monkeypatch.setattr(
+        report_service, "build_report_payload_sync", lambda _db, _report: _sample_report_data()
+    )
+
+    markdown, pdf, html, meta = report_service.generate_report_artifacts_sync(
+        MagicMock(), Report(title="Scheduled", format=ReportFormat.ALL), risk_period=view
+    )
+
+    assert view.change_counts == {
+        "new": 0,
+        "continuing": 0,
+        "resolved": 0,
+        "unknown": 1,
+    }
+    assert view.has_unknown_coverage is True
+    assert "| resolved | 0 |" in markdown
+    assert "| unknown | 1 |" in markdown
+    assert "never proves a risk was repaired" in markdown
+    assert pdf is not None and pdf.startswith(b"%PDF")
+    pdf_risk = next(content for title, content in pdf_sections if title == "Period Risk Changes")
+    assert "Resolved: 0" in pdf_risk
+    assert "Unknown: 1" in pdf_risk
+    assert html is not None and "Coverage incomplete or uncertain" in html
+    assert '<td>Resolved</td><td style="text-align:right">0</td>' in html
+    assert '<td>Unknown</td><td style="text-align:right">1</td>' in html
+    assert meta["riskPeriod"]["status"] == "reported"
 
 
 @pytest.mark.unit
