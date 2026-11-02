@@ -15,12 +15,16 @@ from sqlalchemy.sql.dml import Insert, Update
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult, ScanStatus
 from app.models.scan_risk_notification_event import (
     RISK_EVENT_CANCELLED,
+    RISK_EVENT_CLAIMED,
     RISK_EVENT_PENDING,
     RISK_EVENT_SENT,
     ScanRiskNotificationEvent,
 )
 from app.services import finding_notification_event
-from app.services.finding_notification_event import RISK_EVENT_DISPATCH_MAX_BATCH_SIZE
+from app.services.finding_notification_event import (
+    RISK_EVENT_CLAIM_DURATION,
+    RISK_EVENT_DISPATCH_MAX_BATCH_SIZE,
+)
 from app.services.finding_identity import FINDING_RULESET_VERSION
 from app.services.finding_transition import HighRiskTransition, RiskHistoryPage
 
@@ -206,6 +210,55 @@ async def test_revalidation_does_not_cancel_event_requeued_for_another_scan(monk
     )
     assert event.status == RISK_EVENT_PENDING
     history.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claim_reserves_revalidated_event_without_committing(monkeypatch) -> None:
+    baseline = _evidence_scan(risk=False)
+    scan = _evidence_scan(risk=True, completed_at=NEXT_COMPLETION)
+    event = _pending_event(scan, baseline)
+    revalidate = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        finding_notification_event, "revalidate_pending_risk_event_in_transaction", revalidate
+    )
+    db = SimpleNamespace(get=AsyncMock(return_value=event), commit=AsyncMock())
+
+    token = await finding_notification_event.claim_pending_risk_event_in_transaction(
+        db, event.id, claimed_at=COMPLETED_AT
+    )
+
+    assert token is not None
+    assert event.status == RISK_EVENT_CLAIMED
+    assert event.claim_token == token
+    assert event.claim_expires_at == COMPLETED_AT + RISK_EVENT_CLAIM_DURATION
+    revalidate.assert_awaited_once_with(db, event.id)
+    db.get.assert_awaited_once_with(ScanRiskNotificationEvent, event.id)
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claim_skips_stale_event_and_rejects_naive_time(monkeypatch) -> None:
+    revalidate = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        finding_notification_event, "revalidate_pending_risk_event_in_transaction", revalidate
+    )
+    db = SimpleNamespace(get=AsyncMock())
+    event_id = uuid4()
+
+    assert (
+        await finding_notification_event.claim_pending_risk_event_in_transaction(
+            db, event_id, claimed_at=COMPLETED_AT
+        )
+        is None
+    )
+    db.get.assert_not_awaited()
+    with pytest.raises(ValueError, match="timezone"):
+        await finding_notification_event.claim_pending_risk_event_in_transaction(
+            db, event_id, claimed_at=COMPLETED_AT.replace(tzinfo=None)
+        )
+    revalidate.assert_awaited_once()
 
 
 @pytest.mark.unit

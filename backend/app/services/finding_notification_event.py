@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Select, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
@@ -27,6 +28,7 @@ from app.services.finding_transition import (
 
 RISK_EVENT_DISPATCH_BATCH_SIZE = 50
 RISK_EVENT_DISPATCH_MAX_BATCH_SIZE = 100
+RISK_EVENT_CLAIM_DURATION = timedelta(minutes=15)
 
 
 async def list_pending_risk_event_ids(
@@ -91,6 +93,31 @@ async def revalidate_pending_risk_event_in_transaction(
         event.status = RISK_EVENT_CANCELLED
         return False
     return True
+
+
+async def claim_pending_risk_event_in_transaction(
+    db: AsyncSession, event_id: uuid.UUID, *, claimed_at: datetime | None = None
+) -> uuid.UUID | None:
+    """Reserve one live episode under the scan-first locks held by revalidation.
+
+    The caller commits before any network I/O. An expired claim is not
+    automatically requeued: an unknown send outcome could otherwise duplicate
+    a notification. The token identifies this claim for later finalization.
+    """
+    claim_time = claimed_at or datetime.now(timezone.utc)
+    if claim_time.tzinfo is None or claim_time.utcoffset() is None:
+        raise ValueError("Risk event claim time must include a timezone")
+    if not await revalidate_pending_risk_event_in_transaction(db, event_id):
+        return None
+
+    event = await db.get(ScanRiskNotificationEvent, event_id)
+    if event is None or event.status != RISK_EVENT_PENDING:
+        return None
+    token = uuid.uuid4()
+    event.status = RISK_EVENT_CLAIMED
+    event.claim_token = token
+    event.claim_expires_at = claim_time + RISK_EVENT_CLAIM_DURATION
+    return token
 
 
 def risk_event_is_dispatchable(
