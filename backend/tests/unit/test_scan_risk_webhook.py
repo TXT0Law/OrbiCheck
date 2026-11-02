@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from app.services.finding_notification_payload import ScanRiskNotificationPayload
@@ -92,3 +94,95 @@ def test_scan_risk_webhook_rejects_invalid_enabled_target(monkeypatch) -> None:
                 "webhookUrl": "http://example.com/hook",
             }
         )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_send_scan_risk_webhook_requires_opt_in_before_network(monkeypatch) -> None:
+    send = AsyncMock()
+    monkeypatch.setattr(scan_risk_webhook, "post_json", send)
+
+    outcome = await scan_risk_webhook.send_scan_risk_webhook(
+        _payload(), {"webhookEnabled": True, "webhookUrl": WEBHOOK_URL}
+    )
+
+    assert outcome is scan_risk_webhook.ScanRiskWebhookOutcome.DISABLED
+    send.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_send_scan_risk_webhook_blocks_invalid_target_before_network(
+    monkeypatch,
+) -> None:
+    send = AsyncMock()
+    monkeypatch.setattr(scan_risk_webhook, "post_json", send)
+
+    outcome = await scan_risk_webhook.send_scan_risk_webhook(
+        _payload(),
+        {
+            "scanRiskEventsEnabled": True,
+            "webhookEnabled": True,
+            "webhookUrl": "http://example.com/hook",
+        },
+    )
+
+    assert outcome is scan_risk_webhook.ScanRiskWebhookOutcome.BLOCKED
+    send.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_send_scan_risk_webhook_confirms_success_with_idempotency_key(
+    monkeypatch,
+) -> None:
+    payload = _payload()
+    send = AsyncMock(return_value=(204, ""))
+    monkeypatch.setattr(scan_risk_webhook, "post_json", send)
+    monkeypatch.setattr(scan_risk_webhook, "validate_https_url", lambda target: target)
+
+    outcome = await scan_risk_webhook.send_scan_risk_webhook(
+        payload,
+        {
+            "scanRiskEventsEnabled": True,
+            "webhookEnabled": True,
+            "webhookUrl": WEBHOOK_URL,
+        },
+    )
+
+    assert outcome is scan_risk_webhook.ScanRiskWebhookOutcome.CONFIRMED
+    send.assert_awaited_once_with(
+        WEBHOOK_URL,
+        scan_risk_webhook.build_scan_risk_webhook_body(payload),
+        extra_headers={"Idempotency-Key": str(payload.event_id)},
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["timeout", "status"])
+async def test_send_scan_risk_webhook_does_not_retry_uncertain_result(
+    monkeypatch, failure_kind: str
+) -> None:
+    request = httpx.Request("POST", WEBHOOK_URL)
+    if failure_kind == "timeout":
+        error: httpx.HTTPError = httpx.ReadTimeout("timed out", request=request)
+    else:
+        error = httpx.HTTPStatusError(
+            "server error", request=request, response=httpx.Response(500, request=request)
+        )
+    send = AsyncMock(side_effect=error)
+    monkeypatch.setattr(scan_risk_webhook, "post_json", send)
+    monkeypatch.setattr(scan_risk_webhook, "validate_https_url", lambda target: target)
+
+    outcome = await scan_risk_webhook.send_scan_risk_webhook(
+        _payload(),
+        {
+            "scanRiskEventsEnabled": True,
+            "webhookEnabled": True,
+            "webhookUrl": WEBHOOK_URL,
+        },
+    )
+
+    assert outcome is scan_risk_webhook.ScanRiskWebhookOutcome.UNKNOWN
+    send.assert_awaited_once()
