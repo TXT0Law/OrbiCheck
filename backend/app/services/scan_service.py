@@ -233,15 +233,15 @@ async def list_scans(
     filters = [Scan.user_id == user_id, *_build_scan_filters(search=search, status_group=status_group)]
 
     sort_options = {
-        "created_at_desc": desc(Scan.created_at),
-        "created_at_asc": asc(Scan.created_at),
-        "security_score_desc": desc(Scan.security_score),
-        "security_score_asc": asc(Scan.security_score),
-        "domain_asc": asc(Scan.domain),
-        "domain_desc": desc(Scan.domain),
-        "progress_desc": desc(Scan.progress),
+        "created_at_desc": (desc(Scan.created_at), desc(Scan.id)),
+        "created_at_asc": (asc(Scan.created_at), asc(Scan.id)),
+        "security_score_desc": (desc(Scan.security_score), desc(Scan.created_at), desc(Scan.id)),
+        "security_score_asc": (asc(Scan.security_score), desc(Scan.created_at), desc(Scan.id)),
+        "domain_asc": (asc(Scan.domain), desc(Scan.created_at), desc(Scan.id)),
+        "domain_desc": (desc(Scan.domain), desc(Scan.created_at), desc(Scan.id)),
+        "progress_desc": (desc(Scan.progress), desc(Scan.created_at), desc(Scan.id)),
     }
-    order_clause = sort_options.get(sort_by, desc(Scan.created_at))
+    order_clauses = sort_options.get(sort_by, sort_options["created_at_desc"])
 
     count_stmt = select(func.count()).select_from(Scan)
     if filters:
@@ -252,7 +252,7 @@ async def list_scans(
     if filters:
         stmt = stmt.where(*filters)
 
-    stmt = stmt.order_by(order_clause).limit(limit).offset(offset)
+    stmt = stmt.order_by(*order_clauses).limit(limit).offset(offset)
     result = await db.execute(stmt)
     scans = list(result.scalars().all())
     return scans, total

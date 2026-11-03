@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.core.exceptions import ScanNotFoundError
 from app.models.scan import ModuleStatus, ScanStatus
@@ -210,3 +211,32 @@ async def test_list_scans_returns_rows_and_total() -> None:
 
     assert total == 3
     assert scans == [row]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sort_by", "expected_order"),
+    [
+        ("created_at_desc", "scans.created_at DESC, scans.id DESC"),
+        ("created_at_asc", "scans.created_at ASC, scans.id ASC"),
+        ("security_score_desc", "scans.security_score DESC, scans.created_at DESC, scans.id DESC"),
+        ("security_score_asc", "scans.security_score ASC, scans.created_at DESC, scans.id DESC"),
+        ("domain_asc", "scans.domain ASC, scans.created_at DESC, scans.id DESC"),
+        ("domain_desc", "scans.domain DESC, scans.created_at DESC, scans.id DESC"),
+        ("progress_desc", "scans.progress DESC, scans.created_at DESC, scans.id DESC"),
+        ("unknown", "scans.created_at DESC, scans.id DESC"),
+    ],
+)
+async def test_list_scans_uses_stable_order_for_each_sort(
+    sort_by: str,
+    expected_order: str,
+) -> None:
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_ScalarsResult([0]), _ScalarsResult([])])
+
+    await scan_service.list_scans(db, user_id=1, sort_by=sort_by)
+
+    list_query = db.execute.call_args_list[1].args[0]
+    sql = str(list_query.compile(dialect=postgresql.dialect()))
+    assert f"ORDER BY {expected_order}" in sql
