@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from app.models.scan import ModuleStatus, ScanStatus
@@ -53,9 +53,9 @@ PORT_SCAN_PROFILES = frozenset({"quick", "standard", "deep"})
 class ScanCreateRequest(BaseModel):
     url: str
     modules: list[str] | None = None  # If provided, only run these; otherwise all.
-    enable_port_scan: bool = Field(default=False, alias="enablePortScan")
+    enable_port_scan: StrictBool = Field(default=False, alias="enablePortScan")
     port_scan_profile: str = Field(default="quick", alias="portScanProfile")
-    acknowledge_scan_authorization: bool = Field(
+    acknowledge_scan_authorization: StrictBool = Field(
         default=False,
         alias="acknowledgeScanAuthorization",
     )

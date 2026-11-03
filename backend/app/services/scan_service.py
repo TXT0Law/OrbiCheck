@@ -27,6 +27,7 @@ from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.tasks.scan_tasks import execute_scan
 from app.services.security_analyzer import compute_security_score_v2
 from app.services.scan_client import call_scan_module, is_successful_scan_status
+from app.services.scan_options import PORTS_MODULE, port_scan_authorized
 from app.services.transformers import ALL_MODULES
 from app.utils.url_safety import validate_url_safety
 
@@ -40,7 +41,6 @@ SCAN_CANCEL_REQUESTED_TTL = 86400
 
 TERMINAL_STATUSES = (ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELLED)
 CANCELLABLE_STATUSES = (ScanStatus.PENDING, ScanStatus.RUNNING)
-PORTS_MODULE = "ports"
 DEFAULT_PORT_SCAN_PROFILE = "quick"
 
 
@@ -144,6 +144,13 @@ async def create_scan(
     If modules is None or empty, all modules run (same as before).
     """
     validate_url_safety(url)
+    enable_port_scan = port_scan_authorized(
+        {
+            "enablePortScan": enable_port_scan,
+            "acknowledgeScanAuthorization": acknowledge_scan_authorization,
+        }
+    )
+    acknowledge_scan_authorization = acknowledge_scan_authorization is True
     domain = urlparse(url).hostname or url
     selected = (
         [m for m in modules if m in ALL_MODULES]
@@ -373,8 +380,9 @@ async def rescan(
         await db.delete(mr)
     await db.flush()
 
-    scan_options = getattr(existing, "scan_options", None) or {}
-    enable_port_scan = bool(scan_options.get("enablePortScan", False))
+    stored_options = getattr(existing, "scan_options", None)
+    scan_options = stored_options if isinstance(stored_options, dict) else {}
+    enable_port_scan = port_scan_authorized(scan_options)
     port_scan_profile = str(
         scan_options.get("portScanProfile", DEFAULT_PORT_SCAN_PROFILE)
     )
@@ -495,6 +503,11 @@ async def retry_module(
 
     if module_name not in ALL_MODULES:
         raise InvalidModuleNameError(f"Unknown module: {module_name}")
+
+    if module_name == PORTS_MODULE and not port_scan_authorized(
+        getattr(scan, "scan_options", None)
+    ):
+        raise ScanNotRetryableError("Port scanning requires explicit authorization.")
 
     existing = next(
         (m for m in scan.module_results if m.module_name == module_name),

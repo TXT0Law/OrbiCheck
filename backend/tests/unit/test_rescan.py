@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.exceptions import ScanNotRescannableError, ScanNotFoundError
-from app.models.scan import ScanStatus
+from app.models.scan import ModuleStatus, ScanStatus
 from app.services import scan_service
 
 
@@ -229,3 +229,57 @@ async def test_rescan_deletes_stale_cancel_and_progress_keys(
     keys = stub_redis_for_rescan.delete.call_args[0]
     assert f"scan:{cancelled_scan.id}:progress" in keys
     assert f"scan:{cancelled_scan.id}:cancel_requested" in keys
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored_options", "expect_port_scan"),
+    [
+        ({"enablePortScan": "false", "acknowledgeScanAuthorization": True}, False),
+        ({"enablePortScan": True, "acknowledgeScanAuthorization": "false"}, False),
+        ({"enablePortScan": True, "acknowledgeScanAuthorization": True}, True),
+    ],
+)
+async def test_rescan_port_scan_requires_persisted_explicit_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+    stored_options: dict[str, object],
+    expect_port_scan: bool,
+) -> None:
+    scan = SimpleNamespace(
+        id=uuid4(),
+        status=ScanStatus.COMPLETED,
+        url="https://example.com",
+        domain="example.com",
+        module_results=[],
+        scan_options=stored_options,
+    )
+    added_rows = []
+    dispatched_options = []
+
+    async def _fake_get_scan(_db, _scan_id):
+        return scan
+
+    class FakeDb:
+        def add(self, row):
+            added_rows.append(row)
+
+        async def delete(self, _row):
+            pass
+
+        async def flush(self):
+            pass
+
+    def _fake_delay(_scan_id, _modules_filter, scan_options):
+        dispatched_options.append(scan_options)
+        return SimpleNamespace(id="task-port-opt-in")
+
+    monkeypatch.setattr(scan_service, "get_scan", _fake_get_scan)
+    monkeypatch.setattr(scan_service.execute_scan, "delay", _fake_delay)
+    monkeypatch.setattr(scan_service, "settings", SimpleNamespace(APP_ENV="production"))
+
+    await scan_service.rescan(FakeDb(), scan.id)
+
+    ports_row = next(row for row in added_rows if row.module_name == scan_service.PORTS_MODULE)
+    assert (ports_row.status == ModuleStatus.PENDING) is expect_port_scan
+    assert dispatched_options[0]["enablePortScan"] is expect_port_scan

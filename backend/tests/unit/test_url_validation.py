@@ -31,6 +31,26 @@ class TestScanCreateRequestValidation:
         with pytest.raises(ValidationError):
             ScanCreateRequest(url="https://example.com", enablePortScan=True)
 
+    @pytest.mark.parametrize(
+        ("enable_port_scan", "acknowledgment"),
+        [("true", True), (True, "true"), (1, True)],
+    )
+    def test_port_scan_requires_explicit_boolean_inputs(
+        self,
+        enable_port_scan: object,
+        acknowledgment: object,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "app.api.v1.schemas.scan.validate_url_safety", lambda _url: None
+        )
+        with pytest.raises(ValidationError):
+            ScanCreateRequest(
+                url="https://example.com",
+                enablePortScan=enable_port_scan,
+                acknowledgeScanAuthorization=acknowledgment,
+            )
+
     def test_port_scan_accepts_profile_and_authorization(self) -> None:
         req = ScanCreateRequest(
             url="https://example.com",

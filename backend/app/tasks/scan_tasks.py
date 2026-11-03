@@ -24,6 +24,7 @@ from app.services.scan_client import (
     call_scan_module_sync,
     is_successful_scan_result,
 )
+from app.services.scan_options import PORTS_MODULE, port_scan_authorized
 from app.services.transformers import ALL_MODULES, MODULE_BATCHES
 from app.utils.url_safety import validate_url_safety
 
@@ -169,8 +170,14 @@ def execute_scan(
             persisted_options = scan.scan_options if isinstance(scan.scan_options, dict) else {}
             effective_scan_options = {
                 **persisted_options,
-                **(scan_options or {}),
+                **(scan_options if isinstance(scan_options, dict) else {}),
             }
+            port_scan_enabled = port_scan_authorized(persisted_options) and port_scan_authorized(
+                effective_scan_options
+            )
+            effective_scan_options["enablePortScan"] = port_scan_enabled
+            if not port_scan_enabled:
+                effective_scan_options["acknowledgeScanAuthorization"] = False
             group_id = _coerce_uuid_option(effective_scan_options.get("urlGroupId"))
             group_run_id = _coerce_uuid_option(
                 effective_scan_options.get("urlGroupRunId")
@@ -179,14 +186,23 @@ def execute_scan(
 
             all_raw_results: dict[str, dict | None] = {}
             selected = (
-                [m for m in modules_filter if m in ALL_MODULES]
+                [
+                    m
+                    for m in modules_filter
+                    if m in ALL_MODULES and (m != PORTS_MODULE or port_scan_enabled)
+                ]
                 if modules_filter and len(modules_filter) > 0
                 else None
             )
             total_modules = (
                 len(selected)
                 if selected is not None
-                else sum(len(b) for b in MODULE_BATCHES.values())
+                else sum(
+                    1
+                    for batch in MODULE_BATCHES.values()
+                    for module in batch
+                    if module != PORTS_MODULE or port_scan_enabled
+                )
             )
             record_event_sync(
                 db,
@@ -244,7 +260,9 @@ def execute_scan(
                 modules = (
                     [m for m in batch_modules if m in (selected or [])]
                     if selected is not None
-                    else list(batch_modules)
+                    else [
+                        m for m in batch_modules if m != PORTS_MODULE or port_scan_enabled
+                    ]
                 )
 
                 if not modules:
