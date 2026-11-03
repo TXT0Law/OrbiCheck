@@ -16,6 +16,7 @@ from app.services.finding_identity import FINDING_RULESET_VERSION
 from app.services.finding_observation import (
     FindingProjectionError,
     build_finding_observations,
+    invalidate_finding_observations_for_rescan,
     persist_finding_observations,
     refresh_finding_observations_after_retry,
 )
@@ -219,6 +220,69 @@ def test_persistence_keeps_malformed_scan_unprojected() -> None:
     assert scan.finding_observations_projected_at is None
     assert len(statements) == 1
     assert isinstance(statements[0], Select)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_rescan_invalidation_discards_old_evidence_and_projection_marker() -> None:
+    scan = _scan(_module("ssl", {"bits": 2048}))
+    scan.finding_observations_projected_at = datetime.now(timezone.utc)
+    scan.finding_ruleset_version = FINDING_RULESET_VERSION
+
+    class SessionStub:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        async def execute(self, statement: object) -> SimpleNamespace:
+            self.statements.append(statement)
+            if isinstance(statement, Select):
+                return SimpleNamespace(scalar_one_or_none=lambda: scan)
+            if isinstance(statement, Delete):
+                return SimpleNamespace(rowcount=2)
+            return SimpleNamespace()
+
+    db = SessionStub()
+    assert await invalidate_finding_observations_for_rescan(db, scan.id, scan.user_id) == 2
+    assert [type(statement) for statement in db.statements] == [Select, Delete, Update]
+    locked_select = db.statements[0].compile(dialect=postgresql.dialect())
+    assert "FOR UPDATE OF scans" in str(locked_select)
+    assert scan.user_id in locked_select.params.values()
+    assert db.statements[2].compile().params["finding_observations_projected_at"] is None
+    assert db.statements[2].compile().params["finding_ruleset_version"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [ScanStatus.PENDING, ScanStatus.RUNNING])
+async def test_rescan_invalidation_preserves_active_scan(status: ScanStatus) -> None:
+    scan = _scan(status=status)
+    statements: list[object] = []
+
+    class SessionStub:
+        async def execute(self, statement: object) -> SimpleNamespace:
+            statements.append(statement)
+            return SimpleNamespace(scalar_one_or_none=lambda: scan)
+
+    with pytest.raises(FindingProjectionError, match="unavailable"):
+        await invalidate_finding_observations_for_rescan(SessionStub(), scan.id, scan.user_id)
+    assert len(statements) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_rescan_invalidation_preserves_other_users_evidence() -> None:
+    scan = _scan()
+    statements: list[object] = []
+
+    class SessionStub:
+        async def execute(self, statement: object) -> SimpleNamespace:
+            statements.append(statement)
+            return SimpleNamespace(scalar_one_or_none=lambda: None)
+
+    with pytest.raises(FindingProjectionError, match="unavailable"):
+        await invalidate_finding_observations_for_rescan(SessionStub(), scan.id, scan.user_id + 1)
+    assert len(statements) == 1
+    assert scan.user_id + 1 in statements[0].compile().params.values()
 
 
 @pytest.mark.unit
