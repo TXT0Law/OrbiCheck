@@ -47,6 +47,8 @@ List scans with pagination and filtering.
 | `status_group` | string | `all` | Filter: `all`, `pending`, `running`, `completed`, `failed`, `cancelled` |
 
 > **Note:** Scans use `offset`/`limit` pagination. Other resources (e.g. URL Groups) use `skip`/`limit`. This is a deliberate design choice reflecting each resource's access patterns.
+Scans with the same primary sort value use creation time and scan ID as
+tie-breakers, so pages have a deterministic order.
 
 **Response:** `SuccessResponse[ScanListResponse]`
 
