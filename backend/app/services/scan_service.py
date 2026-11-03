@@ -26,7 +26,7 @@ from app.core.exceptions import (
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.tasks.scan_tasks import execute_scan
 from app.services.security_analyzer import compute_security_score_v2
-from app.services.scan_client import call_scan_module
+from app.services.scan_client import call_scan_module, is_successful_scan_status
 from app.services.transformers import ALL_MODULES
 from app.utils.url_safety import validate_url_safety
 
@@ -524,9 +524,12 @@ async def retry_module(
     status_code = resp.get("status_code", 500)
     data = resp.get("data") or {}
 
-    success = 200 <= status_code < 400
-    if isinstance(data, dict) and "success" in data:
-        success = bool(data.get("success"))
+    success = is_successful_scan_status(status_code)
+    if isinstance(data, dict):
+        if "statusCode" in data:
+            success = success and is_successful_scan_status(data.get("statusCode"))
+        if "success" in data:
+            success = success and data.get("success") is True
 
     new_status = ModuleStatus.SUCCESS if success else ModuleStatus.FAILED
     error_msg = None

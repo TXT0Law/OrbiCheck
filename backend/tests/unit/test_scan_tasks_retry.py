@@ -255,6 +255,85 @@ def test_batch_failure_marks_modules_retrying_then_resolves_per_module(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status_code", "reported_success"), [(200, "false"), (500, True)]
+)
+def test_per_module_recovery_rejects_false_success(
+    monkeypatch: pytest.MonkeyPatch,
+    patched_environment,
+    stub_scan,
+    status_code: int,
+    reported_success: object,
+) -> None:
+    module_name = "ssl"
+    monkeypatch.setattr(
+        scan_tasks,
+        "MODULE_BATCHES",
+        {"quick": [module_name], "medium": [], "heavy": []},
+    )
+    monkeypatch.setattr(scan_tasks, "ALL_MODULES", [module_name])
+
+    def _batch_explodes(*_a: object, **_kw: object) -> None:
+        raise RuntimeError("scan-service batch endpoint 503")
+
+    monkeypatch.setattr(scan_tasks, "call_scan_batch_sync", _batch_explodes)
+    monkeypatch.setattr(
+        scan_tasks,
+        "call_scan_module_sync",
+        lambda *_a, **_kw: {
+            "success": reported_success,
+            "statusCode": status_code,
+            "data": {"grade": "F"},
+            "durationMs": 1,
+        },
+    )
+
+    scan_tasks.execute_scan.request.id = "task-malformed-success"
+    result = scan_tasks.execute_scan.run(str(stub_scan.id))
+
+    assert result["status"] == ScanStatus.FAILED.value
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status_code", "reported_success"), [(200, "false"), (500, True)]
+)
+def test_batch_result_rejects_false_success(
+    monkeypatch: pytest.MonkeyPatch,
+    patched_environment,
+    stub_scan,
+    status_code: int,
+    reported_success: object,
+) -> None:
+    module_name = "ssl"
+    monkeypatch.setattr(
+        scan_tasks,
+        "MODULE_BATCHES",
+        {"quick": [module_name], "medium": [], "heavy": []},
+    )
+    monkeypatch.setattr(scan_tasks, "ALL_MODULES", [module_name])
+    monkeypatch.setattr(
+        scan_tasks,
+        "call_scan_batch_sync",
+        lambda *_a, **_kw: {
+            "results": {
+                module_name: {
+                    "success": reported_success,
+                    "statusCode": status_code,
+                    "data": {"grade": "F"},
+                    "durationMs": 1,
+                }
+            }
+        },
+    )
+
+    scan_tasks.execute_scan.request.id = "task-malformed-batch-success"
+    result = scan_tasks.execute_scan.run(str(stub_scan.id))
+
+    assert result["status"] == ScanStatus.FAILED.value
+
+
+@pytest.mark.unit
 def test_progress_payload_exposes_current_modules_and_degraded_target(
     monkeypatch: pytest.MonkeyPatch, patched_environment, stub_scan
 ) -> None:

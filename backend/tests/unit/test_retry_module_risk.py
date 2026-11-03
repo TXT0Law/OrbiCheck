@@ -141,3 +141,52 @@ async def test_retry_module_invokes_risk_refresh(monkeypatch) -> None:
 
     refresh.assert_awaited_once_with(db, scan_id)
     db.commit.assert_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "reported_success", "payload_status"),
+    [(200, "false", 200), (500, True, 200), (200, True, 500)],
+)
+async def test_retry_module_does_not_accept_false_success_from_scan_service(
+    monkeypatch, status_code: int, reported_success: object, payload_status: int
+) -> None:
+    scan_id = uuid4()
+    ssl_row = SimpleNamespace(
+        module_name="ssl",
+        status=ModuleStatus.FAILED,
+        raw_result=None,
+        duration_ms=1,
+        error_message="previous failure",
+        completed_at=None,
+    )
+    scan = SimpleNamespace(
+        id=scan_id,
+        url="https://example.com",
+        status=ScanStatus.COMPLETED,
+        module_results=[ssl_row],
+    )
+
+    async def fake_get_scan(_db, _scan_id):
+        return scan
+
+    async def fake_call_scan_module(_name, _url):
+        return {
+            "status_code": status_code,
+            "data": {
+                "success": reported_success,
+                "statusCode": payload_status,
+                "durationMs": 12,
+            },
+        }
+
+    monkeypatch.setattr(scan_service, "get_scan", fake_get_scan)
+    monkeypatch.setattr(scan_service, "call_scan_module", fake_call_scan_module)
+    monkeypatch.setattr(scan_service, "_refresh_scan_security_score", AsyncMock())
+
+    db = AsyncMock()
+    result = await scan_service.retry_module(db, scan_id, "ssl")
+
+    assert result["status"] == "failed"
+    assert ssl_row.status == ModuleStatus.FAILED
