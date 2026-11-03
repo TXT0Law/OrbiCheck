@@ -182,6 +182,53 @@ def _decode_progress_payloads(redis: _StubRedis) -> list[dict[str, Any]]:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("stored_options", "task_options", "modules_filter", "expect_ports"),
+    [
+        ({}, None, None, False),
+        ({"enablePortScan": "false", "acknowledgeScanAuthorization": True}, None, None, False),
+        ({"enablePortScan": True, "acknowledgeScanAuthorization": "false"}, None, None, False),
+        ({"enablePortScan": True, "acknowledgeScanAuthorization": True}, None, None, True),
+        ({"enablePortScan": True, "acknowledgeScanAuthorization": True}, {"enablePortScan": False}, None, False),
+        ({}, None, ["status", "ports"], False),
+    ],
+)
+def test_scan_worker_never_dispatches_ports_without_explicit_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+    patched_environment,
+    stub_scan,
+    stored_options: dict[str, object],
+    task_options: dict[str, object] | None,
+    modules_filter: list[str] | None,
+    expect_ports: bool,
+) -> None:
+    stub_scan.scan_options = stored_options
+    monkeypatch.setattr(
+        scan_tasks,
+        "MODULE_BATCHES",
+        {"quick": ["status"], "medium": [], "heavy": ["ports"]},
+    )
+    monkeypatch.setattr(scan_tasks, "ALL_MODULES", ["status", "ports"])
+    dispatched: list[str] = []
+
+    def _batch(_url, modules, _options, **_kwargs):
+        dispatched.extend(modules)
+        return {
+            "results": {
+                name: {"success": True, "statusCode": 200, "data": {}, "durationMs": 1}
+                for name in modules
+            }
+        }
+
+    monkeypatch.setattr(scan_tasks, "call_scan_batch_sync", _batch)
+    scan_tasks.execute_scan.request.id = "task-port-opt-in"
+    scan_tasks.execute_scan.run(str(stub_scan.id), modules_filter, task_options)
+
+    assert ("ports" in dispatched) is expect_ports
+    assert "status" in dispatched
+
+
+@pytest.mark.unit
 def test_batch_failure_marks_modules_retrying_then_resolves_per_module(
     monkeypatch: pytest.MonkeyPatch, patched_environment, stub_scan
 ) -> None:

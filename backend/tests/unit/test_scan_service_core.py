@@ -118,6 +118,7 @@ async def test_create_scan_keeps_ports_when_port_scan_enabled(
         None,
         1,
         enable_port_scan=True,
+        acknowledge_scan_authorization=True,
     )
 
     module_rows = [obj for obj in db.added if getattr(obj, "module_name", None)]
@@ -127,9 +128,30 @@ async def test_create_scan_keeps_ports_when_port_scan_enabled(
     assert scan.scan_options == {
         "enablePortScan": True,
         "portScanProfile": "quick",
-        "acknowledgeScanAuthorization": False,
+        "acknowledgeScanAuthorization": True,
     }
     assert ports_row.status == ModuleStatus.PENDING
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_scan_does_not_queue_ports_without_acknowledgment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _FakeDb()
+    monkeypatch.setattr(scan_service, "validate_url_safety", lambda _url: None)
+
+    scan = await scan_service.create_scan(
+        db,
+        "https://example.com",
+        enable_port_scan=True,
+        acknowledge_scan_authorization=False,
+    )
+
+    ports_row = next(row for row in db.added if getattr(row, "module_name", None) == PORTS_MODULE)
+    assert ports_row.status == ModuleStatus.SUCCESS
+    assert ports_row.raw_result["skipped"] is True
+    assert scan.scan_options["enablePortScan"] is False
 
 
 @pytest.mark.unit

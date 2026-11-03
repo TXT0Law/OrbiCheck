@@ -7,8 +7,39 @@ from uuid import uuid4
 import pytest
 
 from app.models.scan import ModuleStatus, ScanStatus
+from app.core.exceptions import ScanNotRetryableError
 from app.services import scan_service
 from app.services.security_analyzer import SecurityScoreResult
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_manual_retry_rejects_skipped_port_without_authorization(monkeypatch) -> None:
+    scan_id = uuid4()
+    port_row = SimpleNamespace(
+        module_name="ports",
+        status=ModuleStatus.SUCCESS,
+        raw_result={"skipped": True},
+    )
+    scan = SimpleNamespace(
+        id=scan_id,
+        url="https://example.com",
+        status=ScanStatus.COMPLETED,
+        scan_options={"enablePortScan": "false", "acknowledgeScanAuthorization": True},
+        module_results=[port_row],
+    )
+    call_scan_module = AsyncMock()
+
+    async def _get_scan(_db, _scan_id):
+        return scan
+
+    monkeypatch.setattr(scan_service, "get_scan", _get_scan)
+    monkeypatch.setattr(scan_service, "validate_url_safety", lambda _url: None)
+    monkeypatch.setattr(scan_service, "call_scan_module", call_scan_module)
+
+    with pytest.raises(ScanNotRetryableError):
+        await scan_service.retry_module(AsyncMock(), scan_id, "ports")
+    call_scan_module.assert_not_awaited()
 
 
 @pytest.mark.unit
