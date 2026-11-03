@@ -41,6 +41,7 @@ from app.services.finding_notification_event import (
     list_pending_risk_event_ids,
     load_claimed_risk_send_snapshot,
     mark_claimed_risk_event_sent_in_transaction,
+    release_unattempted_risk_event_claim_in_transaction,
 )
 from app.services.notification_channels.scan_risk_webhook import (
     ScanRiskWebhookOutcome,
@@ -107,7 +108,16 @@ async def deliver_one_scan_risk_event(event_id: uuid.UUID) -> ScanRiskDeliveryOu
             event_id=str(event_id),
             error_type=type(exc).__name__,
         )
-        return ScanRiskDeliveryOutcome.PREFLIGHT_UNAVAILABLE
+        async with async_session_factory() as db:
+            async with db.begin():
+                released = await release_unattempted_risk_event_claim_in_transaction(
+                    db, event_id, claim_token
+                )
+        return (
+            ScanRiskDeliveryOutcome.PREFLIGHT_UNAVAILABLE
+            if released
+            else ScanRiskDeliveryOutcome.STALE
+        )
 
     # Redis may have been slow while a rescan or retry invalidated this claim.
     # Read a fresh evidence snapshot before network I/O, without holding a lock.

@@ -262,6 +262,7 @@ async def test_risk_delivery_keeps_claim_after_uncertain_webhook_timeout(
     )
     post = AsyncMock(side_effect=httpx.ReadTimeout("response unavailable"))
     cancel = AsyncMock()
+    release = AsyncMock()
     mark_sent = AsyncMock()
     monkeypatch.setattr(
         notification_tasks, "claim_pending_risk_event_in_transaction", AsyncMock(return_value=token)
@@ -272,6 +273,7 @@ async def test_risk_delivery_keeps_claim_after_uncertain_webhook_timeout(
         AsyncMock(return_value=_snapshot(event_id)),
     )
     monkeypatch.setattr(notification_tasks, "cancel_unattempted_risk_event_claim_in_transaction", cancel)
+    monkeypatch.setattr(notification_tasks, "release_unattempted_risk_event_claim_in_transaction", release)
     monkeypatch.setattr(notification_tasks, "mark_claimed_risk_event_sent_in_transaction", mark_sent)
     monkeypatch.setattr(scan_risk_webhook, "validate_https_url", lambda target: target)
     monkeypatch.setattr(scan_risk_webhook, "post_json", post)
@@ -281,20 +283,23 @@ async def test_risk_delivery_keeps_claim_after_uncertain_webhook_timeout(
     assert outcome is notification_tasks.ScanRiskDeliveryOutcome.UNKNOWN
     post.assert_awaited_once()
     cancel.assert_not_awaited()
+    release.assert_not_awaited()
     mark_sent.assert_not_awaited()
     assert tracker.open_sessions == tracker.open_transactions == 0
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_single_risk_delivery_leaves_claim_unresolved_when_settings_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("released", [True, False])
+async def test_single_risk_delivery_requeues_unattempted_claim_when_settings_unavailable(
+    monkeypatch: pytest.MonkeyPatch, released: bool,
 ) -> None:
     event_id, token = uuid4(), uuid4()
     tracker = _SessionTracker()
     redis, get_settings = _patch_preflight(monkeypatch, tracker)
     get_settings.side_effect = RedisError("unavailable")
     cancel = AsyncMock()
+    release = AsyncMock(return_value=released)
     mark_sent = AsyncMock()
     send = AsyncMock()
     monkeypatch.setattr(
@@ -306,14 +311,20 @@ async def test_single_risk_delivery_leaves_claim_unresolved_when_settings_unavai
         AsyncMock(return_value=_snapshot(event_id)),
     )
     monkeypatch.setattr(notification_tasks, "cancel_unattempted_risk_event_claim_in_transaction", cancel)
+    monkeypatch.setattr(notification_tasks, "release_unattempted_risk_event_claim_in_transaction", release)
     monkeypatch.setattr(notification_tasks, "mark_claimed_risk_event_sent_in_transaction", mark_sent)
     monkeypatch.setattr(notification_tasks, "send_scan_risk_webhook", send)
 
     outcome = await notification_tasks.deliver_one_scan_risk_event(event_id)
 
-    assert outcome is notification_tasks.ScanRiskDeliveryOutcome.PREFLIGHT_UNAVAILABLE
+    assert outcome is (
+        notification_tasks.ScanRiskDeliveryOutcome.PREFLIGHT_UNAVAILABLE
+        if released
+        else notification_tasks.ScanRiskDeliveryOutcome.STALE
+    )
     redis.aclose.assert_awaited_once()
     send.assert_not_awaited()
+    release.assert_awaited_once_with(tracker, event_id, token)
     cancel.assert_not_awaited()
     mark_sent.assert_not_awaited()
     assert tracker.open_sessions == tracker.open_transactions == 0

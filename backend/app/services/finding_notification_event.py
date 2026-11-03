@@ -216,6 +216,32 @@ async def cancel_unattempted_risk_event_claim_in_transaction(
     return result.rowcount == 1
 
 
+async def release_unattempted_risk_event_claim_in_transaction(
+    db: AsyncSession, event_id: uuid.UUID, claim_token: uuid.UUID
+) -> bool:
+    """Requeue a live claim only when no external request was attempted.
+
+    A preflight dependency failure is known to precede webhook I/O. Match the
+    unexpired token so an uncertain or expired claim is never requeued, and
+    so a replaced claim cannot be changed by this worker.
+    """
+    result = await db.execute(
+        update(ScanRiskNotificationEvent)
+        .where(
+            ScanRiskNotificationEvent.id == event_id,
+            ScanRiskNotificationEvent.status == RISK_EVENT_CLAIMED,
+            ScanRiskNotificationEvent.claim_token == claim_token,
+            ScanRiskNotificationEvent.claim_expires_at > func.clock_timestamp(),
+        )
+        .values(
+            status=RISK_EVENT_PENDING,
+            claim_token=None,
+            claim_expires_at=None,
+        )
+    )
+    return result.rowcount == 1
+
+
 async def claimed_risk_event_is_ready_for_send(
     db: AsyncSession, event_id: uuid.UUID, claim_token: uuid.UUID
 ) -> bool:
