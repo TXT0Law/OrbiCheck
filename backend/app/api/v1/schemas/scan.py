@@ -211,3 +211,28 @@ class ScanFindingListResponse(BaseModel):
         alias_generator=to_camel,
         populate_by_name=True,
     )
+
+
+class FindingEvidenceSourceResponse(BaseModel):
+    module_name: str
+    status: Literal["available", "missing", "too_large"]
+    raw_result: dict[str, Any] | None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+
+class ScanFindingEvidenceResponse(BaseModel):
+    scan_id: uuid.UUID
+    rule_id: str
+    observed_at: datetime
+    sources: list[FindingEvidenceSourceResponse]
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )

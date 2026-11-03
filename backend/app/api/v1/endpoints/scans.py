@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Path, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.api.v1.schemas.operational_event import OperationalEventListResponse
 from app.api.v1.schemas.scan import (
     ScanCreateRequest,
     ScanDetailResponse,
+    ScanFindingEvidenceResponse,
     ScanFindingListResponse,
     ScanListResponse,
     ScanResponse,
@@ -315,6 +316,27 @@ async def get_scan_findings(
     """List evidence-backed findings only for an owned, projected scan."""
     findings = await finding_observation.list_scan_findings(db, scan_id, current_user.id)
     return SuccessResponse(data=ScanFindingListResponse.model_validate(findings))
+
+
+@router.get(
+    "/{scan_id}/findings/{rule_id}/evidence",
+    response_model=SuccessResponse[ScanFindingEvidenceResponse],
+    description=(
+        "Returns stored raw results only for the modules supporting an owned, projected finding. "
+        "A source larger than the per-module response limit is marked too_large and omitted."
+    ),
+)
+async def get_scan_finding_evidence(
+    scan_id: uuid.UUID,
+    rule_id: str = Path(min_length=1, max_length=96, pattern=r"^[a-z0-9._-]+$"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuccessResponse[ScanFindingEvidenceResponse]:
+    """Read bounded original module results for an owned risk observation."""
+    evidence = await finding_observation.get_scan_finding_evidence(
+        db, scan_id, rule_id, current_user.id
+    )
+    return SuccessResponse(data=ScanFindingEvidenceResponse.model_validate(evidence))
 
 
 @router.get("/{scan_id}/events", response_model=SuccessResponse[OperationalEventListResponse])

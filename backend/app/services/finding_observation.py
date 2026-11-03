@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 
 import structlog
 from sqlalchemy import case, delete, select, update
@@ -13,8 +14,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ScanNotFoundError
-from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanStatus
+from app.core.exceptions import FindingEvidenceNotFoundError, ScanNotFoundError
+from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult, ScanStatus
 from app.services.finding_identity import (
     FINDING_RULESET_VERSION,
     MAX_FINDING_RULES,
@@ -22,10 +23,11 @@ from app.services.finding_identity import (
     finding_rule_identity,
 )
 from app.services.security_analyzer import extract_key_findings
-from app.services.transformers import _is_skipped
+from app.services.transformers import ALL_MODULES, _is_skipped
 
 SCAN_FINDING_BACKFILL_BATCH_SIZE = 25
 SCAN_FINDING_BACKFILL_MAX_BATCH_SIZE = 100
+MAX_FINDING_EVIDENCE_BYTES = 65_536
 logger = structlog.get_logger(__name__)
 
 
@@ -64,6 +66,100 @@ class ScanFindingList:
     projection_status: Literal["ready", "pending", "failed", "unavailable"]
     projected_at: datetime | None
     observations: list[ScanFindingObservation]
+
+
+@dataclass(frozen=True, slots=True)
+class FindingEvidenceSource:
+    module_name: str
+    status: Literal["available", "missing", "too_large"]
+    raw_result: dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
+class ScanFindingEvidence:
+    scan_id: uuid.UUID
+    rule_id: str
+    observed_at: datetime
+    sources: list[FindingEvidenceSource]
+
+
+async def get_scan_finding_evidence(
+    db: AsyncSession, scan_id: uuid.UUID, rule_id: str, user_id: int
+) -> ScanFindingEvidence:
+    """Read bounded stored raw output for an owned finding in the current ruleset."""
+    finding = (
+        await db.execute(
+            select(ScanFindingObservation)
+            .join(Scan, ScanFindingObservation.scan_id == Scan.id)
+            .where(
+                ScanFindingObservation.scan_id == scan_id,
+                ScanFindingObservation.rule_id == rule_id,
+                ScanFindingObservation.ruleset_version == FINDING_RULESET_VERSION,
+                Scan.user_id == user_id,
+                Scan.status == ScanStatus.COMPLETED,
+                Scan.finding_observations_projected_at.is_not(None),
+                Scan.finding_observations_projection_failed_at.is_(None),
+                Scan.finding_ruleset_version == FINDING_RULESET_VERSION,
+            )
+        )
+    ).scalar_one_or_none()
+    if finding is None:
+        raise FindingEvidenceNotFoundError()
+
+    module_names = finding.evidence_modules
+    if (
+        not isinstance(module_names, list)
+        or not module_names
+        or len(module_names) > len(ALL_MODULES)
+        or any(not isinstance(name, str) for name in module_names)
+        or len(set(module_names)) != len(module_names)
+        or any(name not in ALL_MODULES for name in module_names)
+    ):
+        raise FindingEvidenceNotFoundError()
+
+    module_rows = (
+        await db.execute(
+            select(ScanModuleResult)
+            .where(
+                ScanModuleResult.scan_id == scan_id,
+                ScanModuleResult.module_name.in_(module_names),
+            )
+            .order_by(
+                ScanModuleResult.completed_at.desc().nulls_last(),
+                ScanModuleResult.id.desc(),
+            )
+            .limit(len(ALL_MODULES))
+        )
+    ).scalars().all()
+    latest_modules: dict[str, ScanModuleResult] = {}
+    for row in module_rows:
+        latest_modules.setdefault(row.module_name, row)
+
+    sources: list[FindingEvidenceSource] = []
+    for module_name in module_names:
+        module = latest_modules.get(module_name)
+        if (
+            module is None
+            or module.status != ModuleStatus.SUCCESS
+            or not isinstance(module.raw_result, dict)
+            or module.completed_at is None
+            or module.completed_at > finding.observed_at
+            or _is_skipped(module)
+        ):
+            sources.append(FindingEvidenceSource(module_name, "missing", None))
+            continue
+        raw_bytes = len(json.dumps(module.raw_result, ensure_ascii=False).encode("utf-8"))
+        if raw_bytes > MAX_FINDING_EVIDENCE_BYTES:
+            sources.append(FindingEvidenceSource(module_name, "too_large", None))
+            continue
+        sources.append(FindingEvidenceSource(module_name, "available", module.raw_result))
+
+    return ScanFindingEvidence(
+        scan_id=scan_id,
+        rule_id=rule_id,
+        observed_at=finding.observed_at,
+        sources=sources,
+    )
 
 
 async def list_scan_findings(

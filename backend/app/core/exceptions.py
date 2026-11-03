@@ -20,6 +20,17 @@ class ScanNotFoundError(AppException):
         )
 
 
+class FindingEvidenceNotFoundError(AppException):
+    """Finding evidence is absent or unavailable to this caller."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="FINDING_EVIDENCE_NOT_FOUND",
+            message="Finding evidence not found",
+            status_code=404,
+        )
+
+
 class ScanNotCancellableError(AppException):
     """Raised when a scan cannot be cancelled (already completed/failed/cancelled)."""
 
