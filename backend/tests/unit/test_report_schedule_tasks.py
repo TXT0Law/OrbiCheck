@@ -265,14 +265,23 @@ def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
     db.__enter__.return_value = db
     db.execute.return_value.scalar_one_or_none.side_effect = [run, source]
     commit_states: list[tuple[ReportScheduleRunStatus, uuid.UUID | None]] = []
-    db.commit.side_effect = lambda: commit_states.append((run.status, run.report_id))
+    read_transaction_open = False
+
+    def record_commit() -> None:
+        nonlocal read_transaction_open
+        read_transaction_open = False
+        commit_states.append((run.status, run.report_id))
+
+    db.commit.side_effect = record_commit
 
     def refresh_state(
         entity: Scan | ReportSchedule, *, attribute_names: list[str] | None = None
     ) -> None:
+        nonlocal read_transaction_open
         if isinstance(entity, Scan):
             entity.status = ScanStatus.COMPLETED
         else:
+            read_transaction_open = True
             assert entity is schedule
             assert attribute_names == ["is_enabled", "delivery_channels", "email_recipients"]
             entity.email_recipients = ["new-ops@example.com"]
@@ -310,6 +319,7 @@ def test_scheduled_report_uses_new_scan_result_and_tracks_delivery(
     async def deliver(
         delivery_schedule: ReportSchedule, *_args: object
     ) -> dict[str, object]:
+        assert not read_transaction_open
         assert delivery_schedule.email_recipients == ["new-ops@example.com"]
         return delivery_response
 

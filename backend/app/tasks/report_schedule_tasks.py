@@ -226,6 +226,9 @@ def generate_scheduled_report_run(run_id: str) -> dict:
             report.completed_at = datetime.now(timezone.utc)
             report.error_message = None
             run.status = ReportScheduleRunStatus.DELIVERING
+            # Keep the rendered report and target snapshot available after
+            # ending the read transaction before external delivery.
+            db.expire_on_commit = False
             db.commit()
 
             # The owner may change delivery settings while report generation runs.
@@ -238,6 +241,7 @@ def generate_scheduled_report_run(run_id: str) -> dict:
                 _fail_run(db, run, "Scheduled report was paused before delivery")
                 return {"run_id": run_id, "status": ReportScheduleRunStatus.FAILED.value}
 
+            db.commit()  # Release the refresh transaction before network I/O.
             delivery_summary = asyncio.run(
                 deliver_scheduled_report(schedule, run, report, scan)
             )
