@@ -23,6 +23,7 @@ from app.services.notification_channels import (
 from app.services.notification_channels._helpers import render_alert_title
 from app.services.notification_channels.registry import resolve_channel_configs
 from app.services.notification_channels.discord import DiscordChannel, validate_target_url as validate_discord
+from app.services.notification_channels.email import EmailChannel
 from app.services.notification_channels.pagerduty import (
     PagerDutyChannel,
     build_event_payload,
@@ -82,6 +83,30 @@ def test_non_boolean_opt_in_values_do_not_enable_notification_channels(
 
     resolved = resolve_channel_configs(settings)
     assert all(not channel.enabled for channel in resolved.values())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("muted_value", [False, "false"])
+def test_muted_email_severities_do_not_dispatch_critical_alerts(
+    muted_value: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "EMAIL_DISPATCH_ENABLED", True)
+    saved = normalize_notification_settings(
+        {
+            "emailEnabled": True,
+            "emailAddress": "alerts@example.com",
+            "emailOnCritical": muted_value,
+            "emailOnWarning": muted_value,
+            "emailOnInfo": muted_value,
+        }
+    )
+    config = resolve_channel_configs(saved)["email"]
+
+    assert config.severity_filter == []
+    assert EmailChannel().is_enabled(config, _payload(severity="critical")) is False
 
 
 # ── URL / key validators ──────────────────────────────────────────────

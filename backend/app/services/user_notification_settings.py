@@ -140,9 +140,9 @@ def normalize_notification_settings(raw: dict[str, Any] | None) -> dict[str, Any
         "scanRiskEventsEnabled": raw.get("scanRiskEventsEnabled") is True,
         "emailEnabled": raw.get("emailEnabled") is True and not invalid_email,
         "emailAddress": email,
-        "emailOnCritical": bool(raw.get("emailOnCritical", True)),
-        "emailOnWarning": bool(raw.get("emailOnWarning", True)),
-        "emailOnInfo": bool(raw.get("emailOnInfo", False)),
+        "emailOnCritical": raw.get("emailOnCritical", True) is True,
+        "emailOnWarning": raw.get("emailOnWarning", True) is True,
+        "emailOnInfo": raw.get("emailOnInfo", False) is True,
         "channels": _normalize_channels(raw.get("channels")),
     }
 
@@ -176,10 +176,10 @@ async def set_notification_settings(
 
 def _severity_email_enabled(cfg: dict[str, Any], severity: str) -> bool:
     if severity == "critical":
-        return bool(cfg.get("emailOnCritical", True))
+        return cfg.get("emailOnCritical", True) is True
     if severity == "warning":
-        return bool(cfg.get("emailOnWarning", True))
-    return bool(cfg.get("emailOnInfo", False))
+        return cfg.get("emailOnWarning", True) is True
+    return cfg.get("emailOnInfo", False) is True
 
 
 async def should_dispatch_email_for_severity(

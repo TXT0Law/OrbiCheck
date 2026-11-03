@@ -169,14 +169,12 @@ def _email_severity_filter(user_settings: dict[str, Any]) -> list[str]:
     """Mirror ``_severity_email_enabled`` so existing toggles keep working."""
 
     out: list[str] = []
-    if user_settings.get("emailOnCritical", True):
+    if user_settings.get("emailOnCritical", True) is True:
         out.append("critical")
-    if user_settings.get("emailOnWarning", True):
+    if user_settings.get("emailOnWarning", True) is True:
         out.append("warning")
-    if user_settings.get("emailOnInfo", False):
+    if user_settings.get("emailOnInfo", False) is True:
         out.append("info")
-    if not out:
-        out = ["critical"]
     return out
 
 
