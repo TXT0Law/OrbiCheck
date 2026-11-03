@@ -4,11 +4,14 @@ const isCI = !!process.env.CI;
 
 export default defineConfig({
   testDir: "./tests/connected",
+  outputDir: "test-results/backend-down",
   fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
   workers: 1,
-  reporter: isCI ? [["html", { open: "never" }], ["list"]] : [["list"]],
+  reporter: isCI
+    ? [["html", { open: "never", outputFolder: "playwright-report/backend-down" }], ["list"]]
+    : [["list"]],
   use: {
     ...devices["Desktop Chrome"],
     baseURL: "http://127.0.0.1:3102",

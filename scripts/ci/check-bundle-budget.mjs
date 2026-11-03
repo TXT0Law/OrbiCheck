@@ -43,6 +43,11 @@ export async function calculateRouteSizes(nextDir = DEFAULT_NEXT_DIR) {
   return routeSizes;
 }
 
+/**
+ * @param {Map<string, number>} routeSizes
+ * @param {number} defaultBudgetKib
+ * @param {Record<string, number>} routeBudgetsKib
+ */
 export function evaluateBudgets(
   routeSizes,
   defaultBudgetKib = DEFAULT_ROUTE_BUDGET_KIB,

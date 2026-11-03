@@ -29,14 +29,6 @@ const traceRouteHandler = async (urlString) => {
     throw new Error('Invalid hostname');
   }
 
-  if (process.platform === 'win32') {
-    return {
-      message: 'Traceroute skipped on Windows in local development',
-      result: [],
-      warning: 'Traceroute module is not stable on this platform',
-    };
-  }
-
   return {
     message: 'Traceroute is temporarily disabled pending a safe execFile-based implementation.',
     result: [],

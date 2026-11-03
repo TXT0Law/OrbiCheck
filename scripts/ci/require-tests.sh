@@ -208,7 +208,8 @@ while IFS= read -r file; do
     has_ci_or_infra_src=1
   fi
 
-  if [[ "${file}" =~ ^(scripts/ci/test-|scripts/test-|backend/tests/unit/test_container|backend/tests/unit/test_migration) ]]; then
+  if [[ "${file}" =~ ^(scripts/ci/test-|scripts/test-|backend/tests/unit/test_container|backend/tests/unit/test_migration) ]] || \
+     [[ "${file}" =~ ^tests/scripts/.*\.(test|spec)\.(ts|tsx|js|jsx)$ ]]; then
     has_ci_or_infra_tests=1
   fi
 done <<< "${changed_files}"

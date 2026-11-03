@@ -2,12 +2,18 @@ import path from "node:path";
 
 import { defineConfig } from "vitest/config";
 
+const MAX_TEST_WORKERS = 2;
+const MIN_TEST_WORKERS = 1;
+
 export default defineConfig({
   esbuild: {
     jsx: "automatic",
     jsxImportSource: "react",
   },
   test: {
+    // Bound cold JSDOM/module transforms on hosts with many logical CPUs.
+    maxWorkers: MAX_TEST_WORKERS,
+    minWorkers: MIN_TEST_WORKERS,
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],

@@ -1,0 +1,2 @@
+# Vite's hashbang handling requires LF when importing this CLI in tests.
+scripts/ci/check-bundle-budget.mjs text eol=lf

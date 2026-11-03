@@ -4,6 +4,12 @@
 
 import { handler } from '../trace-route.js';
 
+const ORIGINAL_PLATFORM = Object.getOwnPropertyDescriptor(process, 'platform');
+
+afterEach(() => {
+  Object.defineProperty(process, 'platform', ORIGINAL_PLATFORM);
+});
+
 function createResponseCapture() {
   return {
     headersSent: false,
@@ -32,6 +38,17 @@ describe('trace-route module (disabled)', () => {
     // Disabled response is still a successful envelope (data carries note).
     expect(res.body.success).toBe(true);
     expect(res.body.data.message).toContain('disabled');
+  });
+
+  it.each(['win32', 'linux', 'darwin'])('stays explicitly disabled on %s', async (platform) => {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    const res = createResponseCapture();
+    await handler({ query: { url: 'https://example.com' } }, res);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.message).toContain('disabled');
+    expect(res.body.data.warning).toContain('disabled');
+    expect(res.body.data.result).toEqual([]);
   });
 
   it('is NOT registered in module registry (regression guard)', async () => {
