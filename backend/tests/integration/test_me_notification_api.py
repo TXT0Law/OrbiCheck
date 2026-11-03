@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from unittest.mock import AsyncMock
+
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
+
+from app.core.deps import get_redis
 
 
 @pytest.mark.asyncio
@@ -127,6 +133,43 @@ async def test_email_entrypoints_reject_invalid_recipients(
 
     assert settings_response.status_code == 422
     assert test_response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_legacy_invalid_saved_email_cannot_trigger_test_delivery(
+    async_client: AsyncClient,
+    test_app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings
+
+    redis_source = test_app.dependency_overrides[get_redis]()
+    redis = await anext(redis_source)
+    await redis.set(
+        "orbicheck:user:1:notification_settings",
+        json.dumps(
+            {
+                "emailEnabled": True,
+                "emailAddress": "alerts@example.com\nBcc: other@example.com",
+            }
+        ),
+    )
+    await redis_source.aclose()
+    send_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.api.v1.endpoints.me.send_test_email", send_mock)
+    monkeypatch.setattr(settings, "EMAIL_DISPATCH_ENABLED", True)
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+
+    saved = await async_client.get("/api/v1/me/notification-settings")
+    test_send = await async_client.post("/api/v1/me/test-email", json={})
+
+    assert saved.status_code == 200
+    assert saved.json()["data"]["emailEnabled"] is False
+    assert saved.json()["data"]["emailAddress"] is None
+    assert test_send.status_code == 200
+    assert test_send.json()["data"]["sent"] is False
+    send_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 
+from app.api.v1.schemas.email_address import normalize_email_address
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -121,16 +122,23 @@ def normalize_notification_settings(raw: dict[str, Any] | None) -> dict[str, Any
     if isinstance(url, str):
         url = url.strip() or None
     email = raw.get("emailAddress")
-    if email is not None and not isinstance(email, str):
-        email = str(email) if email else None
+    invalid_email = email is not None and not isinstance(email, str)
     if isinstance(email, str):
         email = email.strip() or None
+        if email is not None:
+            try:
+                email = normalize_email_address(email)
+            except ValueError:
+                email = None
+                invalid_email = True
+    elif invalid_email:
+        email = None
     return {
         "webhookUrl": url,
         "webhookEnabled": raw.get("webhookEnabled") is True,
         "monitorEventsEnabled": bool(raw.get("monitorEventsEnabled", True)),
         "scanRiskEventsEnabled": raw.get("scanRiskEventsEnabled") is True,
-        "emailEnabled": raw.get("emailEnabled") is True,
+        "emailEnabled": raw.get("emailEnabled") is True and not invalid_email,
         "emailAddress": email,
         "emailOnCritical": bool(raw.get("emailOnCritical", True)),
         "emailOnWarning": bool(raw.get("emailOnWarning", True)),
