@@ -104,6 +104,33 @@ async def test_notification_settings_invalid_email_returns_422(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    "email_address",
+    [
+        "alerts@example.com\nBcc: other@example.com",
+        "alerts@example.com,other@example.com",
+        "alerts@example.com@other.com",
+    ],
+)
+async def test_email_entrypoints_reject_invalid_recipients(
+    async_client: AsyncClient,
+    email_address: str,
+) -> None:
+    settings_response = await async_client.put(
+        "/api/v1/me/notification-settings",
+        json={"emailEnabled": True, "emailAddress": email_address},
+    )
+    test_response = await async_client.post(
+        "/api/v1/me/test-email",
+        json={"emailAddress": email_address},
+    )
+
+    assert settings_response.status_code == 422
+    assert test_response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_test_email_returns_disabled_when_smtp_off(
     async_client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,

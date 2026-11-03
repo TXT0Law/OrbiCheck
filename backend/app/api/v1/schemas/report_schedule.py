@@ -1,4 +1,3 @@
-import re
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -7,6 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
+from app.api.v1.schemas.email_address import normalize_email_address
 from app.models.report import ReportFormat
 from app.models.report_schedule import (
     ReportScheduleCadence,
@@ -17,12 +17,6 @@ REPORT_SCHEDULE_DELIVERY_CHANNELS = ("email", "slack")
 REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT = 20
 REPORT_SCHEDULE_FORMATS = ("pdf", "markdown", "html", "both", "all")
 REPORT_SCHEDULE_PERIODS = ("24h", "7d", "30d", "90d")
-EMAIL_LOCAL_PART_PATTERN = re.compile(
-    r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
-)
-EMAIL_DOMAIN_PATTERN = re.compile(
-    r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+"
-)
 
 
 class ReportScheduleBase(BaseModel):
@@ -63,16 +57,9 @@ class ReportScheduleBase(BaseModel):
     def normalize_email_recipients(cls, value: list[str]) -> list[str]:
         cleaned: list[str] = []
         for raw in value:
-            recipient = raw.strip().lower()
-            if not recipient:
+            if not raw.strip():
                 continue
-            local, separator, domain = recipient.partition("@")
-            if (
-                not separator
-                or EMAIL_LOCAL_PART_PATTERN.fullmatch(local) is None
-                or EMAIL_DOMAIN_PATTERN.fullmatch(domain) is None
-            ):
-                raise ValueError("Email recipients must be valid email addresses")
+            recipient = normalize_email_address(raw).lower()
             if recipient not in cleaned:
                 cleaned.append(recipient)
         return cleaned

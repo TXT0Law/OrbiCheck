@@ -4,6 +4,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, HttpUrl, field_validator
 
+from app.api.v1.schemas.email_address import normalize_email_address
 from app.services.notification_channels.discord import (
     validate_target_url as validate_discord_url,
 )
@@ -113,13 +114,7 @@ class NotificationSettingsUpdate(BaseModel):
     def validate_email_address(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        email = value.strip()
-        if "@" not in email:
-            raise ValueError("Value is not a valid email address")
-        local, _, domain = email.partition("@")
-        if not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
-            raise ValueError("Value is not a valid email address")
-        return email
+        return normalize_email_address(value)
 
     @field_validator("channels")
     @classmethod
@@ -146,13 +141,7 @@ class TestEmailRequest(BaseModel):
     def validate_email_address(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        email = value.strip()
-        if "@" not in email:
-            raise ValueError("Value is not a valid email address")
-        local, _, domain = email.partition("@")
-        if not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
-            raise ValueError("Value is not a valid email address")
-        return email
+        return normalize_email_address(value)
 
 
 class TestEmailResponse(BaseModel):
