@@ -7,9 +7,17 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql.dml import Insert, Update
+from sqlalchemy.sql.selectable import Select
 
 from app.models.scan import ModuleStatus, ScanStatus
-from app.services.finding_observation import build_finding_observations
+from app.services.finding_identity import FINDING_RULESET_VERSION
+from app.services.finding_observation import (
+    FindingProjectionError,
+    build_finding_observations,
+    persist_finding_observations,
+)
 
 
 def _scan(
@@ -24,6 +32,8 @@ def _scan(
         status=status,
         completed_at=completed_at or datetime.now(timezone.utc),
         module_results=list(rows),
+        finding_observations_projected_at=None,
+        finding_ruleset_version=None,
     )
 
 
@@ -112,3 +122,99 @@ def test_projection_rejects_completed_scan_without_completion_time() -> None:
 
     with pytest.raises(ValueError, match="completed_at"):
         build_finding_observations(scan)
+
+
+@pytest.mark.unit
+def test_persistence_marks_zero_findings_and_repeated_projection_is_a_noop() -> None:
+    scan = _scan()
+
+    class SessionStub:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        def execute(self, statement: object) -> SimpleNamespace:
+            self.statements.append(statement)
+            if isinstance(statement, Select):
+                return SimpleNamespace(scalar_one=lambda: scan)
+            if isinstance(statement, Update):
+                values = statement.compile().params
+                scan.finding_observations_projected_at = values["finding_observations_projected_at"]
+                scan.finding_ruleset_version = values["finding_ruleset_version"]
+            return SimpleNamespace()
+
+    db = SessionStub()
+    assert persist_finding_observations(db, scan.id) == 0
+    assert scan.finding_observations_projected_at is not None
+    assert scan.finding_ruleset_version == FINDING_RULESET_VERSION
+    assert persist_finding_observations(db, scan.id) == 0
+    assert [type(statement) for statement in db.statements] == [Select, Update, Select]
+
+
+@pytest.mark.unit
+def test_persistence_inserts_evidence_once_under_scan_lock() -> None:
+    scan = _scan(_module("ssl", {"bits": 2048, "valid_to": "Jan 1 2020 GMT"}))
+
+    class SessionStub:
+        def __init__(self) -> None:
+            self.inserted: list[dict] = []
+            self.select_sql: str | None = None
+
+        def execute(self, statement: object) -> SimpleNamespace:
+            if isinstance(statement, Select):
+                self.select_sql = str(statement.compile(dialect=postgresql.dialect()))
+                return SimpleNamespace(scalar_one=lambda: scan)
+            if isinstance(statement, Insert):
+                self.inserted.extend(
+                    {getattr(key, "key", key): value for key, value in row.items()}
+                    for row in statement._multi_values[0]
+                )
+                return SimpleNamespace(rowcount=len(self.inserted))
+            if isinstance(statement, Update):
+                values = statement.compile().params
+                scan.finding_observations_projected_at = values["finding_observations_projected_at"]
+                scan.finding_ruleset_version = values["finding_ruleset_version"]
+            return SimpleNamespace()
+
+    db = SessionStub()
+    assert persist_finding_observations(db, scan.id) == 1
+    assert persist_finding_observations(db, scan.id) == 0
+    assert len(db.inserted) == 1
+    assert db.inserted[0]["rule_id"] == "ssl.certificate_expiry"
+    assert db.inserted[0]["evidence_modules"] == ["ssl"]
+    assert "FOR UPDATE OF scans" in db.select_sql
+
+
+@pytest.mark.unit
+def test_persistence_rejects_unknown_ruleset_without_overwriting_findings() -> None:
+    scan = _scan(_module("ssl", {"bits": 2048, "valid_to": "Jan 1 2020 GMT"}))
+    scan.finding_observations_projected_at = datetime.now(timezone.utc)
+    scan.finding_ruleset_version = FINDING_RULESET_VERSION - 1
+    statements: list[object] = []
+
+    class SessionStub:
+        def execute(self, statement: object) -> SimpleNamespace:
+            statements.append(statement)
+            return SimpleNamespace(scalar_one=lambda: scan)
+
+    with pytest.raises(FindingProjectionError, match="another ruleset"):
+        persist_finding_observations(SessionStub(), scan.id)
+    assert len(statements) == 1
+    assert isinstance(statements[0], Select)
+
+
+@pytest.mark.unit
+def test_persistence_keeps_malformed_scan_unprojected() -> None:
+    scan = _scan(_module("ssl", {"bits": 2048}))
+    scan.completed_at = None
+    statements: list[object] = []
+
+    class SessionStub:
+        def execute(self, statement: object) -> SimpleNamespace:
+            statements.append(statement)
+            return SimpleNamespace(scalar_one=lambda: scan)
+
+    with pytest.raises(FindingProjectionError, match="cannot be projected"):
+        persist_finding_observations(SessionStub(), scan.id)
+    assert scan.finding_observations_projected_at is None
+    assert len(statements) == 1
+    assert isinstance(statements[0], Select)
