@@ -767,6 +767,62 @@
         }
       }
     },
+    "/api/v1/scans/{scan_id}/findings/{rule_id}/evidence": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get Scan Finding Evidence",
+        "description": "Returns stored raw results only for the modules supporting an owned, projected finding. A source larger than the per-module response limit is marked too_large and omitted.",
+        "operationId": "get_scan_finding_evidence_api_v1_scans__scan_id__findings__rule_id__evidence_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 96,
+              "pattern": "^[a-z0-9._-]+$",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_ScanFindingEvidenceResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/scans/{scan_id}/events": {
       "get": {
         "tags": [
@@ -5891,6 +5947,42 @@
         "type": "object",
         "title": "DnsThresholdsUpdateSchema"
       },
+      "FindingEvidenceSourceResponse": {
+        "properties": {
+          "moduleName": {
+            "type": "string",
+            "title": "Modulename"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "missing",
+              "too_large"
+            ],
+            "title": "Status"
+          },
+          "rawResult": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rawresult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "moduleName",
+          "status",
+          "rawResult"
+        ],
+        "title": "FindingEvidenceSourceResponse"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -9713,6 +9805,39 @@
         "title": "ScanDetailResponse",
         "description": "Scan with all module results included."
       },
+      "ScanFindingEvidenceResponse": {
+        "properties": {
+          "scanId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scanid"
+          },
+          "ruleId": {
+            "type": "string",
+            "title": "Ruleid"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observedat"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/FindingEvidenceSourceResponse"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scanId",
+          "ruleId",
+          "observedAt",
+          "sources"
+        ],
+        "title": "ScanFindingEvidenceResponse"
+      },
       "ScanFindingListResponse": {
         "properties": {
           "scanId": {
@@ -10712,6 +10837,35 @@
           "data"
         ],
         "title": "SuccessResponse[ScanDetailResponse]"
+      },
+      "SuccessResponse_ScanFindingEvidenceResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ScanFindingEvidenceResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[ScanFindingEvidenceResponse]"
       },
       "SuccessResponse_ScanFindingListResponse_": {
         "properties": {
