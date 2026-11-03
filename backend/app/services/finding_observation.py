@@ -142,6 +142,42 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
     return inserted
 
 
+async def invalidate_finding_observations_for_rescan(
+    db: AsyncSession,
+    scan_id: uuid.UUID,
+    user_id: int,
+) -> int:
+    """Discard a terminal scan's old projection before reusing its ID.
+
+    This is a database-only step in the caller's transaction. The caller must
+    commit before clearing Redis keys or dispatching another scan task. It is
+    not connected to the rescan endpoint yet.
+    """
+    scan = (
+        await db.execute(
+            select(Scan)
+            .where(Scan.id == scan_id, Scan.user_id == user_id)
+            .with_for_update(of=Scan)
+        )
+    ).scalar_one_or_none()
+    if scan is None or scan.status not in (
+        ScanStatus.COMPLETED,
+        ScanStatus.FAILED,
+        ScanStatus.CANCELLED,
+    ):
+        raise FindingProjectionError("Scan is unavailable for rescan invalidation")
+
+    result = await db.execute(
+        delete(ScanFindingObservation).where(ScanFindingObservation.scan_id == scan_id)
+    )
+    await db.execute(
+        update(Scan)
+        .where(Scan.id == scan_id)
+        .values(finding_observations_projected_at=None, finding_ruleset_version=None)
+    )
+    return result.rowcount
+
+
 async def refresh_finding_observations_after_retry(
     db: AsyncSession,
     scan_id: uuid.UUID,
