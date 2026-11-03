@@ -18,7 +18,7 @@ export default function DashboardLayout({
   const sessionStatus = useSessionGuard();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const scanReservedSegments = ["groups", "new"];
+  const scanReservedSegments = ["groups", "new", "diff"];
   const scanMatch = pathname.match(/^\/dashboard\/scan\/([^/]+)/);
   const scanFirstSegment = scanMatch?.[1];
   const isScanDetailRoute =

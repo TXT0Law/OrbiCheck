@@ -54,6 +54,7 @@ describe("ScanDiffPage", () => {
     render(<ScanDiffPage />);
 
     expect(screen.getByText(/Missing scan IDs/i)).toBeInTheDocument();
+    expect(screen.getByText(/Open Reports and use Compare/i)).toBeInTheDocument();
   });
 
   it("shows the same-id hint when both IDs are equal", () => {
