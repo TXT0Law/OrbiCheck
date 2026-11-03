@@ -18,7 +18,7 @@ from app.models.report_schedule import (
     ReportScheduleRun,
     ReportScheduleRunStatus,
 )
-from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
+from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanModuleResult, ScanStatus
 from app.models.url_group import (
     UrlGroup,
     UrlGroupMember,
@@ -48,6 +48,7 @@ __all__ = [
     "ReportScheduleRunStatus",
     "ReportStatus",
     "Scan",
+    "ScanFindingObservation",
     "ScanModuleResult",
     "ScanStatus",
     "ModuleStatus",
