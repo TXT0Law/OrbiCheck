@@ -24,7 +24,7 @@ export default function SettingsPage() {
         <p className="mt-1 text-muted-foreground">{messages.subtitle}</p>
       </div>
 
-      <div className="flex flex-col gap-8 md:flex-row">
+      <div className="flex flex-col gap-8 lg:flex-row">
         <SettingsNav activeTab={activeTab} onTabChange={setActiveTab} />
 
         <div className="min-w-0 flex-1">

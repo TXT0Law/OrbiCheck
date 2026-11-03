@@ -124,9 +124,9 @@ function SslWatchlistSkeleton({ className }: SslWatchlistProps) {
             key={index}
             className="grid gap-3 rounded-lg border border-zinc-200 p-4 md:grid-cols-[minmax(0,1.3fr)_140px_minmax(0,1fr)_120px] dark:border-zinc-800"
           >
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-3 w-56" />
+            <div className="min-w-0 space-y-2">
+              <Skeleton className="h-4 w-full max-w-40" />
+              <Skeleton className="h-3 w-full max-w-56" />
             </div>
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-2 w-full" />
