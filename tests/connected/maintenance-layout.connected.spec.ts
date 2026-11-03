@@ -6,6 +6,7 @@ const VIEWPORT_WIDTHS = [320, 768, 1024, 1440] as const;
 const VIEWPORT_HEIGHT = 900;
 const MOBILE_WIDTH = 320;
 const MOBILE_TITLE_MIN_WIDTH = 150;
+const MOBILE_ACTION_MIN_WIDTH = 180;
 const WINDOW_TITLE = "Planned_database_maintenance_for_primary_customer_facing_region";
 
 test("maintenance window details fit a narrow screen", async ({ page }) => {
@@ -58,6 +59,46 @@ test("maintenance window details fit a narrow screen", async ({ page }) => {
       expect(statusBox?.y ?? 0).toBeGreaterThanOrEqual(
         (titleBox?.y ?? 0) + (titleBox?.height ?? 0),
       );
+    }
+  }
+});
+
+test("maintenance form controls fit mobile and desktop cards", async ({ page }) => {
+  await page.route(
+    (url) => url.pathname === "/api/v1/maintenance-windows",
+    (route) => route.fulfill({ status: 200, json: { status: "success", data: [] } }),
+  );
+  await page.setViewportSize({ width: MOBILE_WIDTH, height: VIEWPORT_HEIGHT });
+  await navigateTo(page, "/dashboard/settings/maintenance");
+  await page.getByRole("button", { name: "New window" }).click();
+  await page.getByLabel("Repeat this window").check();
+  const form = page.locator("form");
+  await expect(form).toBeVisible();
+  const card = form.locator("xpath=../..");
+  const recurrence = form.locator("fieldset").nth(1);
+  const createButton = form.getByRole("button", { name: "Create window" });
+  const cancelButton = form.getByRole("button", { name: "Cancel" });
+  for (const width of VIEWPORT_WIDTHS) {
+    await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
+    const cardBox = await card.boundingBox();
+    const recurrenceBox = await recurrence.boundingBox();
+    const actionBox = await createButton.boundingBox();
+    const cancelBox = await cancelButton.boundingBox();
+    expect(cardBox).not.toBeNull();
+    expect(recurrenceBox).not.toBeNull();
+    expect(actionBox).not.toBeNull();
+    expect(cancelBox).not.toBeNull();
+    expect((recurrenceBox?.x ?? 0) + (recurrenceBox?.width ?? 0)).toBeLessThanOrEqual(
+      (cardBox?.x ?? 0) + (cardBox?.width ?? 0),
+    );
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    );
+    if (width === MOBILE_WIDTH) {
+      expect(actionBox?.width ?? 0).toBeGreaterThan(MOBILE_ACTION_MIN_WIDTH);
+      expect(cancelBox?.y ?? 0).toBeGreaterThan((actionBox?.y ?? 0) + (actionBox?.height ?? 0));
+    } else if (width === 1024) {
+      expect(cancelBox?.y).toBe(actionBox?.y);
     }
   }
 });
