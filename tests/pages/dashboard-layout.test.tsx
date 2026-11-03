@@ -99,6 +99,20 @@ describe("dashboard layout auth", () => {
     expect(screen.queryByText("Header")).not.toBeInTheDocument();
   });
 
+  it("keeps dashboard navigation on the scan comparison route", () => {
+    pathnameMock.mockReturnValue("/dashboard/scan/diff");
+
+    render(
+      <DashboardLayout>
+        <div>Scan comparison</div>
+      </DashboardLayout>
+    );
+
+    expect(screen.getByText("Scan comparison")).toBeInTheDocument();
+    expect(screen.getByText("Sidebar")).toBeInTheDocument();
+    expect(screen.getByText("Header")).toBeInTheDocument();
+  });
+
   it("does not render protected content for an unauthenticated session", () => {
     sessionGuardMock.mockReturnValue("unauthenticated");
 
