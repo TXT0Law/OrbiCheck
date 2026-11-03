@@ -6,9 +6,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import case, delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanStatus
 from app.services.finding_identity import (
@@ -139,3 +140,83 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
         )
     )
     return inserted
+
+
+async def refresh_finding_observations_after_retry(
+    db: AsyncSession,
+    scan_id: uuid.UUID,
+    module_name: str,
+    retried_at: datetime,
+) -> None:
+    """Reconcile a retry's current rule set inside the caller's transaction.
+
+    This helper is not connected to the retry endpoint yet. The scan lock
+    serializes it with projection. No external I/O occurs while it is held.
+    """
+    scan = (
+        await db.execute(
+            select(Scan)
+            .where(Scan.id == scan_id)
+            .options(selectinload(Scan.module_results))
+            .execution_options(populate_existing=True)
+            .with_for_update(of=Scan)
+        )
+    ).scalar_one()
+    try:
+        candidates = build_finding_observations(scan)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise FindingProjectionError("Stored scan evidence cannot be projected") from exc
+
+    rule_ids = [candidate.rule_id for candidate in candidates]
+    stale = delete(ScanFindingObservation).where(ScanFindingObservation.scan_id == scan_id)
+    if rule_ids:
+        stale = stale.where(ScanFindingObservation.rule_id.not_in(rule_ids))
+    await db.execute(stale)
+
+    await db.execute(
+        update(Scan)
+        .where(Scan.id == scan_id)
+        .values(
+            finding_observations_projected_at=(
+                datetime.now(timezone.utc) if scan.status == ScanStatus.COMPLETED else None
+            ),
+            finding_ruleset_version=(
+                FINDING_RULESET_VERSION if scan.status == ScanStatus.COMPLETED else None
+            ),
+        )
+    )
+    if not candidates:
+        return
+
+    rows = [
+        {
+            "id": uuid.uuid4(),
+            "scan_id": candidate.scan_id,
+            "rule_id": candidate.rule_id,
+            "ruleset_version": candidate.ruleset_version,
+            "severity": candidate.severity,
+            "title": candidate.title,
+            "description": candidate.description,
+            "evidence_modules": list(candidate.evidence_modules),
+            "observed_at": (
+                retried_at if module_name in candidate.evidence_modules else candidate.observed_at
+            ),
+        }
+        for candidate in candidates
+    ]
+    statement = insert(ScanFindingObservation).values(rows)
+    statement = statement.on_conflict_do_update(
+        constraint="uq_scan_finding_observation_scan_rule",
+        set_={
+            "ruleset_version": statement.excluded.ruleset_version,
+            "severity": statement.excluded.severity,
+            "title": statement.excluded.title,
+            "description": statement.excluded.description,
+            "evidence_modules": statement.excluded.evidence_modules,
+            "observed_at": case(
+                (statement.excluded.evidence_modules.contains([module_name]), retried_at),
+                else_=ScanFindingObservation.observed_at,
+            ),
+        },
+    )
+    await db.execute(statement)
