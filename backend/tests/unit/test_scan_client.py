@@ -293,6 +293,69 @@ class _SyncClientStub:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "remote_results",
+    [
+        {"ssl": {"success": True, "statusCode": 200}},
+        {"ssl": {"success": True, "statusCode": 200}, "headers": None},
+    ],
+)
+def test_call_scan_batch_sync_rejects_incomplete_module_results(
+    monkeypatch: pytest.MonkeyPatch,
+    remote_results: dict[str, object],
+) -> None:
+    """An incomplete batch must enter the worker's per-module recovery path."""
+    client_type = httpx.Client
+
+    def _respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/modules"):
+            return httpx.Response(200, json={"modules": ["ssl", "headers"]})
+        return httpx.Response(200, json={"results": remote_results})
+
+    monkeypatch.setattr(
+        scan_client.httpx,
+        "Client",
+        lambda **kwargs: client_type(transport=httpx.MockTransport(_respond), **kwargs),
+    )
+    monkeypatch.setattr(scan_client, "_internal_auth", lambda: None)
+
+    with pytest.raises(ValueError, match="batch results"):
+        scan_client.call_scan_batch_sync("https://example.com", ["ssl", "headers"])
+
+
+@pytest.mark.unit
+def test_call_scan_batch_sync_ignores_unrequested_module_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_type = httpx.Client
+
+    def _respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/modules"):
+            return httpx.Response(200, json={"modules": ["ssl"]})
+        return httpx.Response(
+            200,
+            json={
+                "results": {
+                    "ssl": {"success": True, "statusCode": 200},
+                    "foreign-module": {"success": True, "statusCode": 200},
+                }
+            },
+        )
+
+    monkeypatch.setattr(
+        scan_client.httpx,
+        "Client",
+        lambda **kwargs: client_type(transport=httpx.MockTransport(_respond), **kwargs),
+    )
+    monkeypatch.setattr(scan_client, "_internal_auth", lambda: None)
+
+    result = scan_client.call_scan_batch_sync("https://example.com", ["ssl"])
+
+    assert result["totalModules"] == result["successCount"] == 1
+    assert list(result["results"]) == ["ssl"]
+
+
+@pytest.mark.unit
 def test_call_scan_module_sync_envelope_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

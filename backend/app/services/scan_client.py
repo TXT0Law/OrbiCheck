@@ -74,6 +74,17 @@ def _build_missing_module_result(module_name: str) -> dict:
     }
 
 
+def _validated_batch_results(payload: object, runnable: list[str]) -> dict[str, dict]:
+    """Keep only requested module envelopes and reject incomplete batch responses."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), dict):
+        raise ValueError("scan-service batch results must be an object")
+    remote_results = payload["results"]
+    incomplete = [name for name in runnable if not isinstance(remote_results.get(name), dict)]
+    if incomplete:
+        raise ValueError(f"scan-service batch results incomplete for modules: {incomplete}")
+    return {name: remote_results[name] for name in runnable}
+
+
 def _build_trace_headers(scan_id: str | None = None, trace_id: str | None = None) -> dict[str, str]:
     """Build X-Scan-Id / X-Trace-Id headers for cross-service correlation.
 
@@ -247,7 +258,7 @@ async def call_scan_batch(
             )
             response.raise_for_status()
             payload = response.json()
-            results.update(payload.get("results", {}))
+            results.update(_validated_batch_results(payload, runnable))
 
         for module_name in missing:
             results[module_name] = _build_missing_module_result(module_name)
@@ -383,7 +394,7 @@ def call_scan_batch_sync(
             )
             response.raise_for_status()
             payload = response.json()
-            results.update(payload.get("results", {}))
+            results.update(_validated_batch_results(payload, runnable))
 
         for module_name in missing:
             results[module_name] = _build_missing_module_result(module_name)
