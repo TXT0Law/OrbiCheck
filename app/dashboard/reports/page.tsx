@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { FileText } from "lucide-react";
 
 import { ReportGenerateDialog } from "@/components/report/report-generate-dialog";
 import { ReportListTable } from "@/components/report/report-list-table";
 import { ReportScheduleDialog } from "@/components/report/report-schedule-dialog";
 import { ReportScheduleList } from "@/components/report/report-schedule-list";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
 import { useReportSchedules } from "@/lib/hooks/use-report-schedules";
@@ -33,11 +34,11 @@ export default function ReportsPage() {
             {messages.subtitle}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setScheduleDialogOpen(true)}>
+        <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+          <Button className="w-full" variant="outline" onClick={() => setScheduleDialogOpen(true)}>
             {messages.createSchedule}
           </Button>
-          <Button onClick={() => setDialogOpen(true)}>{messages.generateReport}</Button>
+          <Button className="w-full" onClick={() => setDialogOpen(true)}>{messages.generateReport}</Button>
         </div>
       </div>
 
@@ -58,11 +59,16 @@ export default function ReportsPage() {
             <ReportListTable reports={reportsQuery.data.reports} />
           ) : (
             <Card>
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold">{messages.noReportsTitle}</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                {messages.noReportsDescription}
+              <CardContent className="flex min-h-64 flex-col items-center justify-center gap-4 px-6 py-10 text-center">
+                <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground" aria-hidden="true">
+                  <FileText className="size-6" />
+                </div>
+                <div className="max-w-sm space-y-2">
+                  <h2 className="text-lg font-semibold text-foreground">{messages.noReportsTitle}</h2>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {messages.noReportsDescription}
+                  </p>
+                </div>
               </CardContent>
             </Card>
           )}
