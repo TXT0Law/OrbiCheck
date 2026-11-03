@@ -19,6 +19,7 @@ from app.services.scan_trend import (
     DIFF_KEY_FINDINGS_LIMIT,
     MAX_TIMELINE_LIMIT,
     TIMELINE_RANGE_DAYS,
+    _finding_key,
     compute_scan_diff,
 )
 
@@ -142,18 +143,107 @@ def test_compute_scan_diff_flags_removed_finding_when_compare_recovers() -> None
 
 
 @pytest.mark.unit
+def test_compute_scan_diff_tracks_ssl_expiry_as_one_rule_when_severity_worsens() -> None:
+    base = _scan(module_results=[_ssl_module(days_remaining=15)])
+    compare = _scan(module_results=[_ssl_module(days_remaining=-10)])
+
+    diff = compute_scan_diff(base, compare)
+
+    assert diff["addedFindings"] == []
+    assert diff["removedFindings"] == []
+    assert diff["severityDelta"]["delta"]["critical"] > 0
+
+
+@pytest.mark.unit
+def test_unreviewed_rule_keeps_legacy_diff_identity() -> None:
+    assert _finding_key({"module": "custom", "title": "Future rule"}) == (
+        "custom",
+        "Future rule",
+    )
+
+
+@pytest.mark.unit
 def test_compute_scan_diff_skips_pending_module_results() -> None:
-    """Only SUCCESS module rows feed the diff so partial scans don't lie."""
+    """A missing baseline cannot establish that a finding was newly introduced."""
     base_pending_ssl = _module("ssl", raw=None, status=ModuleStatus.PENDING)
     base = _scan(module_results=[base_pending_ssl])
     compare = _scan(module_results=[_ssl_module(days_remaining=-10)])
 
     diff = compute_scan_diff(base, compare)
 
-    # The base scan has no SUCCESS modules, so any new finding in the
-    # compare scan must show up under addedFindings.
-    titles_added = {item["title"] for item in diff["addedFindings"]}
-    assert "SSL certificate expired" in titles_added
+    assert diff["addedFindings"] == []
+    assert diff["removedFindings"] == []
+
+
+@pytest.mark.unit
+def test_compute_scan_diff_does_not_call_failed_module_a_fix() -> None:
+    base = _scan(module_results=[_ssl_module(days_remaining=-10)])
+    compare = _scan(
+        module_results=[_module("ssl", raw=None, status=ModuleStatus.FAILED)]
+    )
+
+    diff = compute_scan_diff(base, compare)
+
+    assert diff["removedFindings"] == []
+    assert diff["severityDelta"]["delta"] == {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+    }
+    assert diff["breakdownDelta"]["delta"] is None
+
+
+@pytest.mark.unit
+def test_compute_scan_diff_scores_only_shared_successful_modules() -> None:
+    healthy_ssl = _ssl_module(days_remaining=200)
+    base = _scan(
+        module_results=[healthy_ssl, _module("hsts", raw={"compatible": False})]
+    )
+    compare = _scan(
+        module_results=[
+            healthy_ssl,
+            _module("hsts", raw=None, status=ModuleStatus.FAILED),
+        ]
+    )
+
+    diff = compute_scan_diff(base, compare)
+
+    assert diff["severityDelta"]["base"] == diff["severityDelta"]["compare"]
+    assert diff["breakdownDelta"]["base"] == diff["breakdownDelta"]["compare"]
+    assert all(value == 0 for value in diff["severityDelta"]["delta"].values())
+    assert all(value == 0 for value in diff["breakdownDelta"]["delta"].values())
+
+
+@pytest.mark.unit
+def test_compute_scan_diff_accepts_http_security_as_header_evidence() -> None:
+    base = _scan(module_results=[_module("http-security", raw={})])
+    compare = _scan(
+        module_results=[_module("http-security", raw={"content-security-policy": "default-src 'self'"})]
+    )
+
+    diff = compute_scan_diff(base, compare)
+
+    assert diff["addedFindings"] == []
+    assert "Missing Content-Security-Policy" in {
+        item["title"] for item in diff["removedFindings"]
+    }
+
+
+@pytest.mark.unit
+def test_compute_scan_diff_limited_view_does_not_invent_removed_finding() -> None:
+    common_modules = [
+        _module("headers", raw={}),
+        _module("hsts", raw={"compatible": False}),
+        _module("dnssec", raw={"enabled": False}),
+    ]
+    base = _scan(module_results=[*common_modules, _ssl_module(days_remaining=200)])
+    compare = _scan(module_results=[*common_modules, _ssl_module(days_remaining=-10)])
+
+    diff = compute_scan_diff(base, compare, key_findings_limit=2)
+
+    assert [item["title"] for item in diff["addedFindings"]] == ["SSL certificate expired"]
+    assert diff["removedFindings"] == []
 
 
 @pytest.mark.unit

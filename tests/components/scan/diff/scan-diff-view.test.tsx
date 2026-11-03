@@ -71,6 +71,7 @@ describe("ScanDiffView", () => {
     expect(screen.getByText(/Scan diff summary/i)).toBeInTheDocument();
     expect(screen.getByText(/Severity delta/i)).toBeInTheDocument();
     expect(screen.getByText(/Category score delta/i)).toBeInTheDocument();
+    expect(screen.getByText(/only modules that succeeded in both scans/i)).toBeInTheDocument();
     expect(screen.getByText(/New in compare \(1\)/i)).toBeInTheDocument();
     expect(screen.getByText(/Resolved in compare \(0\)/i)).toBeInTheDocument();
     expect(screen.getByText("SSL certificate expired")).toBeInTheDocument();
@@ -91,7 +92,7 @@ describe("ScanDiffView", () => {
       />,
     );
 
-    expect(screen.getByText(/Both scans report the same/i)).toBeInTheDocument();
+    expect(screen.getByText(/No changes were found in comparable module results/i)).toBeInTheDocument();
   });
 
   it("falls back gracefully when breakdownDelta is null", () => {
