@@ -71,6 +71,8 @@ def test_scan_projection_state_starts_unknown_for_legacy_scans() -> None:
     )
 
     assert scan.finding_observations_projected_at is None
+    assert scan.finding_observations_projection_failed_at is None
     assert scan.finding_ruleset_version is None
     assert Scan.__table__.c.finding_observations_projected_at.nullable
+    assert Scan.__table__.c.finding_observations_projection_failed_at.nullable
     assert Scan.__table__.c.finding_ruleset_version.nullable

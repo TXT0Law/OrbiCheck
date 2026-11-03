@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import structlog
 from sqlalchemy import case, delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
@@ -19,6 +20,10 @@ from app.services.finding_identity import (
 )
 from app.services.security_analyzer import extract_key_findings
 from app.services.transformers import _is_skipped
+
+SCAN_FINDING_BACKFILL_BATCH_SIZE = 25
+SCAN_FINDING_BACKFILL_MAX_BATCH_SIZE = 100
+logger = structlog.get_logger(__name__)
 
 
 class FindingProjectionError(ValueError):
@@ -41,6 +46,13 @@ class FindingObservationCandidate:
     @property
     def idempotency_key(self) -> tuple[uuid.UUID, str]:
         return self.scan_id, self.rule_id
+
+
+@dataclass(frozen=True, slots=True)
+class FindingBackfillPage:
+    processed_scans: int
+    inserted_observations: int
+    failed_scans: int
 
 
 def build_finding_observations(scan: Scan) -> list[FindingObservationCandidate]:
@@ -89,7 +101,7 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
 
     The scan row lock serializes concurrent projections. An already projected
     scan is left intact; a different ruleset requires explicit reconciliation.
-    This function is not yet connected to scan completion or background jobs.
+    Scan completion remains unwired; the bounded backfill task invokes it.
     """
     scan = db.execute(
         select(Scan)
@@ -137,9 +149,51 @@ def persist_finding_observations(db: Session, scan_id: uuid.UUID) -> int:
         .values(
             finding_observations_projected_at=datetime.now(timezone.utc),
             finding_ruleset_version=FINDING_RULESET_VERSION,
+            finding_observations_projection_failed_at=None,
         )
     )
     return inserted
+
+
+def backfill_finding_observations_page(
+    db: Session, limit: int = SCAN_FINDING_BACKFILL_BATCH_SIZE
+) -> FindingBackfillPage:
+    """Project one bounded page of historical completed scans; safe to repeat."""
+    if not 1 <= limit <= SCAN_FINDING_BACKFILL_MAX_BATCH_SIZE:
+        raise ValueError("Backfill limit is outside the allowed range")
+    scan_ids = db.execute(
+        select(Scan.id)
+        .where(
+            Scan.status == ScanStatus.COMPLETED,
+            Scan.completed_at.is_not(None),
+            Scan.finding_observations_projected_at.is_(None),
+            Scan.finding_observations_projection_failed_at.is_(None),
+        )
+        .order_by(Scan.id)
+        .limit(limit)
+    ).scalars().all()
+    inserted = 0
+    failed = 0
+    for scan_id in scan_ids:
+        try:
+            inserted += persist_finding_observations(db, scan_id)
+        except FindingProjectionError as exc:
+            failed += 1
+            db.execute(
+                update(Scan)
+                .where(Scan.id == scan_id)
+                .values(finding_observations_projection_failed_at=datetime.now(timezone.utc))
+            )
+            logger.warning(
+                "scan_finding_backfill_projection_failed",
+                scan_id=str(scan_id),
+                error_type=type(exc.__cause__).__name__,
+            )
+    return FindingBackfillPage(
+        processed_scans=len(scan_ids),
+        inserted_observations=inserted,
+        failed_scans=failed,
+    )
 
 
 async def invalidate_finding_observations_for_rescan(
@@ -173,7 +227,11 @@ async def invalidate_finding_observations_for_rescan(
     await db.execute(
         update(Scan)
         .where(Scan.id == scan_id)
-        .values(finding_observations_projected_at=None, finding_ruleset_version=None)
+        .values(
+            finding_observations_projected_at=None,
+            finding_ruleset_version=None,
+            finding_observations_projection_failed_at=None,
+        )
     )
     return result.rowcount
 
@@ -219,6 +277,7 @@ async def refresh_finding_observations_after_retry(
             finding_ruleset_version=(
                 FINDING_RULESET_VERSION if scan.status == ScanStatus.COMPLETED else None
             ),
+            finding_observations_projection_failed_at=None,
         )
     )
     if not candidates:
