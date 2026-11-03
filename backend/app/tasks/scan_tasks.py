@@ -17,7 +17,11 @@ from app.services.security_analyzer import (
     resolve_security_score_for_detail,
 )
 from app.services.operational_event_service import record_event_sync
-from app.services.scan_client import call_scan_batch_sync, call_scan_module_sync
+from app.services.scan_client import (
+    call_scan_batch_sync,
+    call_scan_module_sync,
+    is_successful_scan_result,
+)
 from app.services.transformers import ALL_MODULES, MODULE_BATCHES
 from app.utils.url_safety import validate_url_safety
 
@@ -264,7 +268,7 @@ def execute_scan(
 
                     for module_name, module_result in results.items():
                         raw_data = module_result.get("data", {})
-                        success = module_result.get("success", False)
+                        success = is_successful_scan_result(module_result)
                         duration_ms = module_result.get("durationMs", 0)
 
                         all_raw_results[module_name] = raw_data if success else None
@@ -391,7 +395,7 @@ def execute_scan(
                                 timeout_s=SCAN_PER_MODULE_RETRY_TIMEOUT_S,
                             )
                             raw_data = envelope.get("data") or {}
-                            success = bool(envelope.get("success"))
+                            success = is_successful_scan_result(envelope)
                             duration_ms = int(envelope.get("durationMs") or 0)
                             all_raw_results[module_name] = raw_data if success else None
                             if success:

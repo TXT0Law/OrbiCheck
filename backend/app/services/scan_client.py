@@ -18,6 +18,8 @@ SECONDS_PER_MILLISECOND = 1000.0
 MIN_CONNECT_TIMEOUT_S = 10.0
 BATCH_WAVE_OVERHEAD_S = 5.0
 MIN_BATCH_CONCURRENCY = 1
+SCAN_SUCCESS_STATUS_MIN = 200
+SCAN_SUCCESS_STATUS_MAX_EXCLUSIVE = 400
 SLOW_BATCH_MODULES = frozenset(
     {
         "whois",
@@ -32,6 +34,21 @@ SLOW_BATCH_MODULES = frozenset(
 
 def _internal_auth() -> InternalServiceAuth:
     return InternalServiceAuth(settings.INTERNAL_SERVICE_SECRET)
+
+
+def is_successful_scan_status(status_code: object) -> bool:
+    return (
+        type(status_code) is int
+        and SCAN_SUCCESS_STATUS_MIN <= status_code < SCAN_SUCCESS_STATUS_MAX_EXCLUSIVE
+    )
+
+
+def is_successful_scan_result(result: object) -> bool:
+    return (
+        isinstance(result, dict)
+        and result.get("success") is True
+        and is_successful_scan_status(result.get("statusCode"))
+    )
 
 
 def _module_timeout_budget_s(module_name: str) -> float:
@@ -235,7 +252,7 @@ async def call_scan_batch(
         for module_name in missing:
             results[module_name] = _build_missing_module_result(module_name)
 
-        success_count = sum(1 for item in results.values() if item.get("success"))
+        success_count = sum(1 for item in results.values() if is_successful_scan_result(item))
         total_modules = len(requested)
 
         return {
@@ -291,9 +308,14 @@ def call_scan_module_sync(
                 payload = response.json() if response.content else {}
             except ValueError:
                 payload = {}
+            status_code = int(payload.get("statusCode", response.status_code))
             envelope = {
-                "success": bool(payload.get("success", False)),
-                "statusCode": int(payload.get("statusCode", response.status_code)),
+                "success": (
+                    is_successful_scan_status(response.status_code)
+                    and is_successful_scan_status(status_code)
+                    and payload.get("success") is True
+                ),
+                "statusCode": status_code,
                 "data": payload.get("data"),
                 "durationMs": int(payload.get("durationMs", 0) or 0),
             }
@@ -366,7 +388,7 @@ def call_scan_batch_sync(
         for module_name in missing:
             results[module_name] = _build_missing_module_result(module_name)
 
-        success_count = sum(1 for item in results.values() if item.get("success"))
+        success_count = sum(1 for item in results.values() if is_successful_scan_result(item))
         total_modules = len(requested)
 
         return {

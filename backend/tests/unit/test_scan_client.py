@@ -173,8 +173,8 @@ async def test_call_scan_batch_merges_remote_and_missing_modules(
             200,
             json={
                 "results": {
-                    "ssl": {"success": True},
-                    "headers": {"success": False},
+                    "ssl": {"success": True, "statusCode": 200},
+                    "headers": {"success": False, "statusCode": 200},
                 }
             },
             request=httpx.Request("POST", "http://scan.local/api/scan/batch"),
@@ -196,6 +196,34 @@ async def test_call_scan_batch_merges_remote_and_missing_modules(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_call_scan_batch_does_not_count_untrusted_success_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    get = AsyncMock(return_value=_response(200, json_data={"modules": ["ssl", "headers"]}))
+    post = AsyncMock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "results": {
+                    "ssl": {"success": "false", "statusCode": 200},
+                    "headers": {"success": True, "statusCode": 500},
+                }
+            },
+            request=httpx.Request("POST", "http://scan.local/api/scan/batch"),
+        )
+    )
+    monkeypatch.setattr(
+        scan_client.httpx, "AsyncClient", lambda **_: _AsyncClientStub(get, post)
+    )
+
+    result = await scan_client.call_scan_batch("https://example.com", ["ssl", "headers"])
+
+    assert result["successCount"] == 0
+    assert result["failedCount"] == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_call_scan_batch_falls_back_when_registry_lookup_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -203,7 +231,7 @@ async def test_call_scan_batch_falls_back_when_registry_lookup_fails(
     post = AsyncMock(
         return_value=httpx.Response(
             200,
-            json={"results": {"ssl": {"success": True}}},
+            json={"results": {"ssl": {"success": True, "statusCode": 200}}},
             request=httpx.Request("POST", "http://scan.local/api/scan/batch"),
         )
     )
@@ -228,7 +256,7 @@ async def test_call_scan_batch_uses_resolved_batch_timeout(
     post = AsyncMock(
         return_value=httpx.Response(
             200,
-            json={"results": {"screenshot": {"success": True}}},
+            json={"results": {"screenshot": {"success": True, "statusCode": 200}}},
             request=httpx.Request("POST", "http://scan.local/api/scan/batch"),
         )
     )
@@ -317,6 +345,39 @@ def test_call_scan_module_sync_failed_envelope_carries_error(
     assert envelope["success"] is False
     assert envelope["error"] == "WHOIS rate limited"
     assert envelope["data"]["error"] == "WHOIS rate limited"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("http_status", "payload_status", "payload_success"),
+    [(200, 200, "false"), (500, 200, True), (200, 500, True)],
+)
+def test_call_scan_module_sync_rejects_false_success_from_scan_service(
+    monkeypatch: pytest.MonkeyPatch,
+    http_status: int,
+    payload_status: int,
+    payload_success: object,
+) -> None:
+    request = httpx.Request("GET", "http://scan.local/api/scan/ssl")
+    response = httpx.Response(
+        http_status,
+        json={
+            "success": payload_success,
+            "statusCode": payload_status,
+            "data": {"grade": "F"},
+            "durationMs": 1,
+        },
+        request=request,
+    )
+    monkeypatch.setattr(
+        scan_client.httpx,
+        "Client",
+        lambda **_kw: _SyncClientStub(lambda *_a, **_kw: response),
+    )
+
+    envelope = scan_client.call_scan_module_sync("ssl", "https://example.com")
+
+    assert envelope["success"] is False
 
 
 @pytest.mark.unit
