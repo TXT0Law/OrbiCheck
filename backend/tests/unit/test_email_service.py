@@ -72,6 +72,51 @@ async def test_send_alert_email_builds_html_with_severity_color(
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_alert_email_subject_serializes_monitor_name_with_line_breaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    send_mock = AsyncMock(return_value={})
+    monkeypatch.setattr(email_service.aiosmtplib, "send", send_mock)
+    monkeypatch.setattr(email_service.settings, "EMAIL_DISPATCH_ENABLED", True)
+    monitor = _build_monitor()
+    monitor.display_name = "Uptime\nBcc: other@example.com"
+
+    assert await email_service.send_alert_email(
+        "alerts@example.com", _build_alert(), monitor
+    )
+
+    message = send_mock.await_args.args[0]
+    serialized = message.as_string()
+    assert "\nBcc:" not in serialized
+    assert "\n" not in message["Subject"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_report_email_subject_serializes_title_with_line_breaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    send_mock = AsyncMock(return_value={})
+    monkeypatch.setattr(email_service.aiosmtplib, "send", send_mock)
+    monkeypatch.setattr(email_service.settings, "EMAIL_DISPATCH_ENABLED", True)
+
+    assert await email_service.send_report_email(
+        to_email="alerts@example.com",
+        schedule_name="Weekly risk report",
+        report_title="Weekly\r\nBcc: other@example.com",
+        target_domain="example.com",
+        report_url="https://app.example.com/dashboard/reports/123",
+    )
+
+    message = send_mock.await_args.args[0]
+    serialized = message.as_string()
+    assert "\nBcc:" not in serialized
+    assert "\n" not in message["Subject"]
+    assert "\r" not in message["Subject"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_send_alert_email_returns_false_on_smtp_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

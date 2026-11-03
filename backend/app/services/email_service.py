@@ -33,6 +33,11 @@ CAPABILITY_LABELS = {
 }
 
 
+def _subject_text(value: str) -> str:
+    """Keep untrusted display text on one printable email header line."""
+    return " ".join("".join(char if char.isprintable() else " " for char in value).split())
+
+
 def _dashboard_alerts_url() -> str:
     first_origin = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else ""
     if isinstance(first_origin, str) and first_origin.startswith("http"):
@@ -153,7 +158,7 @@ async def send_alert_email(
 
     message = MIMEMultipart("alternative")
     message["Subject"] = (
-        f"[OrbiCheck] {alert_event.severity.upper()} - {monitor.display_name}"
+        f"[OrbiCheck] {alert_event.severity.upper()} - {_subject_text(monitor.display_name)}"
     )
     message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL))
     message["To"] = to_email.strip()
@@ -343,7 +348,7 @@ async def send_report_email(
 """.strip()
 
     message = MIMEMultipart("alternative")
-    message["Subject"] = f"[OrbiCheck] Scheduled report ready - {report_title}"
+    message["Subject"] = f"[OrbiCheck] Scheduled report ready - {_subject_text(report_title)}"
     message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL))
     message["To"] = recipient
     message.attach(MIMEText(plain, "plain", "utf-8"))
