@@ -1,7 +1,7 @@
 import re
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -182,3 +182,32 @@ class ScanDetailResponse(ScanResponse):
 class ScanListResponse(BaseModel):
     scans: list[ScanResponse]
     total: int
+
+
+class ScanFindingObservationResponse(BaseModel):
+    rule_id: str
+    ruleset_version: int
+    severity: str
+    title: str
+    description: str
+    evidence_modules: list[str]
+    observed_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+
+class ScanFindingListResponse(BaseModel):
+    scan_id: uuid.UUID
+    projection_status: Literal["ready", "pending", "failed", "unavailable"]
+    projected_at: datetime | None
+    observations: list[ScanFindingObservationResponse]
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )

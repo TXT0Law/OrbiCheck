@@ -31,6 +31,7 @@ _RULE_IDS: dict[tuple[str, str], str] = {
     ("security-txt", "No security.txt"): "security_txt.missing",
     ("robots-txt", "No robots.txt"): "robots_txt.missing",
 }
+MAX_FINDING_RULES = len(set(_RULE_IDS.values()))
 
 _EVIDENCE_MODULES: dict[str, frozenset[str]] = {
     "headers": frozenset({"headers", "http-security"}),

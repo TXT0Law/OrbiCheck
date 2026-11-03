@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Literal
 
 import structlog
 from sqlalchemy import case, delete, select, update
@@ -12,9 +13,11 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import ScanNotFoundError
 from app.models.scan import ModuleStatus, Scan, ScanFindingObservation, ScanStatus
 from app.services.finding_identity import (
     FINDING_RULESET_VERSION,
+    MAX_FINDING_RULES,
     finding_evidence_modules,
     finding_rule_identity,
 )
@@ -53,6 +56,62 @@ class FindingBackfillPage:
     processed_scans: int
     inserted_observations: int
     failed_scans: int
+
+
+@dataclass(frozen=True, slots=True)
+class ScanFindingList:
+    scan_id: uuid.UUID
+    projection_status: Literal["ready", "pending", "failed", "unavailable"]
+    projected_at: datetime | None
+    observations: list[ScanFindingObservation]
+
+
+async def list_scan_findings(
+    db: AsyncSession, scan_id: uuid.UUID, user_id: int
+) -> ScanFindingList:
+    """Read one owner's bounded projection without treating missing data as clean."""
+    scan = (
+        await db.execute(select(Scan).where(Scan.id == scan_id, Scan.user_id == user_id))
+    ).scalar_one_or_none()
+    if scan is None:
+        raise ScanNotFoundError(str(scan_id))
+
+    status: Literal["ready", "pending", "failed", "unavailable"]
+    if scan.status != ScanStatus.COMPLETED:
+        status = "unavailable"
+    elif scan.finding_observations_projection_failed_at is not None:
+        status = "failed"
+    elif scan.finding_observations_projected_at is None:
+        status = "pending"
+    elif scan.finding_ruleset_version != FINDING_RULESET_VERSION:
+        status = "unavailable"
+    else:
+        status = "ready"
+
+    observations: list[ScanFindingObservation] = []
+    if status == "ready":
+        observations = list(
+            (
+                await db.execute(
+                    select(ScanFindingObservation)
+                    .where(ScanFindingObservation.scan_id == scan_id)
+                    .order_by(ScanFindingObservation.rule_id)
+                    .limit(MAX_FINDING_RULES + 1)
+                )
+            ).scalars().all()
+        )
+        if len(observations) > MAX_FINDING_RULES or any(
+            row.ruleset_version != FINDING_RULESET_VERSION for row in observations
+        ):
+            status = "failed"
+            observations = []
+
+    return ScanFindingList(
+        scan_id=scan.id,
+        projection_status=status,
+        projected_at=scan.finding_observations_projected_at if status == "ready" else None,
+        observations=observations,
+    )
 
 
 def build_finding_observations(scan: Scan) -> list[FindingObservationCandidate]:
