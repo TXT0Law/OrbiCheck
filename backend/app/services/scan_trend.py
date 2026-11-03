@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.scan import ModuleStatus, Scan, ScanStatus
+from app.services.finding_identity import finding_rule_identity
 from app.services.security_analyzer import (
     compute_security_score_v2,
     compute_severity_counts,
@@ -73,6 +74,14 @@ _CATEGORY_SNAKE_TO_CAMEL: dict[str, str] = {
     "threat_intel": "threatIntel",
     "infrastructure": "infrastructure",
     "best_practices": "bestPractices",
+}
+
+# Some findings are derived from either of two scan modules. A finding is
+# conclusive only when at least one of its evidence modules succeeded in both
+# scans; absent or failed modules cannot prove a regression or a fix.
+_FINDING_EVIDENCE_MODULES: dict[str, frozenset[str]] = {
+    "headers": frozenset({"headers", "http-security"}),
+    "threats": frozenset({"threats", "block-lists"}),
 }
 
 
@@ -159,10 +168,13 @@ def _category_scores_camel(scores: dict | None) -> dict[str, float] | None:
 
 
 def _finding_key(finding: dict) -> tuple[str, str]:
-    """Stable identity for diff comparisons — module + title."""
+    """Use stable rule identity, retaining title matching for unknown future rules."""
     module = str(finding.get("module") or "")
     title = str(finding.get("title") or "")
-    return module, title
+    try:
+        return module, finding_rule_identity(finding).rule_id
+    except ValueError:
+        return module, title
 
 
 def _to_finding_delta(finding: dict) -> FindingDelta:
@@ -178,6 +190,13 @@ def _to_finding_delta(finding: dict) -> FindingDelta:
             else None
         ),
     }
+
+
+def _finding_has_evidence(finding: dict, shared_modules: set[str]) -> bool:
+    module = finding.get("module")
+    if not isinstance(module, str):
+        return False
+    return bool(_FINDING_EVIDENCE_MODULES.get(module, frozenset({module})) & shared_modules)
 
 
 # ─── Public service helpers ─────────────────────────────────────────────
@@ -262,25 +281,40 @@ def compute_scan_diff(
     as the "after" snapshot. Findings are matched on the ``(module, title)``
     pair — stable enough for the same security_analyzer ruleset and short
     enough that two concurrent scans of an unchanged target collapse to
-    zero added / removed entries.
+    zero added / removed entries. Only modules with successful results on
+    both sides can prove a finding was added or removed. The display limit
+    applies after comparison, so a finding falling out of the top list is
+    not mistaken for a fix. Severity and category deltas use the same
+    shared-module subset to avoid treating a failed probe as an improvement.
     """
     base_raw = _build_all_raw(base_scan.module_results)
     compare_raw = _build_all_raw(compare_scan.module_results)
 
-    base_findings = extract_key_findings(base_raw, max_findings=key_findings_limit)
-    compare_findings = extract_key_findings(compare_raw, max_findings=key_findings_limit)
+    shared_modules = set(base_raw) & set(compare_raw)
+    base_shared_raw = {module: base_raw[module] for module in shared_modules}
+    compare_shared_raw = {module: compare_raw[module] for module in shared_modules}
+    base_findings = [
+        finding
+        for finding in extract_key_findings(base_shared_raw, max_findings=None)
+        if _finding_has_evidence(finding, shared_modules)
+    ]
+    compare_findings = [
+        finding
+        for finding in extract_key_findings(compare_shared_raw, max_findings=None)
+        if _finding_has_evidence(finding, shared_modules)
+    ]
     base_keys = {_finding_key(f) for f in base_findings}
     compare_keys = {_finding_key(f) for f in compare_findings}
 
     added: list[FindingDelta] = [
         _to_finding_delta(f) for f in compare_findings if _finding_key(f) not in base_keys
-    ]
+    ][:key_findings_limit]
     removed: list[FindingDelta] = [
         _to_finding_delta(f) for f in base_findings if _finding_key(f) not in compare_keys
-    ]
+    ][:key_findings_limit]
 
-    base_severity = _normalize_severity(compute_severity_counts(base_raw))
-    compare_severity = _normalize_severity(compute_severity_counts(compare_raw))
+    base_severity = _normalize_severity(compute_severity_counts(base_shared_raw))
+    compare_severity = _normalize_severity(compute_severity_counts(compare_shared_raw))
     severity_delta: SeverityDelta = {
         "base": base_severity,
         "compare": compare_severity,
@@ -289,10 +323,8 @@ def compute_scan_diff(
         },
     }
 
-    base_breakdown = compute_security_score_v2(base_raw, base_scan.module_results)
-    compare_breakdown = compute_security_score_v2(
-        compare_raw, compare_scan.module_results
-    )
+    base_breakdown = compute_security_score_v2(base_shared_raw)
+    compare_breakdown = compute_security_score_v2(compare_shared_raw)
     base_cat = (
         _category_scores_camel(base_breakdown.category_scores)
         if base_breakdown is not None

@@ -2,6 +2,48 @@ import { expect, test } from "@playwright/test";
 
 import { navigateTo, uniqueTestName } from "./helpers";
 
+const RESPONSIVE_WIDTHS = [320, 768, 1024, 1440] as const;
+const VIEWPORT_HEIGHT = 900;
+const MOBILE_WIDTH = 320;
+const MOBILE_ACTION_MIN_WIDTH = 200;
+
+test("URL groups action stays readable on narrow screens", async ({ page }) => {
+  await page.route(
+    (url) => url.pathname === "/api/v1/url-groups",
+    (route) => route.fulfill({
+      status: 200,
+      json: { status: "success", data: { groups: [], total: 0 } },
+    }),
+  );
+  await navigateTo(page, "/dashboard/scan/groups");
+
+  const heading = page.getByRole("heading", { name: "URL Groups", exact: true });
+  const description = page.getByText("Organize URLs into groups for batch scanning and management.");
+  const action = page.getByRole("button", { name: "New Group" }).first();
+  await expect(heading).toBeVisible();
+
+  for (const width of RESPONSIVE_WIDTHS) {
+    await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
+    const headingBox = await heading.boundingBox();
+    const descriptionBox = await description.boundingBox();
+    const actionBox = await action.boundingBox();
+    expect(headingBox).not.toBeNull();
+    expect(descriptionBox).not.toBeNull();
+    expect(actionBox).not.toBeNull();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+
+    if (width === MOBILE_WIDTH) {
+      expect(actionBox?.x).toBe(headingBox?.x);
+      expect(actionBox?.width ?? 0).toBeGreaterThan(MOBILE_ACTION_MIN_WIDTH);
+      expect(actionBox?.y ?? 0).toBeGreaterThan(
+        (descriptionBox?.y ?? 0) + (descriptionBox?.height ?? 0),
+      );
+    } else {
+      expect(actionBox?.y).toBe(headingBox?.y);
+    }
+  }
+});
+
 test.describe("Connected URL groups workflow", () => {
   test.setTimeout(120_000);
 

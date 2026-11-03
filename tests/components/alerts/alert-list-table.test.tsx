@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { AlertEmptyState } from "@/components/alerts/alert-empty-state";
@@ -90,7 +90,7 @@ const alert: AlertEvent = {
 };
 
 describe("AlertListTable", () => {
-  it("renders table with mock alert data", () => {
+  it("keeps alert details readable in the mobile card and desktop table", () => {
     render(
       <AlertListTable
         alerts={[alert]}
@@ -101,11 +101,17 @@ describe("AlertListTable", () => {
       />
     );
 
-    expect(screen.getByText("Monitor is down")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Example Monitor" })).toHaveAttribute(
+    const mobileList = within(screen.getByTestId("mobile-alert-list"));
+    expect(mobileList.getByText("Monitor is down")).toBeInTheDocument();
+    expect(
+      mobileList.getByText(messages.capabilityMap.uptime_only)
+    ).toBeInTheDocument();
+    expect(mobileList.getByRole("button", { name: "View" })).toBeInTheDocument();
+    expect(mobileList.getByRole("link", { name: "Example Monitor" })).toHaveAttribute(
       "href",
       "/dashboard/monitor/mon-1"
     );
+    expect(screen.getByRole("table")).toBeInTheDocument();
   });
 
   it("clicking acknowledge calls callback", () => {
@@ -120,8 +126,32 @@ describe("AlertListTable", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
+    fireEvent.click(
+      within(screen.getByTestId("mobile-alert-list")).getByRole("button", {
+        name: "Acknowledge",
+      })
+    );
     expect(onAcknowledge).toHaveBeenCalledWith("alert-1");
+  });
+
+  it("opens alert details from the mobile card", () => {
+    const onSelect = vi.fn();
+    render(
+      <AlertListTable
+        alerts={[alert]}
+        monitorsById={{ [monitor.id]: monitor }}
+        messages={messages}
+        onSelect={onSelect}
+        onAcknowledge={vi.fn()}
+      />
+    );
+
+    fireEvent.click(
+      within(screen.getByTestId("mobile-alert-list")).getByRole("button", {
+        name: "View",
+      })
+    );
+    expect(onSelect).toHaveBeenCalledWith(alert);
   });
 
   it("severity badge renders correct variant", () => {
@@ -135,7 +165,11 @@ describe("AlertListTable", () => {
       />
     );
 
-    expect(screen.getByTestId("alert-severity-critical")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("mobile-alert-list")).getByTestId(
+        "alert-severity-critical"
+      )
+    ).toBeInTheDocument();
   });
 
   it("empty state renders when no data", () => {

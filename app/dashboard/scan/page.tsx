@@ -545,8 +545,8 @@ function ScanPageContent() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-[1fr_180px_180px_180px_180px]">
-            <div className="col-span-2 flex flex-wrap items-center gap-2">
+          <div className="space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <ScanViewToggle
                 mode={viewMode}
                 onChange={(nextViewMode) =>
@@ -554,7 +554,7 @@ function ScanPageContent() {
                 }
               />
               <Input
-                className="min-w-0"
+                className="min-w-0 sm:flex-1"
                 aria-label={messages.searchAria}
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
@@ -566,57 +566,59 @@ function ScanPageContent() {
                 placeholder={messages.searchPlaceholder}
               />
             </div>
-            <select
-              aria-label={messages.sortAria}
-              value={sortBy}
-              onChange={(event) =>
-                updateScanQuery({
-                  sortBy: event.target.value as ScanListSortBy,
-                  page: DEFAULT_PAGE,
-                })
-              }
-              className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-            >
-              <option value="created_at_desc">{messages.sortNewest}</option>
-              <option value="created_at_asc">{messages.sortOldest}</option>
-              <option value="security_score_desc">{messages.sortScoreHigh}</option>
-              <option value="security_score_asc">{messages.sortScoreLow}</option>
-              <option value="domain_asc">{messages.sortDomainAsc}</option>
-              <option value="domain_desc">{messages.sortDomainDesc}</option>
-              <option value="progress_desc">{messages.sortProgressHigh}</option>
-            </select>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+              <select
+                aria-label={messages.sortAria}
+                value={sortBy}
+                onChange={(event) =>
+                  updateScanQuery({
+                    sortBy: event.target.value as ScanListSortBy,
+                    page: DEFAULT_PAGE,
+                  })
+                }
+                className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              >
+                <option value="created_at_desc">{messages.sortNewest}</option>
+                <option value="created_at_asc">{messages.sortOldest}</option>
+                <option value="security_score_desc">{messages.sortScoreHigh}</option>
+                <option value="security_score_asc">{messages.sortScoreLow}</option>
+                <option value="domain_asc">{messages.sortDomainAsc}</option>
+                <option value="domain_desc">{messages.sortDomainDesc}</option>
+                <option value="progress_desc">{messages.sortProgressHigh}</option>
+              </select>
 
-            <select
-              aria-label={messages.statusFilterAria}
-              value={statusGroup}
-              onChange={(event) =>
-                updateScanQuery({
-                  statusGroup: event.target.value as ScanStatusGroup,
-                  page: DEFAULT_PAGE,
-                })
-              }
-              className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-            >
-              <option value="all">{messages.categoryAll}</option>
-              <option value="active">{messages.categoryActive}</option>
-              <option value="completed">{messages.categoryCompleted}</option>
-              <option value="failed">{messages.categoryFailed}</option>
-              <option value="cancelled">{messages.categoryCancelled}</option>
-            </select>
+              <select
+                aria-label={messages.statusFilterAria}
+                value={statusGroup}
+                onChange={(event) =>
+                  updateScanQuery({
+                    statusGroup: event.target.value as ScanStatusGroup,
+                    page: DEFAULT_PAGE,
+                  })
+                }
+                className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              >
+                <option value="all">{messages.categoryAll}</option>
+                <option value="active">{messages.categoryActive}</option>
+                <option value="completed">{messages.categoryCompleted}</option>
+                <option value="failed">{messages.categoryFailed}</option>
+                <option value="cancelled">{messages.categoryCancelled}</option>
+              </select>
 
-            <Button
-              onClick={applySearch}
-              className="h-10 w-full"
-            >
-              {dashboardMessages.common.search}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={resetFilters}
-              className="h-10 w-full"
-            >
-              {dashboardMessages.common.reset}
-            </Button>
+              <Button
+                onClick={applySearch}
+                className="h-10 w-full"
+              >
+                {dashboardMessages.common.search}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={resetFilters}
+                className="h-10 w-full"
+              >
+                {dashboardMessages.common.reset}
+              </Button>
+            </div>
           </div>
         </CardHeader>
 

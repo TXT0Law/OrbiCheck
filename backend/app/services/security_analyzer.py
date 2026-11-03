@@ -881,8 +881,8 @@ def compute_category_summary(raw_results: dict) -> list[dict]:
     return result
 
 
-def extract_key_findings(raw_results: dict, max_findings: int = 8) -> list[dict]:
-    """Extract notable findings sorted by severity."""
+def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> list[dict]:
+    """Extract notable findings sorted by severity; ``None`` returns all findings."""
     findings: list[dict] = []
 
     if not raw_results:
@@ -1070,6 +1070,7 @@ def extract_key_findings(raw_results: dict, max_findings: int = 8) -> list[dict]
 
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     findings.sort(key=lambda f: severity_order.get(f["severity"], 4))
-    for idx, f in enumerate(findings[:max_findings]):
+    selected = findings if max_findings is None else findings[:max_findings]
+    for idx, f in enumerate(selected):
         f["id"] = f"{f.get('module', 'item')}-{idx}"
-    return findings[:max_findings]
+    return selected

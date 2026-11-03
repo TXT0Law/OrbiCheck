@@ -4,6 +4,7 @@ const isCI = !!process.env.CI;
 const scanServicePort = 4000;
 const linkedBackendPort = 8010;
 const frontendPort = 3101;
+const linkedScanCreateRateLimit = "100";
 const scanServiceUrl = `http://127.0.0.1:${scanServicePort}`;
 const linkedBackendUrl = `http://127.0.0.1:${linkedBackendPort}`;
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
@@ -44,7 +45,12 @@ export default defineConfig({
     {
       command: "uv run python ../scripts/dev/start-linked-backend.py",
       cwd: "backend",
-      env: { ...process.env, UV_LINK_MODE: "copy" },
+      env: {
+        ...process.env,
+        UV_LINK_MODE: "copy",
+        RATE_LIMIT_SCAN_CREATE_REQUESTS:
+          process.env.RATE_LIMIT_SCAN_CREATE_REQUESTS ?? linkedScanCreateRateLimit,
+      },
       url: `${linkedBackendUrl}/api/v1/health`,
       reuseExistingServer: !isCI,
       timeout: 120_000,

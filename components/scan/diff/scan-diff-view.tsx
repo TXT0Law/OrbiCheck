@@ -255,13 +255,18 @@ export function ScanDiffView({ diff }: ScanDiffViewProps) {
               {diff.compareScore ?? "—"}
             </p>
           </div>
+          <p className="text-xs text-muted-foreground sm:col-span-2">
+            Finding, severity, and category changes use only modules that succeeded in both
+            scans. Scores above summarize each full scan and may reflect different module coverage.
+          </p>
         </CardContent>
       </Card>
 
       {isUnchanged ? (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            Both scans report the same key findings and severity counts. Nothing changed.
+            No changes were found in comparable module results. Check each scan for
+            modules that did not complete.
           </CardContent>
         </Card>
       ) : null}

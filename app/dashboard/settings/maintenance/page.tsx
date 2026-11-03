@@ -181,8 +181,8 @@ export default function MaintenanceSettingsPage() {
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-zinc-900 dark:text-white">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="w-full min-w-0 break-all font-medium text-zinc-900 dark:text-white sm:w-auto">
                           {window.title}
                         </span>
                         {!window.isEnabled ? (
@@ -201,7 +201,7 @@ export default function MaintenanceSettingsPage() {
                       </p>
                       {window.monitorId ? (
                         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                          Monitor: <span className="font-mono">{window.monitorId}</span>
+                          Monitor: <span className="break-all font-mono">{window.monitorId}</span>
                         </p>
                       ) : null}
                       {window.tagScope && window.tagScope.length > 0 ? (
@@ -210,7 +210,7 @@ export default function MaintenanceSettingsPage() {
                           {window.tagScope.map((t) => (
                             <span
                               key={t}
-                              className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-mono text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+                              className="break-all rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-mono text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
                             >
                               {t}
                             </span>
@@ -218,7 +218,7 @@ export default function MaintenanceSettingsPage() {
                         </p>
                       ) : null}
                       {window.notes ? (
-                        <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+                        <p className="mt-2 break-words text-xs text-zinc-600 dark:text-zinc-300">
                           {window.notes}
                         </p>
                       ) : null}

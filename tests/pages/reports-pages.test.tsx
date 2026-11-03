@@ -11,6 +11,7 @@ const schedulesMock = vi.hoisted(() => ({
   data: [] as ReportSchedule[],
 }));
 const previewMock = vi.hoisted(() => ({ content: "# Heading\n\nReport body" }));
+const reportsMock = vi.hoisted(() => ({ empty: false }));
 
 vi.mock("next/navigation", () => ({
   useRouter: vi.fn(() => ({ push: vi.fn() })),
@@ -46,7 +47,7 @@ vi.mock("@/lib/hooks/use-reports", () => ({
   useReportList: vi.fn(() => ({
     isLoading: false,
     data: {
-      reports: [
+      reports: reportsMock.empty ? [] : [
         {
           id: "report-1",
           title: "Security Report - example.com",
@@ -118,6 +119,7 @@ describe("reports pages", () => {
     localStorage.clear();
     schedulesMock.data = [];
     previewMock.content = "# Heading\n\nReport body";
+    reportsMock.empty = false;
   });
 
   it("renders the reports list", () => {
@@ -127,6 +129,17 @@ describe("reports pages", () => {
     expect(screen.getByText("Security Report - example.com")).toBeInTheDocument();
     expect(screen.getByText("Generate Report Dialog")).toBeInTheDocument();
     expect(screen.getByText("Report Schedule Dialog")).toBeInTheDocument();
+  });
+
+  it("shows a clear empty state when no report exists", () => {
+    reportsMock.empty = true;
+
+    render(<ReportsPage />);
+
+    expect(screen.getByRole("heading", { name: "No reports yet" })).toBeInTheDocument();
+    expect(screen.getByText(/Create your first report from a completed scan/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate Report" })).toBeInTheDocument();
+    expect(screen.queryByText("Security Report - example.com")).not.toBeInTheDocument();
   });
 
   it("renders the reports page chrome in Chinese", () => {

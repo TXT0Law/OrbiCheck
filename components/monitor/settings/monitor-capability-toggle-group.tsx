@@ -49,7 +49,7 @@ export function MonitorCapabilityToggleGroup({
         Monitoring capabilities{" "}
         <span className="font-normal text-zinc-600 dark:text-zinc-300">(select at least one)</span>
       </span>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {MONITOR_CAPABILITIES.map((cap) => {
           const config = CAPABILITY_CONFIG[cap];
           const Icon = ICON_MAP[config.icon];
@@ -66,7 +66,7 @@ export function MonitorCapabilityToggleGroup({
               onClick={() => !isComingSoon && toggle(cap)}
               disabled={isComingSoon}
               className={cn(
-                "relative flex flex-col items-center gap-2 rounded-lg border-2 p-4 text-center transition-all",
+                "relative flex min-w-0 flex-col items-center gap-2 rounded-lg border-2 p-4 text-center transition-all",
                 selected
                   ? "border-sky-500 bg-sky-500/10"
                   : "border-zinc-200 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500",
@@ -87,7 +87,7 @@ export function MonitorCapabilityToggleGroup({
                 />
               ) : null}
               <span className="text-sm font-medium text-zinc-900 dark:text-white">{config.shortLabel}</span>
-              <span className="text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
+              <span className="max-w-full break-words text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
                 {isComingSoon ? "Coming soon" : config.description}
               </span>
             </button>

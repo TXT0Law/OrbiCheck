@@ -126,10 +126,10 @@ function RecentScansSkeleton({ className }: RecentScansProps) {
             key={index}
             className="flex items-center gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
           >
-            <Skeleton className="h-4 w-4 rounded-full" />
-            <div className="flex-1 space-y-2">
-              <Skeleton className="h-4 w-36" />
-              <Skeleton className="h-3 w-52" />
+            <Skeleton className="h-4 w-4 shrink-0 rounded-full" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-4 w-full max-w-36" />
+              <Skeleton className="h-3 w-full max-w-52" />
             </div>
           </div>
         ))}

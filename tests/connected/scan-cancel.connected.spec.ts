@@ -23,7 +23,10 @@ test.describe("Connected scan cancel flow", () => {
         headers: { "X-CSRF-Token": csrfToken },
       }
     );
-    expect(createResponse.ok()).toBeTruthy();
+    expect(
+      createResponse.ok(),
+      `scan creation failed with HTTP ${createResponse.status()}: ${await createResponse.text()}`
+    ).toBeTruthy();
 
     const createBody = await createResponse.json();
     const scanId = createBody?.data?.id ?? createBody?.id;
