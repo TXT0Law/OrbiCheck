@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.sql.dml import Insert, Update
+from sqlalchemy.sql.dml import Delete, Insert, Update
 from sqlalchemy.sql.selectable import Select
 
 from app.models.scan import ModuleStatus, ScanStatus
@@ -17,6 +17,7 @@ from app.services.finding_observation import (
     FindingProjectionError,
     build_finding_observations,
     persist_finding_observations,
+    refresh_finding_observations_after_retry,
 )
 
 
@@ -216,5 +217,87 @@ def test_persistence_keeps_malformed_scan_unprojected() -> None:
     with pytest.raises(FindingProjectionError, match="cannot be projected"):
         persist_finding_observations(SessionStub(), scan.id)
     assert scan.finding_observations_projected_at is None
+    assert len(statements) == 1
+    assert isinstance(statements[0], Select)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_retry_reconciles_rules_and_marks_touched_evidence_time() -> None:
+    scan = _scan(
+        _module("ssl", {"bits": 2048, "valid_to": "Jan 1 2020 GMT"}),
+        _module("headers", None, ModuleStatus.FAILED),
+    )
+    retried_at = scan.completed_at + timedelta(minutes=1)
+
+    class SessionStub:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        async def execute(self, statement: object) -> SimpleNamespace:
+            self.statements.append(statement)
+            return SimpleNamespace(scalar_one=lambda: scan)
+
+    db = SessionStub()
+    await refresh_finding_observations_after_retry(db, scan.id, "ssl", retried_at)
+
+    assert len(db.statements) == 4
+    assert isinstance(db.statements[0], Select)
+    assert isinstance(db.statements[1], Delete)
+    assert isinstance(db.statements[2], Update)
+    assert isinstance(db.statements[3], Insert)
+    assert "FOR UPDATE OF scans" in str(db.statements[0].compile(dialect=postgresql.dialect()))
+    assert "NOT IN" in str(db.statements[1].compile(dialect=postgresql.dialect()))
+    update_params = db.statements[2].compile().params
+    assert update_params["finding_ruleset_version"] == FINDING_RULESET_VERSION
+    assert update_params["finding_observations_projected_at"] is not None
+    row = {
+        getattr(key, "key", key): value
+        for key, value in db.statements[3]._multi_values[0][0].items()
+    }
+    assert row["rule_id"] == "ssl.certificate_expiry"
+    assert row["observed_at"] == retried_at
+    assert row["evidence_modules"] == ["ssl"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_retry_clears_old_rules_when_no_current_findings() -> None:
+    scan = _scan(_module("ssl", None, ModuleStatus.FAILED))
+
+    class SessionStub:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        async def execute(self, statement: object) -> SimpleNamespace:
+            self.statements.append(statement)
+            return SimpleNamespace(scalar_one=lambda: scan)
+
+    db = SessionStub()
+    await refresh_finding_observations_after_retry(
+        db, scan.id, "ssl", datetime.now(timezone.utc)
+    )
+
+    assert [type(statement) for statement in db.statements] == [Select, Delete, Update]
+    assert "NOT IN" not in str(db.statements[1].compile(dialect=postgresql.dialect()))
+    assert db.statements[2].compile().params["finding_ruleset_version"] == FINDING_RULESET_VERSION
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_retry_keeps_old_rows_if_stored_evidence_is_malformed() -> None:
+    scan = _scan(_module("ssl", {"bits": 2048}))
+    scan.completed_at = None
+    statements: list[object] = []
+
+    class SessionStub:
+        async def execute(self, statement: object) -> SimpleNamespace:
+            statements.append(statement)
+            return SimpleNamespace(scalar_one=lambda: scan)
+
+    with pytest.raises(FindingProjectionError, match="cannot be projected"):
+        await refresh_finding_observations_after_retry(
+            SessionStub(), scan.id, "ssl", datetime.now(timezone.utc)
+        )
     assert len(statements) == 1
     assert isinstance(statements[0], Select)
