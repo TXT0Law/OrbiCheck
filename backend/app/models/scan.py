@@ -19,7 +19,16 @@ class ScanStatus(str, enum.Enum):
 
 class Scan(Base):
     __tablename__ = "scans"
-    __table_args__ = (Index("ix_scans_user_created_id", "user_id", "created_at", "id"),)
+    __table_args__ = (
+        Index("ix_scans_user_created_id", "user_id", "created_at", "id"),
+        Index(
+            "ix_scans_finding_backfill",
+            "status",
+            "finding_observations_projected_at",
+            "id",
+            postgresql_concurrently=True,
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -44,6 +53,9 @@ class Scan(Base):
     )
     # Nullable until a completed scan has been projected with a known ruleset.
     finding_observations_projected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finding_observations_projection_failed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     finding_ruleset_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
