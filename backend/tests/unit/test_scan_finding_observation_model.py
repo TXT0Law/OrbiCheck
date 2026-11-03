@@ -58,3 +58,19 @@ def test_observation_ownership_and_deletion_follow_parent_scan() -> None:
     scan.finding_observations.append(observation)
 
     assert observation.scan is scan
+
+
+@pytest.mark.unit
+def test_scan_projection_state_starts_unknown_for_legacy_scans() -> None:
+    scan = Scan(
+        id=uuid4(),
+        user_id=7,
+        domain="example.com",
+        url="https://example.com",
+        status=ScanStatus.COMPLETED,
+    )
+
+    assert scan.finding_observations_projected_at is None
+    assert scan.finding_ruleset_version is None
+    assert Scan.__table__.c.finding_observations_projected_at.nullable
+    assert Scan.__table__.c.finding_ruleset_version.nullable
