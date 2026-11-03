@@ -82,11 +82,11 @@ export default function ReportDetailPage({ params }: ReportDetailPageProps) {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <Link href="/dashboard/reports" className="text-sm text-muted-foreground hover:underline">
             Back to reports
           </Link>
-          <h1 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+          <h1 className="mt-2 break-words text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
             {report.title}
           </h1>
         </div>
