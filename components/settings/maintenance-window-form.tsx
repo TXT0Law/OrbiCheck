@@ -230,7 +230,7 @@ export function MaintenanceWindowForm({
         </label>
       </div>
 
-      <fieldset className="space-y-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+      <fieldset className="min-w-0 space-y-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
         <legend className="px-1 text-sm font-medium text-zinc-900 dark:text-white">
           Suppression
         </legend>
@@ -263,7 +263,7 @@ export function MaintenanceWindowForm({
         </label>
       </fieldset>
 
-      <fieldset className="space-y-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+      <fieldset className="min-w-0 space-y-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
         <legend className="px-1 text-sm font-medium text-zinc-900 dark:text-white">
           Recurrence
         </legend>
@@ -323,12 +323,13 @@ export function MaintenanceWindowForm({
               </div>
             ) : null}
 
-            <label className="flex flex-col gap-1 text-sm">
+            <label className="flex min-w-0 flex-col gap-1 text-sm">
               <span className="font-medium text-zinc-900 dark:text-white">
                 Until (optional)
               </span>
               <Input
                 type="datetime-local"
+                className="min-w-0"
                 value={state.recurrenceUntil}
                 onChange={(e) => patch("recurrenceUntil", e.target.value)}
               />
@@ -377,8 +378,8 @@ export function MaintenanceWindowForm({
         />
       </label>
 
-      <div className="flex items-center gap-3">
-        <Button type="submit" disabled={busy}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <Button type="submit" disabled={busy} className="w-full sm:w-auto">
           {busy
             ? "Saving…"
             : mode === "create"
@@ -391,6 +392,7 @@ export function MaintenanceWindowForm({
             variant="outline"
             onClick={onCancel}
             disabled={busy}
+            className="w-full sm:w-auto"
           >
             Cancel
           </Button>
