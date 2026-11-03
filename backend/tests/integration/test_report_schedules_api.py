@@ -109,3 +109,40 @@ async def test_update_report_schedule_rejects_null_rescan_flag(async_client) -> 
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "recipient",
+    ["ops@example.com\nBcc: other@example.com", "ops@@example.com"],
+)
+async def test_create_report_schedule_rejects_malformed_recipient(
+    async_client, recipient: str
+) -> None:
+    response = await async_client.post(
+        "/api/v1/report-schedules",
+        json={
+            "name": "Weekly security report",
+            "scanId": str(uuid4()),
+            "cadence": "weekly",
+            "dayOfWeek": 0,
+            "hour": 9,
+            "minute": 0,
+            "deliveryChannels": ["email"],
+            "emailRecipients": [recipient],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_update_report_schedule_rejects_malformed_recipient(async_client) -> None:
+    response = await async_client.put(
+        f"/api/v1/report-schedules/{uuid4()}",
+        json={"emailRecipients": ["ops@example.com\nBcc: other@example.com"]},
+    )
+
+    assert response.status_code == 422

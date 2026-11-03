@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.api.v1.schemas.report_schedule import REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT
+from app.api.v1.schemas.report_schedule import ReportScheduleBase
 from app.models.report import Report, ReportFormat
 from app.models.report_schedule import (
     ReportSchedule,
@@ -93,6 +94,13 @@ def test_compute_next_run_monthly_clamps_to_last_day() -> None:
 
 
 @pytest.mark.unit
+def test_report_recipient_normalization_preserves_common_valid_address() -> None:
+    assert ReportScheduleBase.normalize_email_recipients(
+        [" Sec+Alerts@Example.com "]
+    ) == ["sec+alerts@example.com"]
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_email_delivery_without_recipients_reports_failure_without_sending(
     monkeypatch: pytest.MonkeyPatch,
@@ -133,6 +141,8 @@ async def test_email_delivery_without_recipients_reports_failure_without_sending
         "ops@example.com",
         [""],
         ["not-an-email"],
+        ["ops@example.com\nBcc: other@example.com"],
+        ["ops@@example.com"],
         ["ops@example.com", 7],
         ["ops@example.com"] * (REPORT_SCHEDULE_EMAIL_RECIPIENT_LIMIT + 1),
     ],
