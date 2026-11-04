@@ -18,6 +18,29 @@ also require the CSRF cookie value in `X-CSRF-Token`.
 Request and response schemas are defined in the
 [static OpenAPI document](../openapi.json).
 
+## Interpreting run history
+
+Each entry in `GET /report-schedules/{scheduleId}/runs` and in a schedule's
+`recentRuns` includes an `operations` object. Read `artifactState` and
+`reportId` to identify the caller's report. Read `deliveryState`, `channels`
+and `reviewReason` separately to decide whether delivery needs investigation.
+A completed report can still have an unconfirmed delivery.
+
+An accepted receipt means the sending service observed a successful handoff.
+The per-channel counts retain positive receipts when other outcomes are
+missing or uncertain. An explicit successful receipt with an empty channel
+map represents a store-only run. Older empty summaries lack that evidence.
+Use the summary recorded for the run; the schedule's current destination
+settings may have changed since it ran.
+
+The API exposes recognized channel outcomes and owner-scoped report IDs.
+Recipient addresses, webhook URLs, provider diagnostics and arbitrary keys
+from stored receipts are omitted from the run response. The legacy
+`deliverySummary` field remains a nullable object with sanitized values.
+Use `operations` for interpretation. An older negative receipt can also
+represent a lost acknowledgement; verify uncertain results with the receiver
+before deciding on a resend.
+
 ## Recovery after a broker or worker interruption
 
 Keep the `runId` returned by Run now. The scheduled dispatcher can publish the

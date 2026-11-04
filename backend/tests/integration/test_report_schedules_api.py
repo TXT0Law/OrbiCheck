@@ -121,3 +121,76 @@ async def test_run_now_returns_durable_run_id_during_broker_outage(async_client,
     assert response.json()["data"]["runId"] == str(run.id)
     publish.assert_called_once_with(args=(str(run.id),), retry=False, ignore_result=True)
     recovery_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_runs_and_recent_runs_share_safe_owner_projection(async_client, monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from app.models.report_schedule import ReportSchedule, ReportScheduleRun, ReportScheduleRunStatus
+
+    payload = _schedule_response()
+    payload.pop('recent_runs')
+    schedule = ReportSchedule(**payload)
+    foreign_report_id = uuid4()
+    run = ReportScheduleRun(
+        id=uuid4(), schedule_id=schedule.id, report_id=foreign_report_id,
+        status=ReportScheduleRunStatus.FAILED,
+        error_message='https://secret.invalid/webhook',
+        delivery_summary={'outcome': 'unconfirmed', 'secret': 'hidden',
+                          'channels': {'email': [{'success': 'true'}]}},
+    )
+    schedule.runs = [run]
+    calls = []
+
+    async def execute(statement):
+        calls.append(statement)
+        result = MagicMock()
+        sql = str(statement)
+        if 'FROM report_schedules' in sql:
+            result.scalar_one_or_none.return_value = schedule
+            result.scalars.return_value = [schedule]
+        elif 'FROM report_schedule_runs' in sql:
+            result.scalars.return_value = [run]
+        else:
+            result.all.return_value = []  # owner-filtered join finds no accessible report
+        return result
+
+    db = SimpleNamespace(execute=AsyncMock(side_effect=execute))
+    monkeypatch.setattr(report_schedule_endpoints, 'get_db', lambda: db)
+
+    # The fixture owns its app, so override the service session at its public entry points.
+    original_runs = report_schedule_service.list_schedule_runs
+    original_list = report_schedule_service.list_schedules
+    original_detail = report_schedule_service.get_schedule_response
+
+    async def runs(_db, schedule_id, user_id):
+        return await original_runs(db, schedule_id, user_id)
+
+    async def schedules(_db, user_id):
+        return await original_list(db, user_id)
+
+    async def detail(_db, schedule_id, user_id):
+        return await original_detail(db, schedule_id, user_id)
+
+    monkeypatch.setattr(report_schedule_service, 'get_schedule_response', detail)
+    monkeypatch.setattr(report_schedule_service, 'list_schedule_runs', runs)
+    monkeypatch.setattr(report_schedule_service, 'list_schedules', schedules)
+    history = await async_client.get(f'/api/v1/report-schedules/{schedule.id}/runs')
+    listing = await async_client.get('/api/v1/report-schedules')
+    assert history.status_code == listing.status_code == 200
+    detail_response = await async_client.get(f'/api/v1/report-schedules/{schedule.id}')
+    assert detail_response.status_code == 200
+    projected = history.json()['data']['runs'][0]
+    assert detail_response.json()['data']['recentRuns'][0] == projected
+    assert listing.json()['data']['schedules'][0]['recentRuns'][0] == projected
+    assert projected['reportId'] is None
+    assert projected['operations']['artifactState'] == 'missing'
+    assert projected['operations']['deliveryState'] == 'unconfirmed'
+    assert 'secret.invalid' not in history.text
+    assert str(foreign_report_id) not in history.text
+    report_queries = [query for query in calls if 'FROM reports' in str(query)]
+    assert len(report_queries) == 3
+    assert all('reports.user_id' in str(query) for query in report_queries)
+    assert all('content_pdf' not in str(query) for query in report_queries)
