@@ -5078,6 +5078,59 @@
           }
         }
       }
+    },
+    "/api/v1/report-schedules/{schedule_id}/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "report-schedules"
+        ],
+        "summary": "Get Report Schedule Run",
+        "operationId": "get_report_schedule_run_api_v1_report_schedules__schedule_id__runs__run_id__get",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Schedule Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse_ReportScheduleRunResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -11048,6 +11101,35 @@
           "data"
         ],
         "title": "SuccessResponse[ReportScheduleResponse]"
+      },
+      "SuccessResponse_ReportScheduleRunResponse_": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ReportScheduleRunResponse"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "SuccessResponse[ReportScheduleRunResponse]"
       },
       "SuccessResponse_ReportScheduleRunsResponse_": {
         "properties": {

@@ -463,6 +463,27 @@ async def list_schedule_runs(
     return [_run_to_response(row, reports) for row in rows]
 
 
+async def get_schedule_run(
+    db: AsyncSession,
+    schedule_id: uuid.UUID,
+    run_id: uuid.UUID,
+    user_id: int,
+) -> ReportScheduleRunResponse:
+    """Read one owned run independently of the bounded history page."""
+    run = (await db.execute(
+        select(ReportScheduleRun)
+        .join(ReportSchedule, ReportScheduleRun.schedule_id == ReportSchedule.id)
+        .where(
+            ReportScheduleRun.id == run_id,
+            ReportScheduleRun.schedule_id == schedule_id,
+            ReportSchedule.user_id == user_id,
+        )
+    )).scalar_one_or_none()
+    if run is None:
+        raise NotFoundError(code="REPORT_SCHEDULE_RUN_NOT_FOUND", message="Report schedule run not found")
+    return _run_to_response(run, await _run_reports(db, [run], user_id))
+
+
 def build_due_schedule_query(now: datetime) -> Select[tuple[ReportSchedule]]:
     return (
         select(ReportSchedule)

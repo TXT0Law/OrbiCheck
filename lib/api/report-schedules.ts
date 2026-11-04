@@ -12,6 +12,7 @@ import type {
   ReportScheduleCreateParams,
   ReportScheduleListResult,
   ReportScheduleRunsResult,
+  ReportScheduleRun,
   ReportScheduleUpdateParams,
 } from "@/shared/types/report";
 
@@ -76,4 +77,9 @@ export async function listReportScheduleRuns(
       "report schedule runs",
     ),
   };
+}
+
+export async function getReportScheduleRun(scheduleId: string, runId: string): Promise<ReportScheduleRun> {
+  const { data } = await apiClient.get<unknown>(`${BASE}/${encodeURIComponent(scheduleId)}/runs/${encodeURIComponent(runId)}`);
+  return parseSingle<ReportScheduleRun>(reportScheduleRunSchema, data, "report schedule run");
 }

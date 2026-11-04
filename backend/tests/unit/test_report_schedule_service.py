@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -122,3 +123,21 @@ async def test_oversized_slack_reply_is_unconfirmed_without_redirect_replay(monk
     assert result["outcome"] == "unconfirmed"
     assert result["success"] is False
     assert sender.await_args.kwargs["max_redirects"] == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_exact_run_scopes_owner_schedule_and_run_without_history() -> None:
+    from app.core.exceptions import NotFoundError
+
+    schedule_id, run_id = uuid4(), uuid4()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    db = SimpleNamespace(execute=AsyncMock(return_value=result))
+    with pytest.raises(NotFoundError) as error:
+        await report_schedule_service.get_schedule_run(db, schedule_id, run_id, 72)
+    assert error.value.code == 'REPORT_SCHEDULE_RUN_NOT_FOUND'
+    query = db.execute.call_args.args[0].compile(dialect=postgresql.dialect())
+    assert set(query.params.values()) == {schedule_id, run_id, 72}
+    assert 'JOIN report_schedules ON report_schedule_runs.schedule_id = report_schedules.id' in str(query)
+    assert not db.execute.call_args.args[0]._with_options

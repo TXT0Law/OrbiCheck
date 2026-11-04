@@ -85,6 +85,19 @@ export const reportScheduleRunSchema = z.object({
   completedAt: isoStringSchema.nullable(),
   errorMessage: z.string().nullable(),
   deliverySummary: z.record(z.string(), z.unknown()).nullable(),
+  operations: z.object({
+    artifactState: z.enum(["missing", "pending", "generating", "completed", "failed"]),
+    reportId: z.string().nullable(),
+    deliveryState: z.enum(["accepted", "failed", "partial", "unknown", "unconfirmed", "stored", "not_started"]),
+    channels: z.array(z.object({
+      channel: z.enum(["email", "slack"]),
+      state: z.enum(["accepted", "failed", "partial", "unknown"]),
+      acceptedCount: z.number().int().nonnegative(),
+      failedCount: z.number().int().nonnegative(),
+      unknownCount: z.number().int().nonnegative(),
+    })),
+    reviewReason: z.enum(["delivery_unconfirmed", "missing_or_invalid_receipts"]).nullable(),
+  }),
 }) satisfies z.ZodType<ReportScheduleRun>;
 
 export const reportScheduleSchema = z.object({

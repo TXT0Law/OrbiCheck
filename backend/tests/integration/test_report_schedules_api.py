@@ -194,3 +194,55 @@ async def test_runs_and_recent_runs_share_safe_owner_projection(async_client, mo
     assert len(report_queries) == 3
     assert all('reports.user_id' in str(query) for query in report_queries)
     assert all('content_pdf' not in str(query) for query in report_queries)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_exact_run_endpoint_returns_pending_without_history(async_client, monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    from app.core.deps import get_db
+    from app.models.report_schedule import ReportScheduleRun, ReportScheduleRunStatus
+
+    schedule_id, run_id = uuid4(), uuid4()
+    run = ReportScheduleRun(id=run_id, schedule_id=schedule_id,
+                            status=ReportScheduleRunStatus.PENDING)
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = run
+    db = SimpleNamespace(execute=AsyncMock(return_value=result))
+
+    async def override_db():
+        yield db
+
+    async_client._transport.app.dependency_overrides[get_db] = override_db
+    response = await async_client.get(f'/api/v1/report-schedules/{schedule_id}/runs/{run_id}')
+    assert response.status_code == 200
+    data = response.json()['data']
+    assert data['id'] == str(run_id)
+    assert data['operations']['deliveryState'] == 'not_started'
+    assert data['operations']['reviewReason'] is None
+    statement = db.execute.call_args.args[0]
+    assert not statement._with_options
+    assert len(db.execute.call_args_list) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_exact_run_hides_inaccessible_associations(async_client) -> None:
+    from unittest.mock import AsyncMock
+
+    from app.core.deps import get_db
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    db = SimpleNamespace(execute=AsyncMock(return_value=result))
+
+    async def override_db():
+        yield db
+
+    async_client._transport.app.dependency_overrides[get_db] = override_db
+    response = await async_client.get(f'/api/v1/report-schedules/{uuid4()}/runs/{uuid4()}')
+    assert response.status_code == 404
+    assert response.json()['error'] == {
+        'code': 'REPORT_SCHEDULE_RUN_NOT_FOUND', 'message': 'Report schedule run not found',
+    }

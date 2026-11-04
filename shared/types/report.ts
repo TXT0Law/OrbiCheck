@@ -71,6 +71,22 @@ export interface ReportPreview {
   reportMeta?: Record<string, unknown> | null;
 }
 
+export type ReportDeliveryState = "accepted" | "failed" | "partial" | "unknown" | "unconfirmed" | "stored" | "not_started";
+
+export interface ReportRunOperations {
+  artifactState: "missing" | "pending" | "generating" | "completed" | "failed";
+  reportId: string | null;
+  deliveryState: ReportDeliveryState;
+  channels: {
+    channel: "email" | "slack";
+    state: "accepted" | "failed" | "partial" | "unknown";
+    acceptedCount: number;
+    failedCount: number;
+    unknownCount: number;
+  }[];
+  reviewReason: "delivery_unconfirmed" | "missing_or_invalid_receipts" | null;
+}
+
 export interface ReportScheduleRun {
   id: string;
   scheduleId: string;
@@ -80,6 +96,7 @@ export interface ReportScheduleRun {
   completedAt: string | null;
   errorMessage: string | null;
   deliverySummary: Record<string, unknown> | null;
+  operations: ReportRunOperations;
 }
 
 export interface ReportSchedule {

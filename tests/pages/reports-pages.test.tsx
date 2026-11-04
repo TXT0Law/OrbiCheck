@@ -9,6 +9,8 @@ import type { ReportSchedule } from "@/shared/types/report";
 
 const schedulesMock = vi.hoisted(() => ({
   data: [] as ReportSchedule[],
+  error: false,
+  refetch: vi.fn(),
 }));
 const previewMock = vi.hoisted(() => ({ content: "# Heading\n\nReport body" }));
 const reportsMock = vi.hoisted(() => ({ empty: false }));
@@ -36,6 +38,8 @@ vi.mock("@/components/report/report-schedule-dialog", () => ({
 vi.mock("@/lib/hooks/use-report-schedules", () => ({
   useReportSchedules: vi.fn(() => ({
     isLoading: false,
+    isError: schedulesMock.error,
+    refetch: schedulesMock.refetch,
     data: { schedules: schedulesMock.data },
   })),
   useUpdateReportSchedule: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
@@ -118,6 +122,7 @@ describe("reports pages", () => {
   beforeEach(() => {
     localStorage.clear();
     schedulesMock.data = [];
+    schedulesMock.error = false;
     previewMock.content = "# Heading\n\nReport body";
     reportsMock.empty = false;
   });
@@ -187,6 +192,16 @@ describe("reports pages", () => {
     expect(screen.getByText("僅儲存")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "編輯" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "立即執行" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "執行歷史" })).toBeInTheDocument();
+  });
+
+  it("shows schedule query failure instead of an empty schedule collection", () => {
+    schedulesMock.error = true;
+    render(<ReportsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Schedules" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Schedules could not be loaded.");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(schedulesMock.refetch).toHaveBeenCalled();
   });
 
   it("renders the report detail preview", async () => {

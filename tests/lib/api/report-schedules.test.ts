@@ -77,3 +77,17 @@ describe("report schedules api", () => {
     );
   });
 });
+
+it("fetches exact requested run and rejects malformed operations", async () => {
+  const mod = await import("@/lib/api/report-schedules");
+  const run = { id: "requested-run", scheduleId: "schedule-1", reportId: null, status: "pending",
+    startedAt: null, completedAt: null, errorMessage: null, deliverySummary: null,
+    operations: { artifactState: "missing", reportId: null, deliveryState: "not_started", channels: [], reviewReason: null } };
+  apiClientMock.get.mockResolvedValue({ data: run });
+  expect(await mod.getReportScheduleRun("schedule-1", "requested-run")).toEqual(run);
+  expect(apiClientMock.get).toHaveBeenCalledWith("/report-schedules/schedule-1/runs/requested-run");
+  apiClientMock.get.mockResolvedValue({ data: { ...run, operations: { ...run.operations, channels: [
+    { channel: "email", state: "accepted", acceptedCount: -1, failedCount: 0, unknownCount: 0 },
+  ] } } });
+  await expect(mod.getReportScheduleRun("schedule-1", "requested-run")).rejects.toThrow();
+});

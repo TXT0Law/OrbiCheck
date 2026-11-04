@@ -77,3 +77,23 @@ export function useRunReportScheduleNow() {
     onSuccess: () => invalidateReportScheduleQueries(queryClient),
   });
 }
+
+export function useReportScheduleRuns(scheduleId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: reportScheduleKeys.runs(scheduleId),
+    queryFn: () => reportSchedulesApi.listReportScheduleRuns(scheduleId),
+    enabled,
+    refetchInterval: (query) => enabled && query.state.data?.runs.some((run) => hasActiveRun(run.status))
+      ? SCHEDULE_POLL_MS : false,
+  });
+}
+
+export function useReportScheduleRun(scheduleId: string, runId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: [...reportScheduleKeys.runs(scheduleId), runId],
+    queryFn: () => reportSchedulesApi.getReportScheduleRun(scheduleId, runId ?? ""),
+    enabled: enabled && Boolean(runId),
+    refetchInterval: (query) => enabled && query.state.data && hasActiveRun(query.state.data.status)
+      ? SCHEDULE_POLL_MS : false,
+  });
+}
