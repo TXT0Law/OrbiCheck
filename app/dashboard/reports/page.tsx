@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppearanceLanguage } from "@/lib/hooks/use-appearance-language";
+import { getReportHistoryMessages } from "@/lib/i18n/report-history";
 import { useReportSchedules } from "@/lib/hooks/use-report-schedules";
 import { useReportList } from "@/lib/hooks/use-reports";
 import { getDashboardMessages } from "@/lib/i18n/dashboard";
@@ -81,6 +82,11 @@ export default function ReportsPage() {
                 {messages.loadingSchedules}
               </CardContent>
             </Card>
+          ) : schedulesQuery.isError ? (
+            <div role="alert" className="space-y-3 rounded-lg border p-4">
+              <p>{getReportHistoryMessages(language).listError}</p>
+              <Button variant="outline" onClick={() => void schedulesQuery.refetch()}>{getReportHistoryMessages(language).retry}</Button>
+            </div>
           ) : (
             <ReportScheduleList schedules={schedulesQuery.data?.schedules ?? []} />
           )}

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
+import { ReportScheduleHistory } from "@/components/report/report-schedule-history";
+import { getReportHistoryMessages } from "@/lib/i18n/report-history";
 import { ReportScheduleDialog } from "@/components/report/report-schedule-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,10 +61,13 @@ function getRunStatusLabel(
 export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
   const language = useAppearanceLanguage();
   const messages = getDashboardMessages(language).reports;
+  const historyMessages = getReportHistoryMessages(language);
   const { toast } = useToast();
   const updateSchedule = useUpdateReportSchedule();
   const deleteSchedule = useDeleteReportSchedule();
   const runNow = useRunReportScheduleNow();
+  const historyTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [history, setHistory] = useState<{ schedule: ReportSchedule; runId: string | null } | null>(null);
   const [editing, setEditing] = useState<ReportSchedule | null>(null);
   const [deleting, setDeleting] = useState<ReportSchedule | null>(null);
 
@@ -84,7 +89,8 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
 
   async function handleRunNow(schedule: ReportSchedule) {
     try {
-      await runNow.mutateAsync(schedule.id);
+      const result = await runNow.mutateAsync(schedule.id);
+      setHistory({ schedule, runId: result.runId });
       toast({
         title: messages.runQueuedTitle,
         description: messages.runQueuedDescription(schedule.name),
@@ -176,7 +182,11 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className="flex justify-end gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button size="sm" variant="outline" onClick={(event) => {
+                        historyTriggerRef.current = event.currentTarget;
+                        setHistory({ schedule, runId: null });
+                      }}>{historyMessages.history}</Button>
                       <Button size="sm" variant="outline" onClick={() => setEditing(schedule)}>
                         {messages.edit}
                       </Button>
@@ -191,7 +201,10 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => void handleRunNow(schedule)}
+                        onClick={(event) => {
+                          historyTriggerRef.current = event.currentTarget;
+                          void handleRunNow(schedule);
+                        }}
                         disabled={runNow.isPending || !schedule.scanId}
                       >
                         {messages.runNow}
@@ -208,6 +221,7 @@ export function ReportScheduleList({ schedules }: ReportScheduleListProps) {
         </Table>
       </div>
 
+      {history && <ReportScheduleHistory scheduleId={history.schedule.id} scheduleName={history.schedule.name} runId={history.runId} onClose={() => setHistory(null)} onRestoreFocus={() => historyTriggerRef.current?.focus()} />}
       <ReportScheduleDialog
         open={Boolean(editing)}
         onOpenChange={(open) => {

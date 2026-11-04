@@ -14,6 +14,7 @@ also require the CSRF cookie value in `X-CSRF-Token`.
 | DELETE | `/report-schedules/{scheduleId}` | Delete a schedule |
 | POST | `/report-schedules/{scheduleId}/run-now` | Queue an immediate run |
 | GET | `/report-schedules/{scheduleId}/runs` | List recent runs |
+| GET | `/report-schedules/{scheduleId}/runs/{runId}` | Get one run from this schedule, including a newly queued run |
 
 Request and response schemas are defined in the
 [static OpenAPI document](../openapi.json).
@@ -54,10 +55,12 @@ an outstanding reservation, an unclaimed run becomes eligible again after
 execute. Pausing an enabled schedule stops a queued automatic run when the
 worker next checks the schedule.
 
-Use the schedule's runs endpoint to look up the original ID and its
-`reportId`. It returns up to 50 runs and sorts runs without a start time
-last. If an older or pending run is absent, an operator with database access
-can look up `report_schedule_runs.id` using the original run ID.
+Use the single-run endpoint with the original schedule ID and run ID to
+get its current state and `reportId`. It returns the same run object used
+in the list. An absent run, a run under another schedule, and a schedule
+owned by someone else all return `404 REPORT_SCHEDULE_RUN_NOT_FOUND`.
+The history list returns up to 50 runs and sorts runs without a start
+time last. The single-run lookup is independent of that list.
 If the worker stops in `delivering`, the receiver may already
 have accepted the message. Redelivery of the task leaves the run in that
 state. Check the receiving channel and the saved report before deciding on

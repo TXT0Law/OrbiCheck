@@ -11,6 +11,7 @@ from app.api.v1.schemas.report_schedule import (
     ReportScheduleListResponse,
     ReportScheduleResponse,
     ReportScheduleRunsResponse,
+    ReportScheduleRunResponse,
     ReportScheduleUpdateRequest,
 )
 from app.core.config import settings
@@ -111,3 +112,14 @@ async def list_report_schedule_runs(
 ) -> SuccessResponse[ReportScheduleRunsResponse]:
     runs = await report_schedule_service.list_schedule_runs(db, schedule_id, current_user.id)
     return SuccessResponse(data=ReportScheduleRunsResponse(runs=runs))
+
+
+@router.get("/{schedule_id}/runs/{run_id}", response_model=SuccessResponse[ReportScheduleRunResponse])
+async def get_report_schedule_run(
+    schedule_id: uuid.UUID,
+    run_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuccessResponse[ReportScheduleRunResponse]:
+    run = await report_schedule_service.get_schedule_run(db, schedule_id, run_id, current_user.id)
+    return SuccessResponse(data=run)
