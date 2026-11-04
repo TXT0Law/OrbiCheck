@@ -21,7 +21,7 @@ export interface CategorySummary {
   label: string;
   modulesChecked: number;
   issuesFound: number;
-  status: "pass" | "warn" | "fail";
+  status: "pass" | "warn" | "fail" | "unknown";
 }
 
 export interface KeyFinding {
@@ -163,12 +163,12 @@ export interface CertExtensions {
 
 export interface SslCheckResult {
   // === Legacy SslResult fields (backward compatible) ===
-  grade: "A+" | "A" | "B" | "C" | "D" | "F";
+  grade: "A+" | "A" | "B" | "C" | "D" | "F" | null;
   issuer: string;
   subject: string;
   validFrom: string;
   validTo: string;
-  daysRemaining: number;
+  daysRemaining: number | null;
   chainDepth: number;
   keySize: number;
   signatureAlgorithm: string;
@@ -206,7 +206,7 @@ export interface SslCheckResult {
     maxAge?: number;
     preload?: boolean;
     includeSubDomains?: boolean;
-  };
+  } | null;
 
   // === 9. Certificate Transparency ===
   ct?: {
@@ -704,34 +704,34 @@ export interface ScanDetail {
   moduleErrors: Record<string, ModuleErrorSummary>;
   moduleJobs?: ModuleJob[];
   totalDurationMs?: number;
-  ssl: SslResult;
-  headers: HeadersResult;
-  ip: IpInfoResult;
+  ssl: SslResult | null;
+  headers: HeadersResult | null;
+  ip: IpInfoResult | null;
   whois: WhoisResult | null;
-  dns: DnsResult;
+  dns: DnsResult | null;
   ports: PortsResult | null;
-  statusCheck: StatusResult;
+  statusCheck: StatusResult | null;
   screenshot: ScreenshotResult | null;
   pageSource?: PageSourceResult | null;
   techStack: TechStackItem[] | null;
-  tls: TlsResult;
-  hsts: HstsResult;
-  cookies: CookiesResult;
-  firewall: FirewallResult;
-  threats: ThreatsResult;
+  tls: TlsResult | null;
+  hsts: HstsResult | null;
+  cookies: CookiesResult | null;
+  firewall: FirewallResult | null;
+  threats: ThreatsResult | null;
   redirects: RedirectsResult | null;
-  emailConfig: EmailConfigResult;
+  emailConfig: EmailConfigResult | null;
   features: FeaturesResult | null;
-  robotsTxt: RobotsTxtResult;
-  sitemap: SitemapResult;
-  dnssec: DnssecResult;
-  securityTxt: SecurityTxtResult;
+  robotsTxt: RobotsTxtResult | null;
+  sitemap: SitemapResult | null;
+  dnssec: DnssecResult | null;
+  securityTxt: SecurityTxtResult | null;
   traceroute: TracerouteResult | null;
   associatedHosts: AssociatedHostsResult | null;
-  linkedPages: LinkedPagesResult;
-  socialTags: SocialTagsResult;
-  archives: ArchivesResult;
-  rankingAndCarbon: RankingAndCarbonResult;
+  linkedPages: LinkedPagesResult | null;
+  socialTags: SocialTagsResult | null;
+  archives: ArchivesResult | null;
+  rankingAndCarbon: RankingAndCarbonResult | null;
   quality?: QualityResult | null;
 }
 

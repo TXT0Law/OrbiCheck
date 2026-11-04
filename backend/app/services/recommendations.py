@@ -113,8 +113,7 @@ def _dangerous_ports_recommendation(scan_detail: dict) -> dict | None:
 
 def _dnssec_recommendation(scan_detail: dict) -> dict | None:
     dnssec = scan_detail.get("dnssec") or {}
-    enabled = bool(dnssec.get("enabled")) if isinstance(dnssec, dict) else False
-    if enabled:
+    if not isinstance(dnssec, dict) or dnssec.get("enabled") is not False:
         return None
     return {
         "severity": "medium",

@@ -6,6 +6,11 @@ If the raw data already matches (or close enough), the transformer
 can do minimal reshaping.
 """
 
+from app.services.scan_evidence import (
+    is_skipped_payload, normalize_raw_results, observed_dnssec, observed_hsts,
+)
+
+
 MODULE_BATCHES = {
     "quick": [
         "status",
@@ -108,16 +113,7 @@ STATUS_SORT_ORDER = {
 
 def _is_skipped(module_result) -> bool:
     """Check if a 'successful' module was actually skipped due to missing config."""
-    raw = getattr(module_result, "raw_result", None)
-    if not isinstance(raw, dict):
-        return False
-    if raw.get("skipped"):
-        return True
-    data = raw.get("data", raw)
-    note = data.get("note", "") if isinstance(data, dict) else ""
-    if any(indicator in str(note).lower() for indicator in SKIPPED_INDICATORS):
-        return True
-    return False
+    return is_skipped_payload(getattr(module_result, "raw_result", None))
 
 
 def _determine_job_status(module_result) -> str | None:
@@ -321,6 +317,7 @@ def _safe_get(d: dict, key: str, default=None):
 
 
 _SSL_API_GRADES = frozenset({"A+", "A", "B", "C", "D", "F"})
+_SSL_OBSERVED_GRADES = _SSL_API_GRADES | frozenset({"A-", "B+", "B-", "C+", "C-", "D+", "D-"})
 
 
 def _normalize_grade(raw_grade: str) -> str:
@@ -1416,10 +1413,11 @@ def transform_tech_stack(raw: dict) -> list[dict]:
 def transform_hsts(raw: dict) -> dict:
     """Raw HSTS scanner payload -> HstsResult."""
     raw = _ensure_dict(raw)
-    header = raw.get("hstsHeader") or ""
+    header = raw.get("hstsHeader")
+    header = header if isinstance(header, str) else ""
     parsed_max_age = _parse_max_age(header)
     max_age = raw.get("maxAge")
-    if max_age is None:
+    if not isinstance(max_age, int) or isinstance(max_age, bool) or max_age < 0:
         max_age = parsed_max_age
 
     if "enabled" in raw:
@@ -2145,6 +2143,29 @@ def _format_issuer(issuer: dict) -> str:
     return f"{cn} / {org}" if org else cn
 
 
+def _observed_days_until(date_str: object) -> int | None:
+    """Return observed validity, preserving unknown and expired certificates."""
+    from datetime import datetime, timezone
+
+    if not isinstance(date_str, str) or not date_str:
+        return None
+    try:
+        parsed = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+        for fmt in ("%b %d %H:%M:%S %Y GMT", "%b %d %Y GMT"):
+            try:
+                parsed = datetime.strptime(date_str, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return (parsed - datetime.now(timezone.utc)).days
+
+
 def _days_until(date_str: str) -> int:
     from datetime import datetime, timezone
 
@@ -2340,8 +2361,12 @@ def _parse_max_age(header: str) -> int:
         return 0
     import re
 
-    match = re.search(r"max-age=(\d+)", header, re.IGNORECASE)
-    return int(match.group(1)) if match else 0
+    match = re.search(r'(?:^|;)\s*max-age\s*=\s*"?(\d+)"?\s*(?:;|$)', header, re.IGNORECASE)
+    try:
+        return int(match.group(1)) if match else 0
+    except ValueError:
+        return 0
+
 
 
 SECURITY_HEADERS_TO_CHECK = [
@@ -2439,47 +2464,51 @@ TRANSFORMERS = {
 }
 
 
-TRANSFORMER_DEFAULTS = {
-    "ssl": lambda: transform_ssl_check({}),
-    "headers": lambda: transform_headers({}),
-    "status": lambda: transform_status({}),
-    "dns": lambda: transform_dns({}),
-    "get-ip": lambda: transform_ip({}),
-    "whois": lambda: transform_whois({}),
-    "quality": lambda: transform_quality({}),
-    "associated-hosts": lambda: transform_associated_hosts({}),
-    "ports": lambda: transform_ports({}),
-    "screenshot": lambda: transform_screenshot({}),
-    "page-source": lambda: transform_page_source({}),
-    "tech-stack": lambda: transform_tech_stack({}),
-    "hsts": lambda: transform_hsts({}),
-    "cookies": lambda: transform_cookies({}),
-    "firewall": lambda: transform_firewall({}),
-    "threats": lambda: transform_threats({}),
-    "tls": lambda: transform_tls({}),
-    "redirects": lambda: transform_redirects({}),
-    "mail-config": lambda: transform_email_config({}),
-    "robots-txt": lambda: transform_robots_txt({}),
-    "sitemap": lambda: transform_sitemap({}),
-    "dnssec": lambda: transform_dnssec({}),
-    "security-txt": lambda: transform_security_txt({}),
-    "linked-pages": lambda: transform_linked_pages({}),
-    "social-tags": lambda: transform_social_tags({}),
-    "archives": lambda: transform_archives({}),
-    "features": lambda: transform_features({}, all_raw=None),
-    "ranking": lambda: transform_ranking_and_carbon(None, None, None),
-}
-
-
 def build_scan_detail(scan_id: str, url: str, all_raw_results: dict) -> dict:
     """Aggregate all transformed results into a ScanDetail-like dict."""
+    all_raw_results = normalize_raw_results(all_raw_results)
+    # Aggregates may consume several modules, but cannot manufacture a result
+    # solely from absent or skipped inputs.
+    sources = {
+        "ssl": ("ssl", "tls"),
+        "headers": ("headers",),
+        "dns": ("dns", "txt-records", "dns-server"),
+        "threats": ("threats", "block-lists"),
+        "features": ("features", "tech-stack"),
+        "ranking": ("rank", "carbon", "legacy-rank"),
+    }
     transformed = {}
     for key, transformer_fn in TRANSFORMERS.items():
+        if not any(name in all_raw_results for name in sources.get(key, (key,))):
+            transformed[key] = None
+            continue
         try:
             transformed[key] = transformer_fn(all_raw_results)
-        except (KeyError, TypeError, AttributeError):
-            fallback_factory = TRANSFORMER_DEFAULTS.get(key)
-            transformed[key] = fallback_factory() if fallback_factory else None
+        except (KeyError, TypeError, AttributeError, ValueError):
+            transformed[key] = None
+
+    hsts_observation = observed_hsts(all_raw_results)
+    transformed["hsts"] = transform_hsts(hsts_observation) if hsts_observation is not None else None
+    ssl = transformed.get("ssl")
+    if ssl is not None:
+        ssl_raw = all_raw_results.get("ssl", {})
+        tls_raw = all_raw_results.get("tls", {})
+        if not any(key in ssl_raw for key in ("bits", "valid_from", "valid_to", "subject", "issuer")) and not any(
+            key in tls_raw for key in ("grade", "certificates", "protocols", "connection", "ciphers")
+        ):
+            transformed["ssl"] = None
+        else:
+            ssl["hsts"] = transformed["hsts"]
+            ssl["daysRemaining"] = _observed_days_until(ssl_raw.get("valid_to"))
+            bits = ssl_raw.get("bits")
+            if not isinstance(bits, (int, float)) or isinstance(bits, bool) or bits <= 0:
+                if not isinstance(tls_raw.get("grade"), str) or tls_raw["grade"] not in _SSL_OBSERVED_GRADES:
+                    ssl["grade"] = None
+    dnssec_observation = observed_dnssec(all_raw_results.get("dnssec"))
+    if dnssec_observation is None:
+        transformed["dnssec"] = None
+    elif transformed.get("dnssec") is not None:
+        transformed["dnssec"]["enabled"] = dnssec_observation
 
     return {
         "id": scan_id,

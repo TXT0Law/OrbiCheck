@@ -92,7 +92,7 @@ def test_v2_perfect_site_scores_95_to_100():
 
 @pytest.mark.unit
 def test_v2_minimal_site_scores_low():
-    raw = {"headers": {}}
+    raw = {"headers": {"server": "example"}}
     r = compute_security_score_v2(raw)
     assert r is not None
     assert r.score < 50
@@ -111,7 +111,7 @@ def test_v2_transport_category_ssl_expired_scores_low():
 
 @pytest.mark.unit
 def test_v2_http_security_missing_all_headers():
-    raw = {"headers": {}}
+    raw = {"headers": {"server": "example"}}
     r = compute_security_score_v2(raw)
     assert r is not None
     assert r.category_scores["http_security"] == 0
@@ -475,7 +475,7 @@ def test_compute_category_summary_returns_three_categories():
         assert "modulesChecked" in cat
         assert "issuesFound" in cat
         assert "status" in cat
-        assert cat["status"] in ("pass", "warn", "fail")
+        assert cat["status"] == "unknown"
 
 
 @pytest.mark.unit
@@ -501,7 +501,7 @@ def test_compute_category_summary_pass_when_no_issues():
     result = compute_category_summary(raw)
     for cat in result:
         if cat["issuesFound"] == 0:
-            assert cat["status"] == "pass"
+            assert cat["status"] == ("pass" if cat["modulesChecked"] else "unknown")
 
 
 @pytest.mark.unit

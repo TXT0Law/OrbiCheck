@@ -215,7 +215,7 @@ def test_compute_scan_diff_does_not_count_skipped_module_as_new_risk() -> None:
 def test_compute_scan_diff_scores_only_shared_successful_modules() -> None:
     healthy_ssl = _ssl_module(days_remaining=200)
     base = _scan(
-        module_results=[healthy_ssl, _module("hsts", raw={"compatible": False})]
+        module_results=[healthy_ssl, _module("hsts", raw={"enabled": False})]
     )
     compare = _scan(
         module_results=[
@@ -234,9 +234,9 @@ def test_compute_scan_diff_scores_only_shared_successful_modules() -> None:
 
 @pytest.mark.unit
 def test_compute_scan_diff_accepts_http_security_as_header_evidence() -> None:
-    base = _scan(module_results=[_module("http-security", raw={})])
+    base = _scan(module_results=[_module("http-security", raw={"contentSecurityPolicy": False})])
     compare = _scan(
-        module_results=[_module("http-security", raw={"content-security-policy": "default-src 'self'"})]
+        module_results=[_module("http-security", raw={"contentSecurityPolicy": True})]
     )
 
     diff = compute_scan_diff(base, compare)
@@ -250,8 +250,8 @@ def test_compute_scan_diff_accepts_http_security_as_header_evidence() -> None:
 @pytest.mark.unit
 def test_compute_scan_diff_limited_view_does_not_invent_removed_finding() -> None:
     common_modules = [
-        _module("headers", raw={}),
-        _module("hsts", raw={"compatible": False}),
+        _module("headers", raw={"content-type": "text/html"}),
+        _module("hsts", raw={"enabled": False}),
         _module("dnssec", raw={"enabled": False}),
     ]
     base = _scan(module_results=[*common_modules, _ssl_module(days_remaining=200)])
@@ -335,3 +335,23 @@ def test_constants_have_sane_defaults() -> None:
     assert TIMELINE_RANGE_DAYS["7d"] == 7
     assert TIMELINE_RANGE_DAYS["30d"] == 30
     assert TIMELINE_RANGE_DAYS["90d"] == 90
+
+
+@pytest.mark.unit
+def test_partial_http_security_result_cannot_prove_csp_was_fixed() -> None:
+    base = _scan(module_results=[_module("http-security", raw={"contentSecurityPolicy": False})])
+    compare = _scan(module_results=[_module("http-security", raw={"xFrameOptions": True})])
+
+    diff = compute_scan_diff(base, compare)
+    assert diff["removedFindings"] == []
+    assert all(value == 0 for value in diff["severityDelta"]["delta"].values())
+    assert diff["breakdownDelta"]["delta"] is None
+
+
+@pytest.mark.unit
+def test_expiry_change_is_detected_when_unrelated_certificate_metadata_changes() -> None:
+    before = _ssl_module(days_remaining=200)
+    after = _ssl_module(days_remaining=-10)
+    after.raw_result.pop("subject")
+    diff = compute_scan_diff(_scan(module_results=[before]), _scan(module_results=[after]))
+    assert [item["title"] for item in diff["addedFindings"]] == ["SSL certificate expired"]

@@ -21,14 +21,19 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.scan import ModuleStatus, Scan, ScanStatus
-from app.services.finding_identity import finding_evidence_modules, finding_rule_identity
+from app.models.scan import Scan, ScanStatus
+from app.services.finding_identity import (
+    finding_evidence_modules,
+    finding_measurement_coverage,
+    finding_rule_identity,
+    finding_was_measured,
+)
+from app.services.scan_evidence import collect_scan_evidence
 from app.services.security_analyzer import (
     compute_security_score_v2,
     compute_severity_counts,
     extract_key_findings,
 )
-from app.services.transformers import _is_skipped
 
 
 # ─── Constants ──────────────────────────────────────────────────────────
@@ -143,13 +148,7 @@ def _build_all_raw(module_results: Sequence) -> dict:
     Mirrors ``_compose_scan_detail_payload`` so timeline + diff agree with
     the dashboard on which modules contribute to severity / findings.
     """
-    return {
-        m.module_name: m.raw_result
-        for m in module_results
-        if m.status == ModuleStatus.SUCCESS
-        and isinstance(m.raw_result, dict)
-        and not _is_skipped(m)
-    }
+    return collect_scan_evidence(module_results)
 
 
 def _category_scores_camel(scores: dict | None) -> dict[str, float] | None:
@@ -269,7 +268,8 @@ def compute_scan_diff(
     pair — stable enough for the same security_analyzer ruleset and short
     enough that two concurrent scans of an unchanged target collapse to
     zero added / removed entries. Only modules with successful results on
-    both sides can prove a finding was added or removed. The display limit
+    both sides with matching measurement coverage can prove a finding was
+    added or removed. The display limit
     applies after comparison, so a finding falling out of the top list is
     not mistaken for a fix. Severity and category deltas use the same
     shared-module subset to avoid treating a failed probe as an improvement.
@@ -277,7 +277,11 @@ def compute_scan_diff(
     base_raw = _build_all_raw(base_scan.module_results)
     compare_raw = _build_all_raw(compare_scan.module_results)
 
-    shared_modules = set(base_raw) & set(compare_raw)
+    shared_modules = {
+        module for module in set(base_raw) & set(compare_raw)
+        if finding_measurement_coverage({module: base_raw[module]})
+        == finding_measurement_coverage({module: compare_raw[module]})
+    }
     base_shared_raw = {module: base_raw[module] for module in shared_modules}
     compare_shared_raw = {module: compare_raw[module] for module in shared_modules}
     base_findings = [
@@ -294,10 +298,10 @@ def compute_scan_diff(
     compare_keys = {_finding_key(f) for f in compare_findings}
 
     added: list[FindingDelta] = [
-        _to_finding_delta(f) for f in compare_findings if _finding_key(f) not in base_keys
+        _to_finding_delta(f) for f in compare_findings if _finding_key(f) not in base_keys and finding_was_measured(f, base_shared_raw)
     ][:key_findings_limit]
     removed: list[FindingDelta] = [
-        _to_finding_delta(f) for f in base_findings if _finding_key(f) not in compare_keys
+        _to_finding_delta(f) for f in base_findings if _finding_key(f) not in compare_keys and finding_was_measured(f, compare_shared_raw)
     ][:key_findings_limit]
 
     base_severity = _normalize_severity(compute_severity_counts(base_shared_raw))

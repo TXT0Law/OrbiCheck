@@ -96,7 +96,18 @@ export const ScanDetailResponseSchema = z.object({
   duration: z.string().nullable(),
   securityScore: z.number().nullable(),
   severity: severityCountsSchema,
-  categorySummary: z.array(z.unknown()),
+  categorySummary: z.array(z.object({
+    category: z.string(),
+    label: z.string(),
+    modulesChecked: z.number(),
+    issuesFound: z.number(),
+    status: z.enum(["pass", "warn", "fail", "unknown"]),
+  }).passthrough()),
+  ssl: z.object({
+    grade: z.enum(["A+", "A", "B", "C", "D", "F"]).nullable(),
+    daysRemaining: z.number().nullable(),
+    hsts: z.object({ enabled: z.boolean() }).passthrough().nullable().optional(),
+  }).passthrough().nullable().optional(),
   keyFindings: z.array(z.unknown()),
   moduleErrors: z.record(z.string(), z.unknown()),
 }).passthrough();

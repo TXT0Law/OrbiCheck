@@ -10,6 +10,7 @@ from app.services.finding_identity import (
     FINDING_RULESET_VERSION,
     _RULE_IDS,
     finding_rule_identity,
+    finding_evidence_modules,
 )
 from app.services.security_analyzer import extract_key_findings
 
@@ -20,8 +21,8 @@ def test_current_finding_variants_have_reviewed_rule_ids() -> None:
         "ssl": {"bits": 32, "valid_to": "Jan 1 2020 GMT"},
         "threats": {"safeBrowsing": {"unsafe": True}},
         "ports": {"openPorts": [21, 1433]},
-        "headers": {},
-        "hsts": {"compatible": False},
+        "headers": {"content-type": "text/html"},
+        "hsts": {"enabled": False},
         "tls": {"connection": {"protocols": [{"name": "TLSv1.0", "supported": True}]}},
         "dnssec": {"enabled": False},
         "firewall": {"hasWaf": False},
@@ -63,3 +64,19 @@ def test_ssl_expiry_identity_survives_severity_and_title_change() -> None:
 def test_unknown_finding_requires_explicit_rule_review() -> None:
     with pytest.raises(ValueError, match="Unmapped finding rule"):
         finding_rule_identity({"module": "ssl", "title": "New unreviewed SSL rule"})
+
+
+@pytest.mark.unit
+def test_hsts_finding_credits_header_capture_without_crediting_unknown_probe() -> None:
+    finding = {"module": "hsts", "title": "HSTS not enabled"}
+    assert finding_evidence_modules(
+        finding, {"headers": {"Content-Type": "text/html"}, "hsts": {"compatible": False}}
+    ) == frozenset({"headers"})
+
+
+@pytest.mark.unit
+def test_hsts_finding_credits_each_independent_negative_observation() -> None:
+    finding = {"module": "hsts", "title": "HSTS not enabled"}
+    assert finding_evidence_modules(
+        finding, {"headers": {"content-type": "text/html"}, "hsts": {"enabled": False}}
+    ) == frozenset({"headers", "hsts"})

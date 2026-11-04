@@ -95,7 +95,7 @@ def test_projection_attributes_only_sources_that_support_a_shared_finding() -> N
 
 @pytest.mark.unit
 def test_projection_has_stable_scan_rule_idempotency_key() -> None:
-    scan = _scan(_module("http-security", {}))
+    scan = _scan(_module("http-security", {"contentSecurityPolicy": False}))
 
     first = build_finding_observations(scan)
     repeated = build_finding_observations(scan)
@@ -119,7 +119,7 @@ def test_projection_skips_noncompleted_scans() -> None:
 
 @pytest.mark.unit
 def test_projection_rejects_completed_scan_without_completion_time() -> None:
-    scan = _scan(_module("headers", {}))
+    scan = _scan(_module("headers", {"content-type": "text/html"}))
     scan.completed_at = None
 
     with pytest.raises(ValueError, match="completed_at"):

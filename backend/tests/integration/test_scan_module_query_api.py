@@ -113,7 +113,7 @@ async def test_get_scan_module_returns_pending_module_shape(
     payload = response.json()["data"]
     assert payload["module"] == "headers"
     assert payload["status"] == "pending"
-    assert payload["data"]["overallGrade"] == "F"
+    assert payload["data"] is None
 
 
 @pytest.mark.integration
@@ -148,5 +148,5 @@ async def test_get_scan_module_includes_failed_module_error_info(
     assert response.status_code == 200
     payload = response.json()["data"]
     assert payload["status"] == "failed"
-    assert payload["data"]["ogTitle"] is None
+    assert payload["data"] is None
     assert payload["durationMs"] == 999

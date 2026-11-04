@@ -35,6 +35,7 @@ from app.services.security_analyzer import (
     resolve_security_score_for_detail,
 )
 from app.services.transformers import build_scan_detail
+from app.services.scan_evidence import collect_scan_evidence, is_skipped_payload
 
 __all__ = [
     "build_report_payload_sync",
@@ -195,6 +196,32 @@ def _ssl_chain_preview(detail: dict) -> list[dict]:
     return [entry for entry in chain[:SSL_CHAIN_PREVIEW_LIMIT] if isinstance(entry, dict)]
 
 
+def _evidence_flag(detail: dict, module: str, key: str, positive: str, negative: str) -> str:
+    value = detail.get(module)
+    if not isinstance(value, dict) or key not in value or value[key] is None:
+        return "unknown"
+    return positive if value[key] else negative
+
+
+def _module_duration_text(duration: object) -> str:
+    return f"{duration}ms" if isinstance(duration, (int, float)) else "N/A"
+
+
+def _open_ports_text(detail: dict) -> str:
+    if detail.get("ports") is None:
+        return "unknown"
+    entries = _port_entries(detail.get("ports"))
+    return ", ".join(str(port.get("port")) for port in entries[:8]) or "none detected"
+
+
+def _header_presence(status: object) -> str:
+    if status == "pass":
+        return "present"
+    if status in {"missing", "fail"}:
+        return "missing"
+    return "unknown"
+
+
 def _ssl_days_remaining_text(detail: dict) -> str:
     ssl = detail.get("ssl") or {}
     days = ssl.get("daysRemaining") if isinstance(ssl, dict) else None
@@ -290,23 +317,24 @@ def _safe_domain(url: str) -> str:
 
 
 def _collect_raw_results(module_results: list[ScanModuleResult]) -> dict[str, dict]:
-    return {
-        item.module_name: item.raw_result
-        for item in module_results
-        if item.raw_result is not None
-    }
+    return collect_scan_evidence(module_results)
 
 
 def _build_module_summary(module_results: list[ScanModuleResult]) -> list[dict[str, str | int | None]]:
-    return [
-        {
+    summary: list[dict[str, str | int | None]] = []
+    for item in module_results:
+        status = item.status.value
+        duration = item.duration_ms
+        if status == ModuleStatus.SUCCESS.value and not collect_scan_evidence([item]):
+            status = "skipped" if is_skipped_payload(item.raw_result) else "unavailable"
+            duration = None
+        summary.append({
             "module": item.module_name,
-            "status": item.status.value,
-            "duration": item.duration_ms,
+            "status": status,
+            "duration": duration,
             "error": item.error_message,
-        }
-        for item in module_results
-    ]
+        })
+    return summary
 
 
 def _sum_module_duration_ms(module_results: list[ScanModuleResult]) -> int:
@@ -604,7 +632,6 @@ def render_markdown(report_data: dict) -> str:
     breakdown = _read_breakdown_category_scores(scan)
     category_summary = scan.get("categorySummary") or []
     headers = (detail.get("headers") or {}).get("securityChecks", [])
-    ports = _port_entries(detail.get("ports"))
     uptime = (report_data.get("monitor") or {}).get("uptime") or {}
     monitor_ssl = (report_data.get("monitor") or {}).get("ssl") or {}
     lines = [
@@ -684,7 +711,7 @@ def render_markdown(report_data: dict) -> str:
             ),
             (
                 f"- TLS grade: {_stringify((detail.get('tls') or {}).get('grade'))}  |  "
-                f"HSTS: {'enabled' if (detail.get('hsts') or {}).get('enabled') else 'disabled'}"
+                f"HSTS: {_evidence_flag(detail, 'hsts', 'enabled', 'enabled', 'disabled')}"
             ),
         ]
     )
@@ -716,7 +743,7 @@ def render_markdown(report_data: dict) -> str:
     for check in headers[:8]:
         lines.append(
             f"| {check.get('name', 'unknown')} | "
-            f"{'yes' if check.get('status') == 'pass' else 'no'} | "
+            f"{_header_presence(check.get('status'))} | "
             f"{_truncate(check.get('value'))} |"
         )
 
@@ -732,30 +759,26 @@ def render_markdown(report_data: dict) -> str:
                 f"- DNS records: A={len((detail.get('dns') or {}).get('a', []))}, "
                 f"MX={len((detail.get('dns') or {}).get('mx', []))}, "
                 f"NS={len((detail.get('dns') or {}).get('ns', []))}"
+                if detail.get("dns") is not None else "- DNS records: unknown"
             ),
-            f"- DNSSEC: {'enabled' if (detail.get('dnssec') or {}).get('enabled') else 'disabled'}",
+            f"- DNSSEC: {_evidence_flag(detail, 'dnssec', 'enabled', 'enabled', 'disabled')}",
             (
-                "- Open ports: "
-                + (
-                    ", ".join(str(port.get("port")) for port in ports[:8] if isinstance(port, dict))
-                    if ports
-                    else "none detected"
-                )
+                f"- Open ports: {_open_ports_text(detail)}"
             ),
             (
                 f"- Firewall/WAF: "
-                f"{'detected' if (detail.get('firewall') or {}).get('hasWaf') else 'not detected'}"
+                f"{_evidence_flag(detail, 'firewall', 'hasWaf', 'detected', 'not detected')}"
             ),
             "",
             "### 3.4 Threat Intelligence",
             (
                 f"- Threat listed: "
-                f"{'yes' if (detail.get('threats') or {}).get('safeBrowsing') else 'no evidence'}"
+                f"{_evidence_flag(detail, 'threats', 'safeBrowsing', 'yes', 'no evidence')}"
             ),
             "",
             "### 3.5 Content & Best Practices",
-            f"- Robots.txt: {'present' if (detail.get('robotsTxt') or {}).get('robots') else 'absent'}",
-            f"- Sitemap: {'present' if (detail.get('sitemap') or {}).get('items') else 'absent'}",
+            f"- Robots.txt: {_evidence_flag(detail, 'robotsTxt', 'robots', 'present', 'absent')}",
+            f"- Sitemap: {_evidence_flag(detail, 'sitemap', 'items', 'present', 'absent')}",
             "",
             "**Tech Stack (by category)**",
         ]
@@ -773,7 +796,7 @@ def render_markdown(report_data: dict) -> str:
                 line += f" (+{extra} more)"
             lines.append(line)
     else:
-        lines.append("- _no technologies detected_")
+        lines.append("- _no technologies detected_" if detail.get("techStack") is not None else "- Technology evidence unavailable.")
     lines.append("")
 
     if report_data.get("monitor"):
@@ -820,7 +843,7 @@ def render_markdown(report_data: dict) -> str:
     lines.extend(["", "---", "", "## 6. Appendix", "", "### A. Module Execution Summary", "", "| Module | Status | Duration |", "|---|---|---:|"])
     for item in scan["moduleSummary"]:
         lines.append(
-            f"| {item['module']} | {item['status']} | {_stringify(item['duration'], '0')}ms |"
+            f"| {item['module']} | {item['status']} | {_module_duration_text(item['duration'])} |"
         )
     lines.extend(["", "### B. Failed Modules", "", "| Module | Error |", "|---|---|"])
     for item in scan["moduleErrors"]:
@@ -866,7 +889,7 @@ def _render_pdf_cover(pdf, scan: dict, report_data: dict) -> None:
     pdf.cell(0, 6, "Overall Score", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.set_text_color(17, 24, 39)  # gray-900
     pdf.set_font("Helvetica", "B", COVER_SCORE_FONT_SIZE)
-    score_text = _stringify(score, "—")
+    score_text = _stringify(score, "N/A")
     pdf.cell(0, COVER_SCORE_BOX_HEIGHT, score_text, new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.set_font("Helvetica", "B", COVER_DOMAIN_FONT_SIZE)
     pdf.cell(0, 8, f"Grade {_score_grade(score)}", new_x="LMARGIN", new_y="NEXT", align="C")
@@ -929,7 +952,6 @@ def render_pdf(report_data: dict) -> bytes:
     breakdown = _read_breakdown_category_scores(scan)
     category_summary = scan.get("categorySummary") or []
     headers = (detail.get("headers") or {}).get("securityChecks", [])
-    ports = _port_entries(detail.get("ports"))
 
     # Cover page (T3.3) — standalone, no body content.
     pdf.add_page()
@@ -942,7 +964,7 @@ def render_pdf(report_data: dict) -> bytes:
     score_radar_png = _safe_chart_bytes(render_score_radar, breakdown)
     module_bar_png = _safe_chart_bytes(
         render_module_duration_bar,
-        scan["moduleSummary"],
+        [item for item in scan["moduleSummary"] if item.get("duration") is not None],
         limit=PDF_MODULE_DURATION_BAR_LIMIT,
     )
 
@@ -1045,7 +1067,7 @@ def render_pdf(report_data: dict) -> bytes:
         ),
         (
             f"- TLS grade: {_stringify((detail.get('tls') or {}).get('grade'))}, "
-            f"HSTS: {'enabled' if (detail.get('hsts') or {}).get('enabled') else 'disabled'}"
+            f"HSTS: {_evidence_flag(detail, 'hsts', 'enabled', 'enabled', 'disabled')}"
         ),
         *chain_lines,
         "",
@@ -1055,7 +1077,7 @@ def render_pdf(report_data: dict) -> bytes:
         for check in headers[:5]:
             category_lines.append(
                 f"- {check.get('name', 'unknown')}: "
-                f"{'present' if check.get('status') == 'pass' else 'missing'}"
+                f"{_header_presence(check.get('status'))}"
             )
     else:
         category_lines.append("- No header details available.")
@@ -1064,28 +1086,29 @@ def render_pdf(report_data: dict) -> bytes:
         [
             "",
             "DNS & Infrastructure",
+            f"- DNSSEC: {_evidence_flag(detail, 'dnssec', 'enabled', 'enabled', 'disabled')}",
             (
                 f"- IP: {_stringify((detail.get('ip') or {}).get('ip'))} "
                 f"({_stringify((detail.get('ip') or {}).get('country'))})"
             ),
             (
                 f"- Open ports: "
-                f"{', '.join(str(port.get('port')) for port in ports[:8] if isinstance(port, dict)) or 'none detected'}"
+                f"{_open_ports_text(detail)}"
             ),
             (
                 f"- Firewall/WAF: "
-                f"{'detected' if (detail.get('firewall') or {}).get('hasWaf') else 'not detected'}"
+                f"{_evidence_flag(detail, 'firewall', 'hasWaf', 'detected', 'not detected')}"
             ),
             "",
             "Threat Intelligence",
             (
                 f"- Threat listed: "
-                f"{'yes' if (detail.get('threats') or {}).get('safeBrowsing') else 'no evidence'}"
+                f"{_evidence_flag(detail, 'threats', 'safeBrowsing', 'yes', 'no evidence')}"
             ),
             "",
             "Content & Best Practices",
-            f"- Robots.txt: {'present' if (detail.get('robotsTxt') or {}).get('robots') else 'absent'}",
-            f"- Sitemap: {'present' if (detail.get('sitemap') or {}).get('items') else 'absent'}",
+            f"- Robots.txt: {_evidence_flag(detail, 'robotsTxt', 'robots', 'present', 'absent')}",
+            f"- Sitemap: {_evidence_flag(detail, 'sitemap', 'items', 'present', 'absent')}",
         ]
     )
 
@@ -1102,7 +1125,7 @@ def render_pdf(report_data: dict) -> bytes:
                 line += f" (+{extra} more)"
             category_lines.append(line)
     else:
-        category_lines.extend(["", "Tech Stack: no technologies detected"])
+        category_lines.extend(["", "Tech Stack: no technologies detected" if detail.get("techStack") is not None else "Tech Stack: unknown"])
 
     _pdf_write_section(pdf, "Category Assessment", "\n".join(category_lines))
 
@@ -1124,7 +1147,7 @@ def render_pdf(report_data: dict) -> bytes:
             pdf.cell(
                 0,
                 5,
-                f"- {item['module']}: {_stringify(item['duration'], '0')}ms ({item['status']})",
+                f"- {item['module']}: {_module_duration_text(item['duration'])} ({item['status']})",
                 new_x="LMARGIN",
                 new_y="NEXT",
             )
@@ -1156,7 +1179,7 @@ def render_pdf(report_data: dict) -> bytes:
     appendix_lines = [
         "Module Execution Summary",
         *[
-            f"- {item['module']}: {item['status']} ({_stringify(item['duration'], '0')}ms)"
+            f"- {item['module']}: {item['status']} ({_module_duration_text(item['duration'])})"
             for item in scan["moduleSummary"][:12]
         ],
     ]
@@ -1217,7 +1240,7 @@ def render_html(report_data: dict) -> str:
     score_radar = _safe_chart_bytes(render_score_radar, breakdown_raw)
     module_bar = _safe_chart_bytes(
         render_module_duration_bar,
-        scan["moduleSummary"],
+        [item for item in scan["moduleSummary"] if item.get("duration") is not None],
         limit=PDF_MODULE_DURATION_BAR_LIMIT,
     )
     template = _jinja_env.get_template(_HTML_TEMPLATE_NAME)

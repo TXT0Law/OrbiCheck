@@ -58,7 +58,9 @@ def test_backfill_page_selects_only_unprojected_completed_scans(
 
 
 @pytest.mark.unit
-def test_backfill_isolates_malformed_evidence_without_marking_it_projected() -> None:
+def test_backfill_isolates_malformed_evidence_without_marking_it_projected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     malformed_id = uuid4()
     valid_id = uuid4()
     malformed_scan = SimpleNamespace(
@@ -112,6 +114,16 @@ def test_backfill_isolates_malformed_evidence_without_marking_it_projected() -> 
                 return SimpleNamespace(scalar_one=lambda: scan)
             return SimpleNamespace(rowcount=1)
 
+    original_build = finding_observation.build_finding_observations
+
+    def fail_malformed_projection(
+        scan: SimpleNamespace,
+    ) -> list[finding_observation.FindingObservationCandidate]:
+        if scan.id == malformed_id:
+            raise ValueError("Malformed evidence cannot be projected")
+        return original_build(scan)
+
+    monkeypatch.setattr(finding_observation, "build_finding_observations", fail_malformed_projection)
     page = finding_observation.backfill_finding_observations_page(_Session())
 
     assert page.processed_scans == 2

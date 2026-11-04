@@ -78,9 +78,9 @@ async def test_scan_detail_stays_renderable_with_partial_module_failures(monkeyp
 
     data = payload["data"]
 
-    assert data["whois"] is not None
+    assert data["whois"] is None
     assert data["ports"] is not None
-    assert data["features"] is not None
+    assert data["features"] is None
 
     module_errors = data["moduleErrors"]
     assert "whois" in module_errors

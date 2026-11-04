@@ -25,6 +25,7 @@ from app.core.exceptions import (
 )
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.tasks.scan_tasks import execute_scan
+from app.services.scan_evidence import collect_scan_evidence
 from app.services.security_analyzer import compute_security_score_v2
 from app.services.scan_client import call_scan_module, is_successful_scan_status
 from app.services.scan_options import PORTS_MODULE, port_scan_authorized
@@ -65,10 +66,7 @@ async def _refresh_scan_security_score(db: AsyncSession, scan_id: uuid.UUID) -> 
     scan_row = result.scalar_one_or_none()
     if scan_row is None:
         return
-    all_raw: dict[str, dict] = {}
-    for m in scan_row.module_results:
-        if m.status == ModuleStatus.SUCCESS and isinstance(m.raw_result, dict):
-            all_raw[m.module_name] = m.raw_result
+    all_raw = collect_scan_evidence(scan_row.module_results)
     if not all_raw:
         return
     try:
