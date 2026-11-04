@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from kombu.exceptions import OperationalError
 
 from app.api.v1.endpoints import report_schedules as report_schedule_endpoints
 from app.services import report_schedule_service
+from app.tasks import report_schedule_tasks
 
 
 def _schedule_response(**overrides):
@@ -94,3 +97,27 @@ async def test_run_report_schedule_now_endpoint(async_client, monkeypatch) -> No
 
     assert response.status_code == 200
     assert response.json()["data"]["runId"] == str(run_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_now_returns_durable_run_id_during_broker_outage(async_client, monkeypatch) -> None:
+    run = SimpleNamespace(id=uuid4())
+
+    async def create_pending_run(*_args):
+        return run
+
+    monkeypatch.setattr(report_schedule_endpoints.settings, "APP_ENV", "test")
+    monkeypatch.setattr(report_schedule_service, "create_schedule_run", create_pending_run)
+    publish = MagicMock(side_effect=OperationalError("broker unavailable"))
+    monkeypatch.setattr(report_schedule_tasks.generate_scheduled_report_run, "apply_async", publish)
+    recovery_db = MagicMock()
+    recovery_db.__enter__.return_value = recovery_db
+    monkeypatch.setattr(report_schedule_tasks, "_get_sync_session", lambda: recovery_db)
+
+    response = await async_client.post(f"/api/v1/report-schedules/{uuid4()}/run-now")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["runId"] == str(run.id)
+    publish.assert_called_once_with(args=(str(run.id),), retry=False, ignore_result=True)
+    recovery_db.commit.assert_called_once()

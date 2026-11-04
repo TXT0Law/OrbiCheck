@@ -43,10 +43,12 @@ logger = structlog.get_logger(__name__)
 RECENT_RUN_LIMIT = 5
 LIST_RUN_LIMIT = 50
 DISPATCH_BATCH_LIMIT = 25
+REPORT_DISPATCH_LEASE = timedelta(minutes=15)
 MONTHLY_LOOKAHEAD_MONTHS = 24
 WEEKLY_LOOKAHEAD_DAYS = 14
 REPORT_LINK_FALLBACK = "/dashboard/reports"
 SLACK_TEXT_LIMIT = 280
+SCHEDULED_WEBHOOK_MAX_REDIRECTS = 0
 NOTIFICATION_SETTINGS_KEY_PREFIX = "orbicheck:user"
 
 
@@ -327,6 +329,7 @@ async def create_schedule_run(
     run = ReportScheduleRun(
         schedule_id=schedule.id,
         status=ReportScheduleRunStatus.PENDING,
+        allow_paused=not schedule.is_enabled,
     )
     db.add(run)
     await db.flush()
@@ -374,6 +377,7 @@ def dispatch_due_schedules_sync(db: Session, now: datetime | None = None) -> lis
         run = ReportScheduleRun(
             schedule_id=schedule.id,
             status=ReportScheduleRunStatus.PENDING,
+            next_dispatch_at=checked_at,
         )
         db.add(run)
         schedule.last_run_at = checked_at
@@ -389,6 +393,25 @@ def dispatch_due_schedules_sync(db: Session, now: datetime | None = None) -> lis
         runs.append(run)
     db.flush()
     return runs
+
+
+def reserve_pending_report_runs(
+    db: Session, now: datetime, reserved_until: datetime,
+) -> list[uuid.UUID]:
+    """Reserve a fair, bounded page before releasing the transaction to publish."""
+    rows = db.scalars(
+        select(ReportScheduleRun)
+        .where(
+            ReportScheduleRun.status == ReportScheduleRunStatus.PENDING,
+            ReportScheduleRun.next_dispatch_at <= now,
+        )
+        .order_by(ReportScheduleRun.next_dispatch_at, ReportScheduleRun.id)
+        .limit(DISPATCH_BATCH_LIMIT)
+        .with_for_update(skip_locked=True)
+    ).all()
+    for run in rows:
+        run.next_dispatch_at = reserved_until
+    return [run.id for run in rows]
 
 
 def _notification_settings_key(user_id: int) -> str:
@@ -458,7 +481,12 @@ async def deliver_scheduled_report(
     scan: Scan,
 ) -> dict[str, Any]:
     summary: dict[str, Any] = {"channels": {}, "reportUrl": _report_link(report.id)}
-    if "email" in (schedule.delivery_channels or []):
+    channels = schedule.delivery_channels
+    if not isinstance(channels, list) or any(channel not in ("email", "slack") for channel in channels):
+        return {**summary, "runId": str(run.id), "success": False, "error": "invalid_delivery_channels"}
+    if "email" in channels:
+        if not isinstance(schedule.email_recipients, list) or not schedule.email_recipients:
+            return {**summary, "runId": str(run.id), "success": False, "error": "email_recipients_missing"}
         email_results: list[dict[str, Any]] = []
         for recipient in schedule.email_recipients or []:
             started = time.perf_counter()
@@ -473,6 +501,8 @@ async def deliver_scheduled_report(
             except (aiosmtplib.SMTPException, OSError) as exc:
                 sent = False
                 error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+                if isinstance(exc, (OSError, aiosmtplib.SMTPServerDisconnected)):
+                    summary["outcome"] = "unconfirmed"
             else:
                 error = None if sent else "email_not_sent"
             email_results.append(
@@ -485,7 +515,7 @@ async def deliver_scheduled_report(
             )
         summary["channels"]["email"] = email_results
 
-    if "slack" in (schedule.delivery_channels or []):
+    if "slack" in channels:
         started = time.perf_counter()
         target = _resolve_slack_target(schedule.user_id)
         if not target:
@@ -497,8 +527,15 @@ async def deliver_scheduled_report(
         else:
             try:
                 target = validate_target_url(target)
-                await post_json(target, _build_slack_payload(schedule, report, scan))
+                await post_json(
+                    target, _build_slack_payload(schedule, report, scan),
+                    max_redirects=SCHEDULED_WEBHOOK_MAX_REDIRECTS,
+                )
             except (ValueError, httpx.HTTPError) as exc:
+                if isinstance(exc, httpx.RequestError) or (
+                    isinstance(exc, httpx.HTTPStatusError) and exc.response.is_server_error
+                ):
+                    summary["outcome"] = "unconfirmed"
                 summary["channels"]["slack"] = {
                     "success": False,
                     "error": f"{exc.__class__.__name__}: {str(exc)[:160]}",
