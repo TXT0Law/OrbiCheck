@@ -19,7 +19,7 @@ import httpx
 import structlog
 
 from app.core.config import settings
-from app.services.outbound_http import request_safely
+from app.services.outbound_http import DEFAULT_MAX_REDIRECTS, request_safely
 from app.services.notification_channels.types import (
     AlertPayload,
     ChannelDispatchResult,
@@ -129,6 +129,7 @@ async def post_json(
     *,
     expected_status: tuple[int, ...] = (200, 201, 202, 204),
     extra_headers: dict[str, str] | None = None,
+    max_redirects: int = DEFAULT_MAX_REDIRECTS,
 ) -> tuple[int, str]:
     """POST ``body`` as JSON and return ``(status_code, response_text)``.
 
@@ -148,6 +149,7 @@ async def post_json(
         headers=headers,
         timeout=settings.NOTIFICATION_CHANNEL_TIMEOUT_S,
         require_https=True,
+        max_redirects=max_redirects,
     )
     if response.status_code not in expected_status:
         raise httpx.HTTPStatusError(

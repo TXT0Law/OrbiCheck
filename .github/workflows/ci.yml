@@ -112,6 +112,16 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
         run: bash scripts/ci/check-harness.sh "${BASE_SHA}" "${HEAD_SHA}"
 
+      - name: Install services for the weekly report recovery drill
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16 redis-server
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+
+      - name: Exercise weekly report recovery with a real worker
+        timeout-minutes: 5
+        run: make test-weekly-report-recovery
+
   frontend:
     needs: lint
     runs-on: ubuntu-latest

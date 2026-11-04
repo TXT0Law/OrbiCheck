@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, false, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -72,6 +72,9 @@ class ReportSchedule(Base):
 
 class ReportScheduleRun(Base):
     __tablename__ = "report_schedule_runs"
+    __table_args__ = (
+        Index("ix_report_run_dispatch", "status", "next_dispatch_at", "id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -90,6 +93,10 @@ class ReportScheduleRun(Base):
         nullable=False,
         default=ReportScheduleRunStatus.PENDING,
     )
+    next_dispatch_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    allow_paused: Mapped[bool] = mapped_column(Boolean, server_default=false(), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

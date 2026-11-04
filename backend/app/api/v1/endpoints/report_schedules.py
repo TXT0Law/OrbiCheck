@@ -1,7 +1,9 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.api.v1.schemas.common import SuccessResponse
 from app.api.v1.schemas.report_schedule import (
@@ -14,7 +16,7 @@ from app.api.v1.schemas.report_schedule import (
 from app.core.config import settings
 from app.core.deps import CurrentUser, get_current_user, get_db
 from app.services import report_schedule_service
-from app.tasks.report_schedule_tasks import generate_scheduled_report_run
+from app.tasks.report_schedule_tasks import generate_scheduled_report_run, publish_report_run
 
 router = APIRouter(prefix="/report-schedules", tags=["report-schedules"])
 
@@ -88,12 +90,17 @@ async def run_report_schedule_now(
     db: AsyncSession = Depends(get_db),
 ) -> SuccessResponse[dict]:
     run = await report_schedule_service.create_schedule_run(db, schedule_id, current_user.id)
+    run_id = run.id
+    reserved_until = datetime.now(timezone.utc) + report_schedule_service.REPORT_DISPATCH_LEASE
+    run.next_dispatch_at = reserved_until
     await db.commit()
     if settings.APP_ENV.lower() == "development":
-        background_tasks.add_task(generate_scheduled_report_run.run, str(run.id))
+        background_tasks.add_task(generate_scheduled_report_run.run, str(run_id))
     else:
-        generate_scheduled_report_run.delay(str(run.id))
-    return SuccessResponse(data={"runId": str(run.id)})
+        # The API tracks the durable run ID. Subscribing to a Redis result here
+        # would block the request during a broker outage before Celery can publish.
+        await run_in_threadpool(publish_report_run, run_id, reserved_until, ignore_result=True)
+    return SuccessResponse(data={"runId": str(run_id)})
 
 
 @router.get("/{schedule_id}/runs", response_model=SuccessResponse[ReportScheduleRunsResponse])
