@@ -109,6 +109,26 @@ class ReportScheduleUpdateRequest(BaseModel):
         return ReportScheduleBase.normalize_email_recipients(value)
 
 
+class ReportRunChannelResult(BaseModel):
+    channel: Literal["email", "slack"]
+    state: Literal["accepted", "failed", "partial", "unknown"]
+    accepted_count: int = 0
+    failed_count: int = 0
+    unknown_count: int = 0
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class ReportRunOperations(BaseModel):
+    artifact_state: Literal["missing", "pending", "generating", "completed", "failed"]
+    report_id: uuid.UUID | None = None
+    delivery_state: Literal["accepted", "failed", "partial", "unknown", "unconfirmed", "stored", "not_started"]
+    channels: list[ReportRunChannelResult] = Field(default_factory=list)
+    review_reason: Literal["delivery_unconfirmed", "missing_or_invalid_receipts"] | None = None
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
 class ReportScheduleRunResponse(BaseModel):
     id: uuid.UUID
     schedule_id: uuid.UUID
@@ -118,6 +138,7 @@ class ReportScheduleRunResponse(BaseModel):
     completed_at: datetime | None = None
     error_message: str | None = None
     delivery_summary: dict[str, Any] | None = None
+    operations: ReportRunOperations
 
     model_config = ConfigDict(
         from_attributes=True,

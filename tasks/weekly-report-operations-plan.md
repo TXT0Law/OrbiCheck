@@ -8,13 +8,13 @@
 
 可複用的產品入口是 Reports → Schedules、`POST /report-schedules/{id}/run-now` 與 `GET /report-schedules/{id}/runs`。既有前端 client 能讀取歷史，排程表只呈現最近一輪的摘要。`run-now` 建立新的 run，不能用來重試某個舊 run。[API](../backend/app/api/v1/endpoints/report_schedules.py) · [前端 client](../lib/api/report-schedules.ts) · [排程列表](../components/report/report-schedule-list.tsx)
 
-## 本批 W0　同一週報在派工失敗後可以接手
+## 已完成 W0　同一週報在派工失敗後可以接手
 
-**Owner** Backend 與 Infra。這是本次 `codex/weekly-report-recovery` 的交付與驗收範圍。接手者從 PR、checks 和最新 `main` 判定實際進度。
+**Owner** Backend 與 Infra。已合併至 `main@ef353dc`。1,084 項後端測試通過。故障演練中，同一 run 在 broker 恢復後僅補派一次，worker 重啟後僅產生一份報告，SMTP 接受一封郵件。[PR #52 與故障記錄](https://github.com/TXT0Law/OrbiCheck/pull/52) · [main CI](https://github.com/TXT0Law/OrbiCheck/actions/runs/41817665359)
 
-- [ ] 到期週報及手動 `run-now` 建立持久化待處理工作。若資料庫已提交、broker 未收到訊息，broker 恢復後能派送原本的 `runId`。同一排程週期只有一個 run。手動請求驗證回傳的 runId 和後續查詢指向同一筆。
-- [ ] 兩個 worker 收到同一項工作只有一個能開始執行。已進入外送或已完成的 run 再收到訊息，不會重做外部投遞。外部可能已接受但無法取得確認時，保留可核查狀態。
-- [ ] Linux CI 跑隔離 PostgreSQL、Redis、Celery 與受控 SMTP 的故障演練，記錄 run、report、SMTP 計數及重啟後狀態。以 `make test-weekly-report-recovery` 執行。重現需要後端開發依賴、PostgreSQL server tools、`redis-server`、可綁定 loopback 的非 root 帳戶。測試會建立自己的暫存服務。CI 及合併證據齊全後才勾選。[演練入口](../scripts/ci/test-weekly-report-recovery.py)
+- [x] 到期週報及手動 `run-now` 建立持久化待處理工作。若資料庫已提交、broker 未收到訊息，broker 恢復後能派送原本的 `runId`。同一排程週期只有一個 run。手動請求驗證回傳的 runId 和後續查詢指向同一筆。
+- [x] 兩個 worker 收到同一項工作只有一個能開始執行。已進入外送或已完成的 run 再收到訊息，不會重做外部投遞。外部可能已接受但無法取得確認時，保留可核查狀態。
+- [x] Linux CI 跑隔離 PostgreSQL、Redis、Celery 與受控 SMTP 的故障演練，記錄 run、report、SMTP 計數及重啟後狀態。以 `make test-weekly-report-recovery` 執行。重現需要後端開發依賴、PostgreSQL server tools、`redis-server`、可綁定 loopback 的非 root 帳戶。測試會建立自己的暫存服務。[演練入口](../scripts/ci/test-weekly-report-recovery.py)
 
 **部署及回退順序。** 先暫停舊版 Beat／手動派工入口，讓舊版週報 worker 完成在途任務並離隊，核查尚在生成或外送的 run，再套用向後相容的資料庫 migration。舊版 worker 收到同 ID 訊息仍可能從頭生成。啟動新版 worker，確認只有新版 consumer 可取得工作後，才開啟新版補派、恢復 producers 並觀察第一輪 run。若需回退，先暫停 scheduler、手動派工及 consumers，對照資料庫與接收端記錄逐筆核查 queue 裡的訊息及在途外送，再恢復相容版本。保持 run、report、回執及 migration 資料供判讀。[本批基線 worker](https://github.com/TXT0Law/OrbiCheck/blob/c4c8bc8ed7e9e0885c82c61bf0f7e0286b42ed70/backend/app/tasks/report_schedule_tasks.py#L38-L61)
 
@@ -31,7 +31,7 @@
 | W5　納入週報維運輪值與部署驗收 | W2、W3，Infra 與維運 owner | 依週期統計應執行數、準時產生比例、已設定目的地確認比例、未知及積壓的最長時間。記錄缺樣本與停用排程的分母規則。於隔離部署演練 broker 中斷、worker 重啟及 SMTP 接受後失聯，值班人員僅憑 run ID 及手冊完成判讀。 | D、C |
 | W6　恢復已停滯的報告生成 | W1、W3，Backend。有積壓證據時提前評估 | 針對停留於 `generating` 的 run 確認舊 worker 已失去執行權，並用 attempt 識別阻止遲到寫入。於產物建立前後分別殺掉 worker，驗同一 run 僅有一份有效報告，且不會重新發送可能已投遞的目的地。 | B、D，涉及資料變更時加 M |
 
-**決定是否擴大開發。** W2 上線後抽查實際週報，記錄從發現問題到定位 run 的時間、人工核查次數、漏掉週期和可信的重複投遞證據。先取得一個完整排程週期的基線，由維運 owner 確定可接受的準時窗口、告警門檻與觀測期。若未知或部分成功的個案需要逐目的地處理，優先 W3/W4。若問題集中於佇列等待，先把 W5 的排程／佇列觀測拆成獨立票。既有 [服務目標](../docs/operations.md) 可作對照，其告警投遞指標與週報應分開計算。
+**決定是否擴大開發。** 本輪在 W2 合併且主線 CI 通過後交接；下一票由維運方提供的完整週期資料決定。W2 上線後抽查實際週報，記錄從發現問題到定位 run 的時間、人工核查次數、漏掉週期和可信的重複投遞證據。先取得一個完整排程週期的基線，由維運 owner 確定可接受的準時窗口、告警門檻與觀測期。若未知或部分成功的個案需要逐目的地處理，優先 W3/W4。若問題集中於佇列等待，先把 W5 的排程／佇列觀測拆成獨立票。既有 [服務目標](../docs/operations.md) 可作對照，其告警投遞指標與週報應分開計算。
 
 ### 如何判斷能否重試
 

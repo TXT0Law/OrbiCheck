@@ -9099,6 +9099,117 @@
         ],
         "title": "ReportResponse"
       },
+      "ReportRunChannelResult": {
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "email",
+              "slack"
+            ],
+            "title": "Channel"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "failed",
+              "partial",
+              "unknown"
+            ],
+            "title": "State"
+          },
+          "acceptedCount": {
+            "type": "integer",
+            "title": "Acceptedcount",
+            "default": 0
+          },
+          "failedCount": {
+            "type": "integer",
+            "title": "Failedcount",
+            "default": 0
+          },
+          "unknownCount": {
+            "type": "integer",
+            "title": "Unknowncount",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel",
+          "state"
+        ],
+        "title": "ReportRunChannelResult"
+      },
+      "ReportRunOperations": {
+        "properties": {
+          "artifactState": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "pending",
+              "generating",
+              "completed",
+              "failed"
+            ],
+            "title": "Artifactstate"
+          },
+          "reportId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reportid"
+          },
+          "deliveryState": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "failed",
+              "partial",
+              "unknown",
+              "unconfirmed",
+              "stored",
+              "not_started"
+            ],
+            "title": "Deliverystate"
+          },
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/ReportRunChannelResult"
+            },
+            "type": "array",
+            "title": "Channels"
+          },
+          "reviewReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "delivery_unconfirmed",
+                  "missing_or_invalid_receipts"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewreason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifactState",
+          "deliveryState"
+        ],
+        "title": "ReportRunOperations"
+      },
       "ReportScheduleCadence": {
         "type": "string",
         "enum": [
@@ -9498,13 +9609,17 @@
               }
             ],
             "title": "Deliverysummary"
+          },
+          "operations": {
+            "$ref": "#/components/schemas/ReportRunOperations"
           }
         },
         "type": "object",
         "required": [
           "id",
           "scheduleId",
-          "status"
+          "status",
+          "operations"
         ],
         "title": "ReportScheduleRunResponse"
       },

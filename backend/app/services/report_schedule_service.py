@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.schemas.report_schedule import (
+    ReportRunChannelResult,
+    ReportRunOperations,
     ReportScheduleCreateRequest,
     ReportScheduleResponse,
     ReportScheduleRunResponse,
@@ -26,7 +28,7 @@ from app.api.v1.schemas.report_schedule import (
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.monitor import Monitor
-from app.models.report import Report, ReportFormat
+from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.report_schedule import (
     ReportSchedule,
     ReportScheduleCadence,
@@ -50,6 +52,7 @@ REPORT_LINK_FALLBACK = "/dashboard/reports"
 SLACK_TEXT_LIMIT = 280
 SCHEDULED_WEBHOOK_MAX_REDIRECTS = 0
 NOTIFICATION_SETTINGS_KEY_PREFIX = "orbicheck:user"
+PRE_DELIVERY_ERRORS = frozenset({"invalid_delivery_channels", "email_recipients_missing"})
 
 
 def _utc_now() -> datetime:
@@ -167,11 +170,111 @@ def _validate_delivery(channels: list[str], recipients: list[str]) -> None:
         )
 
 
-def _schedule_to_response(schedule: ReportSchedule) -> ReportScheduleResponse:
-    recent_runs = [
-        ReportScheduleRunResponse.model_validate(run)
-        for run in list(schedule.runs or [])[:RECENT_RUN_LIMIT]
-    ]
+def _run_to_response(
+    run: ReportScheduleRun, reports: dict[uuid.UUID, ReportStatus],
+) -> ReportScheduleRunResponse:
+    report_status = reports.get(run.report_id)
+    raw = run.delivery_summary if isinstance(run.delivery_summary, dict) else {}
+    raw_channels = raw.get("channels")
+    unconfirmed = (raw.get("outcome") == "unconfirmed"
+                   or run.status == ReportScheduleRunStatus.DELIVERING)
+    channels: list[ReportRunChannelResult] = []
+    safe_channels: dict[str, Any] = {}
+    for channel in ("email", "slack"):
+        if not isinstance(raw_channels, dict) or channel not in raw_channels:
+            continue
+        value = raw_channels[channel]
+        receipts = (value if isinstance(value, list) else [None]) if channel == "email" else [value]
+        if not receipts:
+            receipts = [None]
+        accepted = sum(isinstance(item, dict) and item.get("success") is True for item in receipts)
+        failed = sum(isinstance(item, dict) and item.get("success") is False
+                     for item in receipts) if not unconfirmed else 0
+        unknown = len(receipts) - accepted - failed
+        if unknown:
+            state = "unknown"
+        elif accepted and failed:
+            state = "partial"
+        elif accepted:
+            state = "accepted"
+        else:
+            state = "failed"
+        channels.append(ReportRunChannelResult(
+            channel=channel, state=state, accepted_count=accepted,
+            failed_count=failed, unknown_count=unknown,
+        ))
+        safe_receipts = [
+            {"success": item["success"]}
+            if isinstance(item, dict) and type(item.get("success")) is bool
+            and (not unconfirmed or item["success"] is True) else {}
+            for item in receipts
+        ]
+        safe_channels[channel] = safe_receipts if channel == "email" else safe_receipts[0]
+    states = {channel.state for channel in channels}
+    if unconfirmed:
+        delivery_state = "unconfirmed"
+    elif run.delivery_summary in (None, {}) and run.status in (
+        ReportScheduleRunStatus.PENDING, ReportScheduleRunStatus.GENERATING,
+    ):
+        delivery_state = "not_started"
+    elif (raw_channels == {} and isinstance(raw.get("error"), str)
+          and raw["error"] in PRE_DELIVERY_ERRORS
+          and raw.get("success") is False):
+        delivery_state = "not_started"
+    elif not channels:
+        delivery_state = "stored" if raw_channels == {} and raw.get("success") is True else "unknown"
+    elif (isinstance(raw_channels, dict) and set(raw_channels) - {"email", "slack"}) or "unknown" in states:
+        delivery_state = "unknown"
+    elif "partial" in states or {"accepted", "failed"} <= states:
+        delivery_state = "partial"
+    else:
+        delivery_state = next(iter(states))
+    if ((raw.get("success") is True and delivery_state in ("failed", "partial"))
+            or (raw.get("success") is False and delivery_state in ("accepted", "stored"))):
+        delivery_state = "unknown"
+    reason = None
+    if delivery_state == "unconfirmed":
+        reason = "delivery_unconfirmed"
+    elif delivery_state == "unknown":
+        reason = "missing_or_invalid_receipts"
+    safe_summary: dict[str, Any] = {"channels": safe_channels}
+    if type(raw.get("success")) is bool:
+        safe_summary["success"] = raw["success"]
+    if raw.get("outcome") == "unconfirmed":
+        safe_summary["outcome"] = "unconfirmed"
+    return ReportScheduleRunResponse(
+        id=run.id, schedule_id=run.schedule_id,
+        report_id=run.report_id if report_status is not None else None, status=run.status,
+        started_at=run.started_at, completed_at=run.completed_at,
+        error_message=("delivery_unconfirmed" if unconfirmed else "run_failed")
+        if run.error_message or unconfirmed else None,
+        delivery_summary=safe_summary if raw else None,
+        operations=ReportRunOperations(
+            artifact_state=report_status if report_status is not None else "missing",
+            report_id=run.report_id if report_status is not None else None, delivery_state=delivery_state,
+            channels=channels, review_reason=reason,
+        ),
+    )
+
+
+async def _run_reports(
+    db: AsyncSession, runs: list[ReportScheduleRun], user_id: int,
+) -> dict[uuid.UUID, ReportStatus]:
+    ids = {run.report_id for run in runs if run.report_id is not None}
+    if not ids:
+        return {}
+    # Select only metadata: report bodies may be large and are never exposed here.
+    rows = (await db.execute(select(Report.id, Report.status).where(
+        Report.id.in_(ids), Report.user_id == user_id,
+    ))).all()
+    return {row.id: row.status for row in rows}
+
+
+def _schedule_to_response(
+    schedule: ReportSchedule, reports: dict[uuid.UUID, ReportStatus],
+) -> ReportScheduleResponse:
+    recent_runs = [_run_to_response(run, reports)
+                   for run in list(schedule.runs or [])[:RECENT_RUN_LIMIT]]
     response = ReportScheduleResponse.model_validate(schedule)
     return response.model_copy(update={"recent_runs": recent_runs})
 
@@ -230,7 +333,9 @@ async def list_schedules(db: AsyncSession, user_id: int) -> list[ReportScheduleR
             )
         ).scalars()
     )
-    return [_schedule_to_response(row) for row in rows]
+    runs = [run for row in rows for run in list(row.runs or [])[:RECENT_RUN_LIMIT]]
+    reports = await _run_reports(db, runs, user_id)
+    return [_schedule_to_response(row, reports) for row in rows]
 
 
 async def get_schedule(db: AsyncSession, schedule_id: uuid.UUID, user_id: int) -> ReportSchedule:
@@ -251,7 +356,9 @@ async def get_schedule_response(
     schedule_id: uuid.UUID,
     user_id: int,
 ) -> ReportScheduleResponse:
-    return _schedule_to_response(await get_schedule(db, schedule_id, user_id))
+    schedule = await get_schedule(db, schedule_id, user_id)
+    runs = list(schedule.runs or [])[:RECENT_RUN_LIMIT]
+    return _schedule_to_response(schedule, await _run_reports(db, runs, user_id))
 
 
 async def update_schedule(
@@ -352,7 +459,8 @@ async def list_schedule_runs(
             )
         ).scalars()
     )
-    return [ReportScheduleRunResponse.model_validate(row) for row in rows]
+    reports = await _run_reports(db, rows, user_id)
+    return [_run_to_response(row, reports) for row in rows]
 
 
 def build_due_schedule_query(now: datetime) -> Select[tuple[ReportSchedule]]:
