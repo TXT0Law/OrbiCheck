@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 import structlog
-from sqlalchemy import case, delete, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,9 @@ from app.services.transformers import ALL_MODULES, _is_skipped
 
 SCAN_FINDING_BACKFILL_BATCH_SIZE = 25
 SCAN_FINDING_BACKFILL_MAX_BATCH_SIZE = 100
+SCAN_FINDING_HISTORY_DEFAULT_LIMIT = 20
+SCAN_FINDING_HISTORY_MAX_LIMIT = 100
+SCAN_FINDING_HISTORY_MAX_OFFSET = 10_000
 MAX_FINDING_EVIDENCE_BYTES = 65_536
 logger = structlog.get_logger(__name__)
 
@@ -81,6 +84,117 @@ class ScanFindingEvidence:
     rule_id: str
     observed_at: datetime
     sources: list[FindingEvidenceSource]
+
+
+@dataclass(frozen=True, slots=True)
+class ScanFindingHistoryItem:
+    scan_id: uuid.UUID
+    domain: str
+    observation: ScanFindingObservation
+
+
+@dataclass(frozen=True, slots=True)
+class ScanFindingHistoryPage:
+    items: list[ScanFindingHistoryItem]
+    total: int
+    pending_scans: int
+    failed_scans: int
+    unavailable_scans: int
+
+
+async def list_scan_finding_history(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    limit: int = SCAN_FINDING_HISTORY_DEFAULT_LIMIT,
+    offset: int = 0,
+    domain: str | None = None,
+    rule_id: str | None = None,
+) -> ScanFindingHistoryPage:
+    """List one owner's current-ruleset observations with coverage counts."""
+    if not 1 <= limit <= SCAN_FINDING_HISTORY_MAX_LIMIT:
+        raise ValueError("History limit is outside the allowed range")
+    if not 0 <= offset <= SCAN_FINDING_HISTORY_MAX_OFFSET:
+        raise ValueError("History offset is outside the allowed range")
+
+    scan_scope = [Scan.user_id == user_id, Scan.status == ScanStatus.COMPLETED]
+    if domain is not None:
+        scan_scope.append(Scan.domain == domain)
+    stale_observation = (
+        select(ScanFindingObservation.id)
+        .where(
+            ScanFindingObservation.scan_id == Scan.id,
+            ScanFindingObservation.ruleset_version != FINDING_RULESET_VERSION,
+        )
+        .correlate(Scan)
+        .exists()
+    )
+    ready_scope = [
+        *scan_scope,
+        Scan.finding_observations_projected_at.is_not(None),
+        Scan.finding_observations_projection_failed_at.is_(None),
+        Scan.finding_ruleset_version == FINDING_RULESET_VERSION,
+        ~stale_observation,
+    ]
+    finding_scope = [ScanFindingObservation.rule_id == rule_id] if rule_id is not None else []
+    joined = select(ScanFindingObservation, Scan.domain).join(
+        Scan, ScanFindingObservation.scan_id == Scan.id
+    )
+    page_rows = (
+        await db.execute(
+            joined.where(*ready_scope, *finding_scope)
+            .order_by(
+                ScanFindingObservation.observed_at.desc(),
+                ScanFindingObservation.scan_id.desc(),
+                ScanFindingObservation.rule_id.asc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    total = (
+        await db.execute(
+            select(func.count(ScanFindingObservation.id))
+            .join(Scan, ScanFindingObservation.scan_id == Scan.id)
+            .where(*ready_scope, *finding_scope)
+        )
+    ).scalar_one()
+    pending_scans, failed_scans, unavailable_scans = (
+        await db.execute(
+            select(
+                func.count(Scan.id).filter(
+                    Scan.finding_observations_projected_at.is_(None),
+                    Scan.finding_observations_projection_failed_at.is_(None),
+                ),
+                func.count(Scan.id).filter(
+                    Scan.finding_observations_projection_failed_at.is_not(None)
+                ),
+                func.count(Scan.id).filter(
+                    Scan.finding_observations_projected_at.is_not(None),
+                    Scan.finding_observations_projection_failed_at.is_(None),
+                    or_(
+                        Scan.finding_ruleset_version.is_(None),
+                        Scan.finding_ruleset_version != FINDING_RULESET_VERSION,
+                        stale_observation,
+                    ),
+                ),
+            ).where(*scan_scope)
+        )
+    ).one()
+    return ScanFindingHistoryPage(
+        items=[
+            ScanFindingHistoryItem(
+                scan_id=observation.scan_id,
+                domain=scan_domain,
+                observation=observation,
+            )
+            for observation, scan_domain in page_rows
+        ],
+        total=total,
+        pending_scans=pending_scans,
+        failed_scans=failed_scans,
+        unavailable_scans=unavailable_scans,
+    )
 
 
 async def get_scan_finding_evidence(

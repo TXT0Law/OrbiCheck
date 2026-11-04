@@ -15,6 +15,7 @@ from app.api.v1.schemas.scan import (
     ScanCreateRequest,
     ScanDetailResponse,
     ScanFindingEvidenceResponse,
+    ScanFindingHistoryResponse,
     ScanFindingListResponse,
     ScanListResponse,
     ScanResponse,
@@ -178,6 +179,42 @@ async def list_scans(
             "sortBy": sort_by,
             "statusGroup": status_group,
         },
+    )
+
+
+@router.get(
+    "/findings/history",
+    response_model=SuccessResponse[ScanFindingHistoryResponse],
+    description=(
+        "Lists evidence-backed findings from completed scans owned by the caller. "
+        "Coverage counts distinguish pending, failed, and unavailable projections "
+        "for the requested domain. A missing observation does not establish a fix."
+    ),
+)
+async def list_scan_finding_history(
+    limit: int = Query(
+        default=finding_observation.SCAN_FINDING_HISTORY_DEFAULT_LIMIT,
+        ge=1,
+        le=finding_observation.SCAN_FINDING_HISTORY_MAX_LIMIT,
+    ),
+    offset: int = Query(default=0, ge=0, le=finding_observation.SCAN_FINDING_HISTORY_MAX_OFFSET),
+    domain: str | None = Query(default=None, min_length=1, max_length=255),
+    rule_id: str | None = Query(default=None, min_length=1, max_length=96, pattern=r"^[a-z0-9._-]+$"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuccessResponse[ScanFindingHistoryResponse]:
+    """List current-ruleset risk observations across owned completed scans."""
+    page = await finding_observation.list_scan_finding_history(
+        db,
+        user_id=current_user.id,
+        limit=limit,
+        offset=offset,
+        domain=domain,
+        rule_id=rule_id,
+    )
+    return SuccessResponse(
+        data=ScanFindingHistoryResponse.model_validate(page),
+        meta={"limit": limit, "offset": offset, "domain": domain, "ruleId": rule_id},
     )
 
 
