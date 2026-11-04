@@ -88,17 +88,12 @@ def test_transform_features_accepts_json_string_payload():
 
 
 @pytest.mark.unit
-def test_build_scan_detail_returns_renderable_defaults_for_missing_modules():
+def test_build_scan_detail_preserves_unknown_for_missing_modules():
     detail = build_scan_detail("scan-1", "https://example.com", all_raw_results={})
 
-    assert detail["whois"] is not None
-    assert detail["ports"]["entries"] == []
-    assert detail["redirects"]["hops"] == []
-    # traceroute module was removed in P1-9; build_scan_detail still surfaces
-    # the key (frontend ScanDetail still types it) but as `None`.
-    assert detail["traceroute"] is None
-    assert detail["features"]["features"] == []
-    assert detail["screenshot"]["imageUrl"] == ""
+    for key, value in detail.items():
+        if key not in {"id", "url"}:
+            assert value is None, key
 
 
 @pytest.mark.unit

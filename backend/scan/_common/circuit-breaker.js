@@ -6,7 +6,7 @@
 //
 // Lifecycle (Hystrix-style, simplified):
 //   closed   — counting consecutive failures; resets on first success.
-//   open     — rejects every probe with a 503 envelope; flips to half-open
+//   open     — rejects every probe without fetching; flips to half-open
 //              after `openCooldownMs` elapses.
 //   half-open— allow exactly one probe through. Success → closed; failure →
 //              back to open with the cooldown restarted.

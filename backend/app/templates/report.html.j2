@@ -280,7 +280,7 @@
         <tr>
           <td>{{ item.module }}</td>
           <td>{{ item.status }}</td>
-          <td style="text-align:right">{{ item.duration or 0 }}</td>
+          <td style="text-align:right">{{ item.duration if item.duration is not none else "N/A" }}</td>
         </tr>
         {% endfor %}
       </tbody>

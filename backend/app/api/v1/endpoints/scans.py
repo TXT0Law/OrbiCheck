@@ -24,6 +24,7 @@ from app.core.deps import CurrentUser, get_current_user, get_db
 from app.core.config import settings
 from app.core.redis import get_redis_async
 from app.services import finding_observation, operational_event_service, scan_service, scan_trend
+from app.services.scan_evidence import collect_scan_evidence
 from app.services.recommendations import generate_recommendations
 from app.services.scan_trend import (
     DEFAULT_TIMELINE_LIMIT,
@@ -406,11 +407,7 @@ async def get_scan_module(
     if not module_result:
         return SuccessResponse(data=None)
 
-    all_raw = {
-        m.module_name: m.raw_result
-        for m in scan.module_results
-        if m.raw_result is not None
-    }
+    all_raw = collect_scan_evidence(scan.module_results)
     detail = build_scan_detail(str(scan.id), scan.url, all_raw)
 
     frontend_key = MODULE_TO_FRONTEND_KEY.get(module_name, module_name)
@@ -438,11 +435,7 @@ def _compose_scan_detail_payload(scan, *, key_findings_limit: int) -> dict:
     Pulls every transformer + analyzer once so both endpoints stay in lockstep
     (G7 / D0-1: single source of truth for ``securityScoreBreakdown`` shape).
     """
-    all_raw = {
-        m.module_name: m.raw_result
-        for m in scan.module_results
-        if m.raw_result is not None
-    }
+    all_raw = collect_scan_evidence(scan.module_results)
     detail = build_scan_detail(str(scan.id), scan.url, all_raw)
     module_errors = build_module_errors(scan.module_results)
     module_jobs, total_duration_ms = build_module_jobs(

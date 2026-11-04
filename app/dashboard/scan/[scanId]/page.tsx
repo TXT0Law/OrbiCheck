@@ -24,7 +24,10 @@ const SeverityAndBreakdownSection = dynamic(
   },
 );
 
-function getCategoryStatusClass(status: "pass" | "warn" | "fail") {
+function getCategoryStatusClass(status: "pass" | "warn" | "fail" | "unknown") {
+  if (status === "unknown") {
+    return "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300";
+  }
   if (status === "pass") {
     return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200";
   }
@@ -63,7 +66,7 @@ function keyFindingsEmptyMessage(status: string): string {
   if (status === "pending" || status === "running") {
     return "No key findings yet — prioritized issues appear as modules complete.";
   }
-  return "No key findings — no high-priority issues were detected. Open individual module pages for full raw results.";
+  return "No high-priority findings were extracted from the available evidence. Open individual module pages to review coverage and raw results.";
 }
 
 const KEY_FINDINGS_DISPLAY_LIMIT = 8;
@@ -96,8 +99,8 @@ export default function ScanSummaryPage() {
               <CardContent className="space-y-2 text-sm">
                 <p className="text-zinc-600 dark:text-zinc-300">Modules checked: {category.modulesChecked}</p>
                 <p className="text-zinc-600 dark:text-zinc-300">Issues found: {category.issuesFound}</p>
-                <Badge className={`border-transparent capitalize ${getCategoryStatusClass(category.status)}`}>
-                  {category.status}
+                <Badge className={`border-transparent capitalize ${getCategoryStatusClass(category.modulesChecked === 0 ? "unknown" : category.status)}`}>
+                  {category.modulesChecked === 0 ? "unknown" : category.status}
                 </Badge>
               </CardContent>
             </Card>

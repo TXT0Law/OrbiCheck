@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.models.scan import ModuleStatus, ScanStatus
-from app.services.transformers import extract_tls_ciphers, extract_tls_protocols
+from app.services.scan_evidence import normalize_raw_results, observed_dnssec, observed_hsts
+from app.services.transformers import extract_tls_ciphers, extract_tls_protocols, transform_hsts
 
 logger = logging.getLogger(__name__)
 
@@ -116,18 +117,42 @@ def _ensure_dict(value: Any) -> dict:
     return {}
 
 
-def _get_headers_dict(raw_results: dict) -> dict:
-    """Extract normalized headers from headers or http-security modules."""
-    headers_raw = raw_results.get("headers") or raw_results.get("http-security")
-    if isinstance(headers_raw, dict):
-        return {k.lower(): v for k, v in headers_raw.items()}
-    return {}
+HTTP_SECURITY_FLAGS = {
+    "content-security-policy": "contentSecurityPolicy",
+    "x-frame-options": "xFrameOptions",
+    "x-content-type-options": "xContentTypeOptions",
+}
 
 
-def _has_header(headers: dict, name: str) -> bool:
-    """Check if header exists (case-insensitive)."""
-    lower = name.lower()
-    return any(k.lower() == lower and v for k, v in headers.items())
+def observed_header(raw_results: dict, name: str) -> bool | None:
+    """A complete header capture covers every name, a flag covers only its own check."""
+    headers = raw_results.get("headers")
+    if headers:
+        return bool(headers.get(name))
+    flags = raw_results.get("http-security", {})
+    value = flags.get(HTTP_SECURITY_FLAGS.get(name))
+    if isinstance(value, bool):
+        return value
+    if isinstance(flags.get(name), str):  # Older captures used literal HTTP header names.
+        return bool(flags[name])
+    return None
+
+
+def _hsts_result(raw_results: dict) -> dict:
+    observation = observed_hsts(raw_results)
+    return transform_hsts(observation) if observation is not None else {}
+
+
+def _ssl_bits(raw_results: dict) -> int | None:
+    value = _get_ssl_data(raw_results).get("bits")
+    if isinstance(value, str) and value.isascii() and value.isdecimal():
+        try:
+            value = int(value)
+        except ValueError:  # Python rejects unbounded decimal strings.
+            return None
+    if type(value) is int and value > 0:
+        return value
+    return None
 
 
 def _get_ssl_data(raw_results: dict) -> dict:
@@ -358,7 +383,7 @@ def _score_transport_category(raw_results: dict) -> tuple[float, float]:
     else:
         earned += 0
 
-    bits = int(ssl.get("bits", 0) or 0)
+    bits = _ssl_bits(raw_results) or 0
     if bits >= 256:
         earned += 6
     elif bits >= 128:
@@ -389,8 +414,8 @@ def _score_transport_category(raw_results: dict) -> tuple[float, float]:
     elif weak_count <= 2:
         earned += 2
 
-    hsts = _ensure_dict(raw_results.get("hsts"))
-    if hsts.get("compatible", False):
+    hsts = _hsts_result(raw_results)
+    if hsts.get("enabled"):
         if hsts.get("preload"):
             earned += 5
         elif hsts.get("includeSubDomains"):
@@ -405,18 +430,17 @@ def _score_transport_category(raw_results: dict) -> tuple[float, float]:
 
 
 def _score_http_security_category(raw_results: dict) -> tuple[float, float]:
-    headers = _get_headers_dict(raw_results)
     earned = 0.0
     max_pts = 25.0
-    if _has_header(headers, "content-security-policy"):
+    if observed_header(raw_results, "content-security-policy"):
         earned += 8
-    if _has_header(headers, "x-frame-options"):
+    if observed_header(raw_results, "x-frame-options"):
         earned += 4
-    if _has_header(headers, "x-content-type-options"):
+    if observed_header(raw_results, "x-content-type-options"):
         earned += 3
-    if _has_header(headers, "referrer-policy"):
+    if observed_header(raw_results, "referrer-policy"):
         earned += 3
-    if _has_header(headers, "permissions-policy"):
+    if observed_header(raw_results, "permissions-policy"):
         earned += 2
     earned += float(_score_cookie_security(raw_results))
     return earned, max_pts
@@ -487,16 +511,7 @@ def _score_infrastructure_category(raw_results: dict) -> tuple[float, float]:
     if firewall.get("hasWaf", False):
         earned += 4
 
-    dnssec = _ensure_dict(raw_results.get("dnssec"))
-    dnssec_ok = bool(dnssec.get("enabled", False))
-    if not dnssec_ok:
-        dnskey = dnssec.get("DNSKEY", {})
-        ds = dnssec.get("DS", {})
-        if isinstance(dnskey, dict) and dnskey.get("isFound"):
-            dnssec_ok = True
-        if isinstance(ds, dict) and ds.get("isFound"):
-            dnssec_ok = True
-    if dnssec_ok:
+    if observed_dnssec(raw_results.get("dnssec")):
         earned += 3
 
     return earned, max_pts
@@ -547,18 +562,16 @@ def detect_has_dangerous_ports(raw_results: dict) -> bool:
 
 
 def detect_missing_csp(raw_results: dict) -> bool:
-    return not _has_header(_get_headers_dict(raw_results), "content-security-policy")
+    return observed_header(raw_results, "content-security-policy") is False
 
 
 def detect_hsts_not_enabled(raw_results: dict) -> bool:
-    return not _ensure_dict(raw_results.get("hsts")).get("compatible", False)
+    return _hsts_result(raw_results).get("enabled") is False
 
 
 def detect_ssl_bits_below_128(raw_results: dict) -> bool:
-    ssl = _get_ssl_data(raw_results)
-    if not ssl:
-        return False
-    return int(ssl.get("bits", 0) or 0) < 128
+    bits = _ssl_bits(raw_results)
+    return bits is not None and bits < 128
 
 
 def detect_legacy_tls_supported(raw_results: dict) -> bool:
@@ -576,7 +589,7 @@ def compute_confidence(module_results: Sequence[Any] | None) -> float:
     total = len(module_results)
     if total == 0:
         return 0.0
-    success = sum(1 for m in module_results if getattr(m, "status", None) == ModuleStatus.SUCCESS)
+    success = _module_success_count(module_results)
     return success / total
 
 
@@ -601,6 +614,7 @@ def compute_security_score_v2(
     module_results: Sequence[Any] | None = None,
 ) -> SecurityScoreResult | None:
     """Compute security score using the hybrid model. Returns None if no raw data."""
+    raw_results = normalize_raw_results(raw_results)
     if not raw_results:
         return None
 
@@ -671,7 +685,16 @@ def compute_security_score(raw_results: dict) -> int:
 
 
 def _module_success_count(module_results: Sequence[Any]) -> int:
-    return sum(1 for m in module_results if getattr(m, "status", None) == ModuleStatus.SUCCESS)
+    observed = 0
+    for row in module_results:
+        if row.status != ModuleStatus.SUCCESS:
+            continue
+        # Status-only callers have no raw payload to validate; stored rows do.
+        if not hasattr(row, "raw_result") or normalize_raw_results(
+            {getattr(row, "module_name", ""): row.raw_result}
+        ):
+            observed += 1
+    return observed
 
 
 def resolve_security_score_for_detail(
@@ -725,6 +748,7 @@ def compute_severity_counts(raw_results: dict) -> dict:
     """
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
 
+    raw_results = normalize_raw_results(raw_results)
     if not raw_results:
         return counts
 
@@ -743,42 +767,29 @@ def compute_severity_counts(raw_results: dict) -> dict:
     if detect_hsts_not_enabled(raw_results):
         counts["high"] += 1
 
-    ssl = _get_ssl_data(raw_results)
-    if ssl:
-        bits = int(ssl.get("bits", 0) or 0)
-        if bits < 128:
-            counts["high"] += 1
+    if detect_ssl_bits_below_128(raw_results):
+        counts["high"] += 1
 
     if detect_legacy_tls_supported(raw_results):
         counts["high"] += 1
 
-    headers = _get_headers_dict(raw_results)
-    if not _has_header(headers, "x-frame-options"):
+    if observed_header(raw_results, "x-frame-options") is False:
         counts["medium"] += 1
-    if not _has_header(headers, "referrer-policy"):
-        counts["medium"] += 1
-
-    dnssec = _ensure_dict(raw_results.get("dnssec"))
-    dnssec_enabled = bool(dnssec.get("enabled", False))
-    if not dnssec_enabled:
-        dnskey = dnssec.get("DNSKEY", {})
-        ds = dnssec.get("DS", {})
-        if isinstance(dnskey, dict) and dnskey.get("isFound"):
-            dnssec_enabled = True
-        if isinstance(ds, dict) and ds.get("isFound"):
-            dnssec_enabled = True
-    if not dnssec_enabled:
+    if observed_header(raw_results, "referrer-policy") is False:
         counts["medium"] += 1
 
-    if not _has_header(headers, "permissions-policy"):
+    if observed_dnssec(raw_results.get("dnssec")) is False:
+        counts["medium"] += 1
+
+    if observed_header(raw_results, "permissions-policy") is False:
         counts["low"] += 1
 
     sec_txt = _ensure_dict(raw_results.get("security-txt"))
-    if not sec_txt.get("isPresent", False):
+    if sec_txt.get("isPresent") is False:
         counts["low"] += 1
 
     robots = _ensure_dict(raw_results.get("robots-txt"))
-    if robots.get("skipped") or robots.get("error") or not robots.get("robots"):
+    if robots.get("robots") == []:
         counts["low"] += 1
 
     return counts
@@ -791,6 +802,7 @@ def compute_category_summary(raw_results: dict) -> list[dict]:
     V2 ``securityScoreBreakdown.categoryScores`` uses five weighted dimensions; unifying
     those models is deferred until the dashboard consumes both in one view.
     """
+    raw_results = normalize_raw_results(raw_results)
     categories = [
         ("Security", SECURITY_MODULES),
         ("Network", NETWORK_MODULES),
@@ -812,9 +824,8 @@ def compute_category_summary(raw_results: dict) -> list[dict]:
                 checked_count += 1
 
         if cat_name == "Security":
-            headers = _get_headers_dict(raw_results)
             for hdr in HTTP_SECURITY_HEADER_KEYS:
-                if not _has_header(headers, hdr):
+                if observed_header(raw_results, hdr) is False:
                     issue_count += 1
             if detect_hsts_not_enabled(raw_results):
                 issue_count += 1
@@ -825,7 +836,7 @@ def compute_category_summary(raw_results: dict) -> list[dict]:
                     issue_count += 1
                 if days is not None and 0 <= days <= 30:
                     issue_count += 1
-                if int(ssl.get("bits", 0) or 0) < 128:
+                if detect_ssl_bits_below_128(raw_results):
                     issue_count += 1
             if detect_legacy_tls_supported(raw_results):
                 issue_count += 1
@@ -834,16 +845,11 @@ def compute_category_summary(raw_results: dict) -> list[dict]:
                 issue_count += 1
             if _is_threat_listed(raw_results):
                 issue_count += 1
-            if not _ensure_dict(raw_results.get("firewall")).get("hasWaf"):
+            if _ensure_dict(raw_results.get("firewall")).get("hasWaf") is False:
                 issue_count += 1
-            dnssec = _ensure_dict(raw_results.get("dnssec"))
-            if not (
-                dnssec.get("enabled")
-                or _ensure_dict(dnssec.get("DNSKEY")).get("isFound")
-                or _ensure_dict(dnssec.get("DS")).get("isFound")
-            ):
+            if observed_dnssec(raw_results.get("dnssec")) is False:
                 issue_count += 1
-            if not _ensure_dict(raw_results.get("security-txt")).get("isPresent"):
+            if _ensure_dict(raw_results.get("security-txt")).get("isPresent") is False:
                 issue_count += 1
 
         elif cat_name == "Network":
@@ -860,13 +866,12 @@ def compute_category_summary(raw_results: dict) -> list[dict]:
 
         elif cat_name == "Content":
             robots = _ensure_dict(raw_results.get("robots-txt"))
-            if robots.get("skipped") or robots.get("error"):
-                issue_count += 1
-            sitemap = _ensure_dict(raw_results.get("sitemap"))
-            if sitemap.get("skipped") or sitemap.get("error"):
+            if robots.get("robots") == []:
                 issue_count += 1
 
-        status = "pass" if issue_count == 0 else ("warn" if issue_count <= 2 else "fail")
+        status = "unknown"
+        if checked_count:
+            status = "pass" if issue_count == 0 else ("warn" if issue_count <= 2 else "fail")
 
         result.append(
             {
@@ -885,6 +890,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
     """Extract notable findings sorted by severity; ``None`` returns all findings."""
     findings: list[dict] = []
 
+    raw_results = normalize_raw_results(raw_results)
     if not raw_results:
         return findings
 
@@ -954,8 +960,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
             },
         )
 
-    headers = _get_headers_dict(raw_results)
-    if not _has_header(headers, "content-security-policy"):
+    if observed_header(raw_results, "content-security-policy") is False:
         findings.append(
             {
                 "title": "Missing Content-Security-Policy",
@@ -965,8 +970,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
             },
         )
 
-    hsts = _ensure_dict(raw_results.get("hsts"))
-    if not hsts.get("compatible", False):
+    if detect_hsts_not_enabled(raw_results):
         findings.append(
             {
                 "title": "HSTS not enabled",
@@ -976,8 +980,9 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
             },
         )
 
-    if ssl:
-        grade = _ssl_grade_from_bits(int(ssl.get("bits", 0) or 0))
+    bits = _ssl_bits(raw_results)
+    if bits is not None:
+        grade = _ssl_grade_from_bits(bits)
         if grade in ("C", "D", "E", "F"):
             findings.append(
                 {
@@ -998,7 +1003,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
             },
         )
 
-    if not _has_header(headers, "x-frame-options"):
+    if observed_header(raw_results, "x-frame-options") is False:
         findings.append(
             {
                 "title": "Missing X-Frame-Options",
@@ -1007,7 +1012,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
                 "module": "headers",
             },
         )
-    if not _has_header(headers, "referrer-policy"):
+    if observed_header(raw_results, "referrer-policy") is False:
         findings.append(
             {
                 "title": "Missing Referrer-Policy",
@@ -1017,9 +1022,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
             },
         )
 
-    dnssec = _ensure_dict(raw_results.get("dnssec"))
-    dnssec_ok = dnssec.get("enabled") or _ensure_dict(dnssec.get("DNSKEY")).get("isFound")
-    if not dnssec_ok:
+    if observed_dnssec(raw_results.get("dnssec")) is False:
         findings.append(
             {
                 "title": "DNSSEC not enabled",
@@ -1029,7 +1032,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
             },
         )
 
-    if not _ensure_dict(raw_results.get("firewall")).get("hasWaf"):
+    if _ensure_dict(raw_results.get("firewall")).get("hasWaf") is False:
         findings.append(
             {
                 "title": "No WAF detected",
@@ -1039,7 +1042,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
             },
         )
 
-    if not _has_header(headers, "permissions-policy"):
+    if observed_header(raw_results, "permissions-policy") is False:
         findings.append(
             {
                 "title": "Missing Permissions-Policy",
@@ -1048,7 +1051,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
                 "module": "headers",
             },
         )
-    if not _ensure_dict(raw_results.get("security-txt")).get("isPresent"):
+    if _ensure_dict(raw_results.get("security-txt")).get("isPresent") is False:
         findings.append(
             {
                 "title": "No security.txt",
@@ -1058,7 +1061,7 @@ def extract_key_findings(raw_results: dict, max_findings: int | None = 8) -> lis
             },
         )
     robots = _ensure_dict(raw_results.get("robots-txt"))
-    if robots.get("skipped") or robots.get("error") or not robots.get("robots"):
+    if robots.get("robots") == []:
         findings.append(
             {
                 "title": "No robots.txt",

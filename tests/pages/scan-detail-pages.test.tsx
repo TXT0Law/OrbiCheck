@@ -238,7 +238,7 @@ describe("scan detail routes", () => {
     expect(
       screen.getByText(/No category summary for this scan/i)
     ).toBeInTheDocument();
-    expect(screen.getByText(/No key findings — no high-priority issues/i)).toBeInTheDocument();
+    expect(screen.getByText(/No high-priority findings were extracted from the available evidence/i)).toBeInTheDocument();
   });
 
   it("shows em-dash gauge and progress verdict when security score is null while running", () => {
@@ -403,4 +403,15 @@ describe("scan detail routes", () => {
 
     expect(screen.queryByTestId("module-retry-banner")).not.toBeInTheDocument();
   });
+});
+
+it("shows unobserved categories as unknown even for legacy pass summaries", () => {
+  useScanDetailContextMock.mockReturnValue(baseScanDetailContext({
+    detail: { ...MOCK_SCAN_DETAIL, categorySummary: [
+      { category: "security", label: "Security", modulesChecked: 0, issuesFound: 0, status: "pass" },
+    ] },
+  }));
+  render(<ScanSummaryPage />);
+  expect(screen.getByText("unknown")).toBeInTheDocument();
+  expect(screen.queryByText("pass")).not.toBeInTheDocument();
 });

@@ -23,8 +23,6 @@ const RETRY_AFTER_MAX_MS = 5_000;
 const SERVER_ERROR_FLOOR = 500;
 const SERVER_ERROR_CEILING = 600;
 const STATUS_TOO_MANY_REQUESTS = 429;
-const FAST_FAIL_STATUS = 503;
-const FAST_FAIL_DURATION_MS = 0;
 const SAFE_HTTP_ADAPTER = createSafeHttpAdapter();
 
 function isRetriable5xx() {
@@ -111,29 +109,14 @@ function applyRetry(instance) {
 }
 
 function attachCircuitBreaker(instance) {
-  // S-1: gate every outbound request on the per-host circuit breaker. The
-  // request interceptor short-circuits an open breaker with a synthetic
-  // 503 response so calling modules can branch on `status` exactly like a
-  // real upstream failure. The response interceptor records success/failure
-  // so the breaker learns from real traffic.
+  // A skipped request has no upstream response. Keep it rejected so modules
+  // cannot turn absent evidence into missing headers or a target HTTP status.
   instance.interceptors.request.use((config) => {
     const target = config?.url;
     const decision = circuitBreaker.canRequest(target || '');
     if (!decision.allowed) {
       const synthetic = new Error('circuit_breaker_open');
       synthetic.code = 'CIRCUIT_OPEN';
-      synthetic.response = {
-        status: FAST_FAIL_STATUS,
-        statusText: 'Circuit breaker open',
-        data: {
-          error: 'circuit_breaker_open',
-          reason: decision.reason,
-          cooldownRemainingMs: decision.cooldownRemainingMs,
-        },
-        headers: {},
-        config,
-        durationMs: FAST_FAIL_DURATION_MS,
-      };
       return Promise.reject(synthetic);
     }
     config.__circuitTarget = target;

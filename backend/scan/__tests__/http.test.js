@@ -146,7 +146,7 @@ describe('http.js — axios-retry + circuit breaker wiring', () => {
     expect(requestCount).toBe(1);
   });
 
-  it('short-circuits to 503 once the per-host breaker is open (S-1)', async () => {
+  it('rejects without an upstream response once the per-host breaker is open', async () => {
     // Pre-trip the breaker by recording 3 consecutive failures directly,
     // matching the default threshold. The next request must NOT touch the
     // network.
@@ -155,12 +155,10 @@ describe('http.js — axios-retry + circuit breaker wiring', () => {
     circuitBreaker.recordFailure(urlFor('/'));
 
     const client = httpWith({ timeout: 2000 });
-    const response = await client.get(urlFor('/'));
-
-    expect(response.status).toBe(503);
-    expect(response.data).toEqual(
-      expect.objectContaining({ error: 'circuit_breaker_open' }),
-    );
+    await expect(client.get(urlFor('/'))).rejects.toMatchObject({
+      code: 'CIRCUIT_OPEN',
+      message: 'circuit_breaker_open',
+    });
     expect(requestCount).toBe(0);
   });
 });

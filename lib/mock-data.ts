@@ -195,7 +195,14 @@ const MOCK_PORTS_DETAIL: PortsResult = {
   },
 };
 
-export const MOCK_SCAN_DETAIL: ScanDetail = {
+type CompleteMockScanDetail = ScanDetail & {
+  [K in "ssl" | "headers" | "ip" | "dns" | "statusCheck" | "tls" | "hsts" |
+    "cookies" | "firewall" | "threats" | "emailConfig" | "robotsTxt" | "sitemap" |
+    "dnssec" | "securityTxt" | "linkedPages" | "socialTags" | "archives" |
+    "rankingAndCarbon"]: NonNullable<ScanDetail[K]>;
+};
+
+export const MOCK_SCAN_DETAIL: CompleteMockScanDetail = {
   id: "scan-001",
   domain: "example.com",
   url: "https://example.com",

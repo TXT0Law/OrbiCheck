@@ -506,3 +506,118 @@ def test_embed_chart_returns_false_for_missing_bytes() -> None:
     # _embed_chart should short-circuit on falsy bytes without touching the pdf.
     assert _embed_chart(sentinel, None, width_mm=10) is False
     assert _embed_chart(sentinel, b"", width_mm=10) is False
+
+
+@pytest.mark.unit
+def test_report_unavailable_evidence_is_not_negative_or_zero() -> None:
+    payload = _sample_report_data()
+    payload['scan']['detail'] = {}
+    payload['scan']['moduleSummary'] = [
+        {'module': 'headers', 'status': 'failed', 'duration': None, 'error': 'fetch failed'}
+    ]
+    markdown = render_markdown(payload)
+    assert 'HSTS: unknown' in markdown
+    assert 'DNSSEC: unknown' in markdown
+    assert '| headers | failed | N/A |' in markdown
+    assert 'none detected' not in markdown
+    html = render_html(payload)
+    assert '>N/A</td>' in html
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('enabled,label', [(True, 'enabled'), (False, 'disabled')])
+def test_report_preserves_observed_security_flags(enabled: bool, label: str) -> None:
+    payload = _sample_report_data()
+    payload['scan']['detail']['hsts'] = {'enabled': enabled}
+    payload['scan']['detail']['dnssec'] = {'enabled': enabled}
+    markdown = render_markdown(payload)
+    assert f'HSTS: {label}' in markdown
+    assert f'DNSSEC: {label}' in markdown
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('observed', [False, True])
+@pytest.mark.parametrize('scan_status', ['completed', 'failed'])
+def test_artifacts_use_observed_evidence_and_truthful_appendix(
+    monkeypatch: pytest.MonkeyPatch, observed: bool, scan_status: str,
+) -> None:
+    import uuid
+    from app.models.report import ReportFormat
+    from app.models.scan import ModuleStatus, ScanStatus
+
+    def row(name: str, raw: dict | None, duration: int | None = None,
+            status: ModuleStatus = ModuleStatus.SUCCESS) -> SimpleNamespace:
+        return SimpleNamespace(module_name=name, raw_result=raw, duration_ms=duration,
+                               status=status, error_message=None)
+
+    modules = [
+        row('headers', {'responseHeaders': {'strict-transport-security': 'max-age=31536000'}}
+            if observed else {'error': 'fetch failed'}, 20),
+        row('ssl', {'skipped': True}, 0),
+        row('dnssec', {'enabled': False} if observed else None, 5 if observed else 0),
+        row('tls', {'grade': 'F'}, 100, ModuleStatus.FAILED),
+        row('ports', None, None, ModuleStatus.TIMEOUT),
+    ]
+    scan = SimpleNamespace(id=uuid.uuid4(), user_id=1, url='https://example.com',
+                           domain='example.com', status=ScanStatus(scan_status),
+                           security_score=None, completed_at=None, module_results=modules)
+    db = SimpleNamespace(execute=lambda query: SimpleNamespace(scalar_one_or_none=lambda: scan))
+    report = SimpleNamespace(id=uuid.uuid4(), user_id=1, scan_id=scan.id,
+                             title='Evidence report', monitor_id=None, format=ReportFormat.ALL)
+    sections: list[str] = []
+    write_section = report_service._pdf_write_section
+
+    def capture(pdf: object, title: str, content: str) -> None:
+        sections.append(content)
+        write_section(pdf, title, content)
+
+    monkeypatch.setattr(report_service, '_pdf_write_section', capture)
+    markdown, pdf, html, meta = report_service.generate_report_artifacts_sync(db, report)
+    assert pdf and pdf.startswith(b'%PDF')
+    assert html and 'example.com' in html
+    assert '| ssl | skipped | N/A |' in markdown
+    assert '| tls | failed | 100ms |' in markdown
+    assert '| ports | timeout | N/A |' in markdown
+    assert 'Renew SSL certificate soon' not in markdown
+    assert 'Weak SSL grade' not in markdown
+    assert '0 days remaining' not in markdown
+    assert 'HSTS: enabled' in markdown if observed else 'HSTS: unknown' in markdown
+    assert ('Enable DNSSEC validation' in markdown) is observed
+    pdf_text = '\n'.join(sections)
+    assert 'HSTS: enabled' in pdf_text if observed else 'HSTS: unknown' in pdf_text
+    assert 'ssl: skipped (N/A)' in pdf_text
+    assert meta['scanDomain'] == 'example.com'
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stored_report_artifacts_remain_immutable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import uuid
+    from app.models.report import ReportStatus
+
+    stored = SimpleNamespace(id=uuid.uuid4(), title='Historical report',
+                             status=ReportStatus.COMPLETED, content_md='Historical Markdown',
+                             content_pdf=b'%PDF-historical', content_html='<p>Historical HTML</p>',
+                             report_meta={'scanDomain': 'example.com'})
+
+    async def get_stored(db: object, report_id: uuid.UUID, user_id: int) -> SimpleNamespace:
+        return stored
+
+    monkeypatch.setattr(report_service, 'get_report', get_stored)
+    preview = await report_service.get_report_preview(None, stored.id, 1)
+    assert preview.content_md == stored.content_md
+    for fmt, expected in [('markdown', b'Historical Markdown'), ('pdf', stored.content_pdf),
+                          ('html', stored.content_html.encode())]:
+        content, _, _ = await report_service.get_report_download(None, stored.id, 1, fmt)
+        assert content == expected
+
+
+@pytest.mark.unit
+def test_report_preserves_unknown_category_coverage() -> None:
+    payload = _sample_report_data()
+    payload['scan']['categorySummary'] = [
+        {'category': 'security', 'label': 'Security', 'modulesChecked': 0,
+         'issuesFound': 0, 'status': 'unknown'}
+    ]
+    assert '| Security | 0 | 0 | Unknown |' in render_markdown(payload)
+    assert '<td>Unknown</td>' in render_html(payload)

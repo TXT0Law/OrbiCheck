@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.redis import get_redis_sync
 from app.models.scan import ModuleStatus, Scan, ScanModuleResult, ScanStatus
 from app.services.finding_observation import backfill_finding_observations_page
+from app.services.scan_evidence import collect_scan_evidence
 from app.services.security_analyzer import (
     compute_security_score_v2,
     resolve_security_score_for_detail,
@@ -548,7 +549,9 @@ def execute_scan(
                         .where(Scan.id == uuid.UUID(scan_id))
                         .options(selectinload(Scan.module_results)),
                     ).scalar_one()
-                    v2 = compute_security_score_v2(all_raw_results, scan_final.module_results)
+                    v2 = compute_security_score_v2(
+                        collect_scan_evidence(scan_final.module_results), scan_final.module_results
+                    )
                     security_score = 0 if v2 is None else v2.score
                 except Exception as err:
                     logger.exception(
@@ -662,11 +665,7 @@ def execute_scan(
 
             security_val: int | None = None
             if scan_row is not None:
-                all_raw_fatal = {
-                    m.module_name: m.raw_result
-                    for m in scan_row.module_results
-                    if m.raw_result is not None
-                }
+                all_raw_fatal = collect_scan_evidence(scan_row.module_results)
                 resolved_fatal = resolve_security_score_for_detail(
                     stored_score=scan_row.security_score,
                     scan_status=scan_row.status,

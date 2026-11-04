@@ -22,8 +22,9 @@ from app.services.finding_identity import (
     finding_evidence_modules,
     finding_rule_identity,
 )
+from app.services.scan_evidence import collect_scan_evidence
 from app.services.security_analyzer import extract_key_findings
-from app.services.transformers import ALL_MODULES, _is_skipped
+from app.services.transformers import ALL_MODULES
 
 SCAN_FINDING_BACKFILL_BATCH_SIZE = 25
 SCAN_FINDING_BACKFILL_MAX_BATCH_SIZE = 100
@@ -258,7 +259,7 @@ async def get_scan_finding_evidence(
             or not isinstance(module.raw_result, dict)
             or module.completed_at is None
             or module.completed_at > finding.observed_at
-            or _is_skipped(module)
+            or not collect_scan_evidence([module])
         ):
             sources.append(FindingEvidenceSource(module_name, "missing", None))
             continue
@@ -331,13 +332,7 @@ def build_finding_observations(scan: Scan) -> list[FindingObservationCandidate]:
     if scan.completed_at is None:
         raise ValueError("Completed scan is missing completed_at")
 
-    raw_results = {
-        row.module_name: row.raw_result
-        for row in scan.module_results
-        if row.status == ModuleStatus.SUCCESS
-        and isinstance(row.raw_result, dict)
-        and not _is_skipped(row)
-    }
+    raw_results = collect_scan_evidence(scan.module_results)
     observations: list[FindingObservationCandidate] = []
     seen_rule_ids: set[str] = set()
     for finding in extract_key_findings(raw_results, max_findings=None):
