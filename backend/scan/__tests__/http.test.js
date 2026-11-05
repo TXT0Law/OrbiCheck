@@ -102,6 +102,18 @@ describe('http.js — axios-retry + circuit breaker wiring', () => {
     expect(requestCount).toBe(2);
   });
 
+  it('preserves the final 429 after bounded retries', async () => {
+    respondWith = [
+      { status: 429, body: 'slow down' },
+      { status: 429, body: 'slow down' },
+      { status: 429, body: 'slow down' },
+    ];
+    const client = httpWith({ timeout: 5000 });
+    const response = await client.get(urlFor('/'));
+    expect(response.status).toBe(429);
+    expect(requestCount).toBe(3);
+  });
+
   it('surfaces the last 5xx response without retrying (default policy)', async () => {
     respondWith = [
       { status: 503, body: 'down' },

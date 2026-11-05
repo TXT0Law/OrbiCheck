@@ -386,7 +386,17 @@ export interface PortsResult {
   scanStats?: ScanStats;
 }
 
+export type FetchOutcome =
+  | "http_response"
+  | "dns_error"
+  | "tls_error"
+  | "timeout"
+  | "circuit_open"
+  | "network_error";
+
 export interface StatusResult {
+  /** Absent on historical responses with no classified fetch outcome. */
+  fetchOutcome?: FetchOutcome | null;
   httpStatusCode: number | null;
   responseTimeMs: number | null;
   serverHeader: string | null;

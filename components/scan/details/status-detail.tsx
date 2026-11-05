@@ -1,11 +1,29 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { StatusResult } from "@/shared/types/scan";
+import type { FetchOutcome, StatusResult } from "@/shared/types/scan";
 
 interface StatusDetailProps {
   data: StatusResult;
 }
 
+const HTTP_ERROR_MIN = 400;
+const HTTP_RESPONSE_LABELS: Record<number, string> = {
+  403: "Access refused",
+  429: "Rate limited",
+  503: "Service unavailable",
+};
+
+const FETCH_FAILURE_LABELS: Record<Exclude<FetchOutcome, "http_response">, string> = {
+  dns_error: "No HTTP response: DNS lookup failed",
+  tls_error: "No HTTP response: TLS connection failed",
+  timeout: "No HTTP response: request timed out",
+  circuit_open: "No HTTP response: circuit breaker open",
+  network_error: "No HTTP response: network connection failed",
+};
+
 export function StatusDetail({ data }: StatusDetailProps) {
+  const failureLabel = data.fetchOutcome && data.fetchOutcome !== "http_response"
+    ? FETCH_FAILURE_LABELS[data.fetchOutcome]
+    : null;
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       <Card>
@@ -15,13 +33,21 @@ export function StatusDetail({ data }: StatusDetailProps) {
         <CardContent>
           <p
             className={`text-4xl font-bold ${
-              data.httpStatusCode != null && data.httpStatusCode >= 400
-                ? "text-red-600"
-                : "text-green-600"
+              data.httpStatusCode == null
+                ? "text-muted-foreground"
+                : data.httpStatusCode >= HTTP_ERROR_MIN
+                  ? "text-red-600"
+                  : "text-green-600"
             }`}
           >
             {data.httpStatusCode ?? "—"}
           </p>
+          {data.httpStatusCode == null && (
+            <p className="mt-2 text-sm text-muted-foreground">{failureLabel ?? "HTTP response unavailable"}</p>
+          )}
+          {data.httpStatusCode != null && HTTP_RESPONSE_LABELS[data.httpStatusCode] && (
+            <p className="mt-2 text-sm text-muted-foreground">{HTTP_RESPONSE_LABELS[data.httpStatusCode]}</p>
+          )}
         </CardContent>
       </Card>
 

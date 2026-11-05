@@ -6,6 +6,8 @@ If the raw data already matches (or close enough), the transformer
 can do minimal reshaping.
 """
 
+import math
+
 from app.services.scan_evidence import (
     is_skipped_payload, normalize_raw_results, observed_dnssec, observed_hsts,
 )
@@ -954,8 +956,9 @@ def transform_headers(raw: dict, http_security_raw: dict | None = None) -> dict:
 def transform_status(raw: dict) -> dict:
     """Raw status -> StatusResult."""
     return {
-        "httpStatusCode": raw.get("responseCode", 0),
-        "responseTimeMs": round(raw.get("responseTime", 0), 1),
+        "httpStatusCode": raw.get("responseCode"),
+        "fetchOutcome": raw.get("fetchOutcome"),
+        "responseTimeMs": round(raw["responseTime"], 1) if isinstance(raw.get("responseTime"), (int, float)) and not isinstance(raw.get("responseTime"), bool) and math.isfinite(raw["responseTime"]) and raw["responseTime"] >= 0 else None,
         "serverHeader": "",
         "contentType": "",
         "redirectCount": 0,
@@ -2466,7 +2469,7 @@ TRANSFORMERS = {
 
 def build_scan_detail(scan_id: str, url: str, all_raw_results: dict) -> dict:
     """Aggregate all transformed results into a ScanDetail-like dict."""
-    all_raw_results = normalize_raw_results(all_raw_results)
+    all_raw_results = normalize_raw_results(all_raw_results, include_fetch_failures=True)
     # Aggregates may consume several modules, but cannot manufacture a result
     # solely from absent or skipped inputs.
     sources = {

@@ -221,3 +221,40 @@ async def test_retry_module_does_not_accept_false_success_from_scan_service(
 
     assert result["status"] == "failed"
     assert ssl_row.status == ModuleStatus.FAILED
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload,success,code,outcome", [
+    ({"responseCode": 403, "fetchOutcome": "http_response"}, True, 403, "http_response"),
+    ({"responseCode": 429, "fetchOutcome": "http_response"}, True, 429, "http_response"),
+    ({"responseCode": 503, "fetchOutcome": "http_response"}, True, 503, "http_response"),
+    ({"fetchOutcome": "timeout"}, False, None, "timeout"),
+    ({"fetchOutcome": "circuit_open"}, False, None, "circuit_open"),
+])
+async def test_manual_retry_preserves_target_observation_through_public_detail(
+    monkeypatch: pytest.MonkeyPatch, payload: dict, success: bool, code: int | None, outcome: str
+) -> None:
+    from app.services.scan_evidence import collect_scan_evidence
+    from app.services.transformers import build_scan_detail
+
+    scan_id = uuid4()
+    row = SimpleNamespace(module_name="status", status=ModuleStatus.FAILED, raw_result=None,
+        duration_ms=1, error_message="previous failure", completed_at=None)
+    scan = SimpleNamespace(id=scan_id, url="https://example.com", status=ScanStatus.COMPLETED, module_results=[row])
+
+    async def get_scan(_db, _scan_id):
+        return scan
+
+    async def call_module(_name, _url):
+        return {"status_code": 200, "data": {"success": success, "statusCode": 200, "data": payload,
+            "error": None if success else "Request failed", "durationMs": 12}}
+
+    monkeypatch.setattr(scan_service, "get_scan", get_scan)
+    monkeypatch.setattr(scan_service, "call_scan_module", call_module)
+    monkeypatch.setattr(scan_service, "_refresh_scan_security_score", AsyncMock())
+    result = await scan_service.retry_module(AsyncMock(), scan_id, "status")
+    detail = build_scan_detail(str(scan_id), scan.url, collect_scan_evidence(scan.module_results, include_fetch_failures=True))
+    assert result["status"] == ("success" if success else "failed")
+    assert detail["statusCheck"]["httpStatusCode"] == code
+    assert detail["statusCheck"]["fetchOutcome"] == outcome

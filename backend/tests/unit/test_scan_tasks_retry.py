@@ -465,3 +465,22 @@ def test_progress_payload_exposes_current_modules_and_degraded_target(
 def test_module_status_retrying_enum_value_exposed() -> None:
     """B-9: defensive guard so future refactors don't silently rename the enum."""
     assert ModuleStatus.RETRYING.value == "retrying"
+
+
+@pytest.mark.unit
+def test_batch_preserves_status_fetch_failure_and_module_error(
+    monkeypatch: pytest.MonkeyPatch, patched_environment, stub_scan
+) -> None:
+    session = patched_environment["session"]
+    monkeypatch.setattr(scan_tasks, "MODULE_BATCHES", {"quick": ["status"], "medium": [], "heavy": []})
+    monkeypatch.setattr(scan_tasks, "ALL_MODULES", ["status"])
+    monkeypatch.setattr(scan_tasks, "call_scan_batch_sync", lambda *_a, **_kw: {
+        "results": {"status": {"success": False, "statusCode": 200,
+            "data": {"fetchOutcome": "dns_error"}, "error": "getaddrinfo ENOTFOUND", "durationMs": 1}}
+    })
+    scan_tasks.execute_scan.request.id = "task-status-fetch-failure"
+    scan_tasks.execute_scan.run(str(stub_scan.id))
+    updates = [statement.compile().params for statement in session.executed if str(statement).lower().startswith("update scan_module_results")]
+    saved = next(values for values in updates if "raw_result" in values)
+    assert saved["raw_result"] == {"fetchOutcome": "dns_error"}
+    assert saved["error_message"] == "getaddrinfo ENOTFOUND"

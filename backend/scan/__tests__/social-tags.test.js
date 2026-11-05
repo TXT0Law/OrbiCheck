@@ -45,6 +45,7 @@ describe('social-tags module', () => {
   it('returns parsed metadata on success', async () => {
     const handler = await loadHandlerWithAxios(
       jest.fn().mockResolvedValue({
+        status: 200,
         data: `
           <html>
             <head>
@@ -72,6 +73,7 @@ describe('social-tags module', () => {
   it('returns null-ish metadata fields gracefully when tags are absent', async () => {
     const handler = await loadHandlerWithAxios(
       jest.fn().mockResolvedValue({
+        status: 200,
         data: '<html><head><title></title></head><body>No metadata</body></html>',
       })
     );

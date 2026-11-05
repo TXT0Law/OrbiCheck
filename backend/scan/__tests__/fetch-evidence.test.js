@@ -65,7 +65,7 @@ describe('fetch evidence when a target is skipped', () => {
     const result = await handler.runDirect(TARGET);
 
     expect(adapter).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ success: false, data: null });
+    expect(result).toMatchObject({ success: false, data: _name === 'status' ? { fetchOutcome: 'circuit_open' } : null });
     expect(result.error).toEqual(expect.any(String));
   });
 });

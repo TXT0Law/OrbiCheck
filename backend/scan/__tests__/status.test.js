@@ -117,13 +117,13 @@ describe('status module (S-3)', () => {
     expect(response.body.data.responseCode).toBe(200);
   });
 
-  it('returns success:false with the upstream status when probe yields 5xx', async () => {
+  it('returns measured status with the upstream status when probe yields 5xx', async () => {
     responder = (_req, res) => {
       res.statusCode = 503;
       res.end('down');
     };
     const response = await invoke(urlFor('/'));
-    expect(response.body.success).toBe(false);
+    expect(response.body.success).toBe(true);
     expect(response.body.data.isUp).toBe(false);
     expect(response.body.data.responseCode).toBe(503);
   });

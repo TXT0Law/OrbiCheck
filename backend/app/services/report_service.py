@@ -317,7 +317,7 @@ def _safe_domain(url: str) -> str:
 
 
 def _collect_raw_results(module_results: list[ScanModuleResult]) -> dict[str, dict]:
-    return collect_scan_evidence(module_results)
+    return collect_scan_evidence(module_results, include_fetch_failures=True)
 
 
 def _build_module_summary(module_results: list[ScanModuleResult]) -> list[dict[str, str | int | None]]:
@@ -624,6 +624,23 @@ def build_report_payload_sync(db: Session, report: Report) -> dict:
     }
 
 
+def _target_response_text(detail: dict) -> str:
+    status = detail.get("statusCheck") or {}
+    code = status.get("httpStatusCode")
+    if type(code) is int:
+        descriptions = {403: "access refused", 429: "rate limited", 503: "service unavailable"}
+        suffix = f" ({descriptions[code]})" if code in descriptions else ""
+        return f"HTTP {code}{suffix}"
+    outcomes = {
+        "dns_error": "DNS error", "tls_error": "TLS error", "timeout": "timeout",
+        "circuit_open": "circuit open", "network_error": "network error",
+    }
+    outcome = status.get("fetchOutcome")
+    if outcome in outcomes:
+        return f"No HTTP response ({outcomes[outcome]})"
+    return "unknown"
+
+
 def render_markdown(report_data: dict) -> str:
     scan = report_data["scan"]
     detail = scan["detail"]
@@ -649,6 +666,7 @@ def render_markdown(report_data: dict) -> str:
         f"**Security Score**: {_stringify(score)}/100 ({_score_grade(score)})",
         f"**Scan Status**: {scan['status']}  |  **Duration**: {scan['duration']}",
         f"**Scanned At**: {_stringify(scan['scannedAt'])}",
+        f"**Target Response**: {_target_response_text(detail)}",
         "",
         "### Severity Overview",
         "| Level | Count |",
@@ -978,6 +996,7 @@ def render_pdf(report_data: dict) -> bytes:
             f"Domain: {scan['domain']}\n"
             f"Score: {_stringify(score)}/100 ({_score_grade(score)})\n"
             f"Status: {scan['status']}\n"
+            f"Target Response: {_target_response_text(detail)}\n"
             f"Duration: {scan['duration']}"
         ),
     )
@@ -1247,6 +1266,7 @@ def render_html(report_data: dict) -> str:
     return template.render(
         scan=scan,
         detail=detail,
+        target_response=_target_response_text(detail),
         report_id=report_data.get("reportId"),
         generated_at=report_data.get("generatedAt"),
         score_text=_stringify(score, "—"),

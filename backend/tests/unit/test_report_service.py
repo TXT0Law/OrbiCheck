@@ -621,3 +621,20 @@ def test_report_preserves_unknown_category_coverage() -> None:
     ]
     assert '| Security | 0 | 0 | Unknown |' in render_markdown(payload)
     assert '<td>Unknown</td>' in render_html(payload)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("status,label", [
+    ({"httpStatusCode": 403, "fetchOutcome": "http_response"}, "HTTP 403 (access refused)"),
+    ({"httpStatusCode": 429, "fetchOutcome": "http_response"}, "HTTP 429 (rate limited)"),
+    ({"httpStatusCode": 503, "fetchOutcome": "http_response"}, "HTTP 503 (service unavailable)"),
+    ({"httpStatusCode": None, "fetchOutcome": "dns_error"}, "No HTTP response (DNS error)"),
+    ({"httpStatusCode": None, "fetchOutcome": "tls_error"}, "No HTTP response (TLS error)"),
+    ({"httpStatusCode": None, "fetchOutcome": "timeout"}, "No HTTP response (timeout)"),
+    ({"httpStatusCode": None, "fetchOutcome": "circuit_open"}, "No HTTP response (circuit open)"),
+])
+def test_reports_describe_target_response_separately_from_module_execution(status: dict, label: str) -> None:
+    payload = _sample_report_data()
+    payload["scan"]["detail"]["statusCheck"] = status
+    assert label in render_markdown(payload)
+    assert label in render_html(payload)

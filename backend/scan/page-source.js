@@ -1,3 +1,4 @@
+import { contentEvidenceError } from './_common/content-evidence.js';
 import { httpWith } from './_common/http.js';
 import middleware from './_common/middleware.js';
 
@@ -48,6 +49,9 @@ const pageSourceHandler = async (url) => {
         'Accept-Language': 'en-US,en;q=0.9',
       },
     });
+
+    const contentError = contentEvidenceError(response, url, Date.now() - startTime);
+    if (contentError) return contentError;
 
     const rawData = typeof response.data === 'string' ? response.data : '';
     const html = rawData.slice(0, MAX_HTML_LENGTH);

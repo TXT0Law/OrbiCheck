@@ -407,7 +407,7 @@ async def get_scan_module(
     if not module_result:
         return SuccessResponse(data=None)
 
-    all_raw = collect_scan_evidence(scan.module_results)
+    all_raw = collect_scan_evidence(scan.module_results, include_fetch_failures=True)
     detail = build_scan_detail(str(scan.id), scan.url, all_raw)
 
     frontend_key = MODULE_TO_FRONTEND_KEY.get(module_name, module_name)
@@ -435,7 +435,7 @@ def _compose_scan_detail_payload(scan, *, key_findings_limit: int) -> dict:
     Pulls every transformer + analyzer once so both endpoints stay in lockstep
     (G7 / D0-1: single source of truth for ``securityScoreBreakdown`` shape).
     """
-    all_raw = collect_scan_evidence(scan.module_results)
+    all_raw = collect_scan_evidence(scan.module_results, include_fetch_failures=True)
     detail = build_scan_detail(str(scan.id), scan.url, all_raw)
     module_errors = build_module_errors(scan.module_results)
     module_jobs, total_duration_ms = build_module_jobs(

@@ -1,3 +1,4 @@
+import { contentEvidenceError } from './_common/content-evidence.js';
 import * as cheerio from 'cheerio';
 
 import { http } from './_common/http.js';
@@ -17,6 +18,9 @@ const socialTagsHandler = async (rawUrl) => {
 
   try {
     const response = await http.get(url);
+    const contentError = contentEvidenceError(response, url, 0);
+    if (contentError) return contentError;
+
     const html = response.data;
     const $ = cheerio.load(html);
     
