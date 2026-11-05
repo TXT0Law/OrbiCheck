@@ -62,6 +62,14 @@ describe.each([['page-source', pageSource], ['social-tags', socialTags], ['linke
     expect(await handler.runDirect(target + 'login')).toMatchObject({ success: true });
     expect(requests).toBe(1);
   });
+  it('accepts a directly requested login page after canonical redirect', async () => {
+    responder = (req, res) => {
+      if (req.url === '/login') { res.writeHead(302, { Location: '/login/' }); res.end(); return; }
+      res.end('<html><input type="password"><a href="/help">Help</a></html>');
+    };
+    expect(await handler.runDirect(target + 'login')).toMatchObject({ success: true });
+    expect(requests).toBe(2);
+  });
   it('accepts normal redirected content after two requests', async () => {
     responder = (req, res) => {
       if (req.url === '/') { res.writeHead(302, { Location: '/home' }); res.end(); return; }

@@ -27,7 +27,9 @@ export function contentEvidenceError(response, requestedUrl, durationMs = 0) {
   const finalUrl = response.request?.res?.responseUrl || response.request?.responseURL;
   if (finalUrl && finalUrl !== requestedUrl) {
     try {
-      if (LOGIN_PATH.test(new URL(finalUrl).pathname) && $('input[type="password"]').length > 0) {
+      const requestedLogin = LOGIN_PATH.test(new URL(requestedUrl).pathname);
+      if (!requestedLogin && LOGIN_PATH.test(new URL(finalUrl).pathname)
+          && $('input[type="password"]').length > 0) {
         return err('Content unavailable: redirected to login', durationMs, { statusCode: 200 });
       }
     } catch (error) {
