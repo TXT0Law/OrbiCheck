@@ -278,3 +278,45 @@ async def test_scan_detail_security_score_null_while_running(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["data"]["securityScore"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("raw,code,outcome", [
+    ({"responseCode": 403, "fetchOutcome": "http_response"}, 403, "http_response"),
+    ({"success": False, "data": {"responseCode": 429}}, 429, "http_response"),
+    ({"responseCode": 503}, 503, "http_response"),
+    ({"fetchOutcome": "dns_error"}, None, "dns_error"),
+    ({"fetchOutcome": "tls_error"}, None, "tls_error"),
+    ({"fetchOutcome": "timeout"}, None, "timeout"),
+    ({"fetchOutcome": "circuit_open"}, None, "circuit_open"),
+])
+async def test_detail_and_module_keep_target_response_separate_from_module_failure(
+    async_client, monkeypatch: pytest.MonkeyPatch, raw: dict, code: int | None, outcome: str
+) -> None:
+    scan_id = UUID("55555555-5555-5555-5555-555555555555")
+    scan = SimpleNamespace(
+        id=scan_id, domain="example.com", url="https://example.com", status=ScanStatus.COMPLETED,
+        security_score=42, started_at=None, completed_at=None,
+        module_results=[SimpleNamespace(module_name="status", status=ModuleStatus.FAILED,
+            raw_result=raw, error_message="Probe could not complete", duration_ms=12)],
+    )
+    from app.services import scan_service
+
+    async def get_scan(_db, _scan_id, _user_id=None):
+        return scan
+
+    monkeypatch.setattr(scan_service, "get_scan", get_scan)
+    for suffix in ("detail", "detail/full", "modules/status"):
+        response = await async_client.get(f"/api/v1/scans/{scan_id}/{suffix}")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        if suffix == "detail/full":
+            data = data["summary"]
+        status = data["data"] if suffix == "modules/status" else data["statusCheck"]
+        assert status["httpStatusCode"] == code
+        assert status["fetchOutcome"] == outcome
+        if code is None:
+            assert status["responseTimeMs"] is None
+        if suffix != "modules/status":
+            assert data["moduleErrors"]["status"]["message"] == "Probe could not complete"

@@ -87,7 +87,27 @@ const categoryScoresSchema = z.object({
   bestPractices: z.number(),
 });
 
+const HTTP_STATUS_MIN = 100;
+const HTTP_STATUS_MAX = 599;
+const MIN_MEASUREMENT = 0;
+
+export const StatusResultSchema = z.object({
+  httpStatusCode: z.number().int().min(HTTP_STATUS_MIN).max(HTTP_STATUS_MAX).nullable(),
+  responseTimeMs: z.number().min(MIN_MEASUREMENT).nullable(),
+  serverHeader: z.string().nullable(),
+  contentType: z.string().nullable(),
+  redirectCount: z.number().int().min(MIN_MEASUREMENT).nullable(),
+  fetchOutcome: z.enum([
+    "http_response", "dns_error", "tls_error", "timeout", "circuit_open", "network_error",
+  ]).nullable().optional(),
+}).passthrough().refine(
+  (status) => !status.fetchOutcome || status.fetchOutcome === "http_response"
+    || (status.httpStatusCode == null && status.responseTimeMs == null),
+  { message: "No-response outcomes cannot contain HTTP response measurements" },
+);
+
 export const ScanDetailResponseSchema = z.object({
+  statusCheck: StatusResultSchema.nullable().optional(),
   id: z.string(),
   domain: z.string(),
   url: z.string(),

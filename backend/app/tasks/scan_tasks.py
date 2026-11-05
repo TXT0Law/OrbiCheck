@@ -326,7 +326,7 @@ def execute_scan(
                                 status=ModuleStatus.SUCCESS if success else ModuleStatus.FAILED,
                                 raw_result=raw_data,
                                 duration_ms=duration_ms,
-                                error_message=raw_data.get("error") if not success and isinstance(raw_data, dict) else None,
+                                error_message=(module_result.get("error") or (raw_data.get("error") if isinstance(raw_data, dict) else None)) if not success else None,
                                 completed_at=datetime.now(timezone.utc),
                             )
                         )

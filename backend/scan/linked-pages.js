@@ -1,3 +1,4 @@
+import { contentEvidenceError } from './_common/content-evidence.js';
 import * as cheerio from 'cheerio';
 import urlLib from 'url';
 
@@ -64,6 +65,9 @@ export function classifyLinks(html, pageUrl) {
  */
 const linkedPagesHandler = async (url) => {
   const response = await http.get(url);
+  const contentError = contentEvidenceError(response, url, 0);
+  if (contentError) return contentError;
+
   const html = response.data;
   const { internal, external } = classifyLinks(html, url);
 

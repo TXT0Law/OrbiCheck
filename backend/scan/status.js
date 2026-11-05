@@ -13,6 +13,7 @@
 
 import { performance } from 'perf_hooks';
 
+import { classifyFetchFailure } from './_common/fetch-outcome.js';
 import { getRequestSignal } from './_common/abort.js';
 import { http, HTTP_DEFAULT_TIMEOUT_MS } from './_common/http.js';
 import middleware from './_common/middleware.js';
@@ -25,6 +26,8 @@ const PROBE_TIMEOUT_MS = parseInt(
 const STATUS_UP_FLOOR = 200;
 const STATUS_UP_CEILING = 400;
 const MAX_REDIRECTS = 3;
+const HTTP_STATUS_MIN = 100;
+const HTTP_STATUS_MAX = 599;
 
 function isUpStatus(status) {
   return Number.isFinite(status) && status >= STATUS_UP_FLOOR && status < STATUS_UP_CEILING;
@@ -71,21 +74,18 @@ const statusHandler = async (url, req) => {
       url,
       getRequestSignal(req),
     );
-    const responseCode = response?.status ?? 0;
+    const responseCode = response?.status;
+    if (!Number.isInteger(responseCode) || responseCode < HTTP_STATUS_MIN || responseCode > HTTP_STATUS_MAX) {
+      throw new TypeError('Probe returned no valid target HTTP status');
+    }
     const serverHeader = response?.headers?.server || null;
     const data = {
+      fetchOutcome: 'http_response',
       isUp: isUpStatus(responseCode),
       responseCode,
       responseTime: Math.round(responseTime),
       server: serverHeader,
     };
-    if (!data.isUp) {
-      return err(
-        `Received non-success response code: ${responseCode}`,
-        Math.round(responseTime),
-        { statusCode: 200, data },
-      );
-    }
     return ok(data, responseTime);
   } catch (error) {
     // Network-level errors (DNS, refused, TLS) — surface a clean envelope
@@ -95,7 +95,7 @@ const statusHandler = async (url, req) => {
         ? 'Target temporarily skipped by circuit breaker'
         : `Probe failed: ${error?.message || 'unknown error'}`,
       0,
-      { statusCode: 200 },
+      { statusCode: 200, data: { fetchOutcome: classifyFetchFailure(error) } },
     );
   }
 };

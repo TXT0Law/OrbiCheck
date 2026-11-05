@@ -169,3 +169,80 @@ def test_successful_header_wrappers_preserve_actual_header_names(payload: dict) 
     detail = build_scan_detail("scan", "https://example.com", {"headers": payload})
     assert detail["headers"]["responseHeaders"]["error"] == "none"
     assert detail["hsts"]["enabled"] is False
+
+
+@pytest.mark.parametrize("code", [403, 429, 503])
+def test_failed_status_row_retains_actual_http_observation(code: int) -> None:
+    rows = [SimpleNamespace(module_name="status", status="failed", raw_result={"success": False, "data": {"responseCode": code, "responseTime": 12}, "error": "HTTP response"})]
+    detail = build_scan_detail("scan", "https://example.com", collect_scan_evidence(rows))
+    assert detail["statusCheck"]["httpStatusCode"] == code
+    assert detail["statusCheck"]["fetchOutcome"] == "http_response"
+
+
+@pytest.mark.parametrize("outcome", ["dns_error", "tls_error", "timeout", "circuit_open", "network_error"])
+def test_transport_failure_is_displayed_without_target_http_status(outcome: str) -> None:
+    rows = [SimpleNamespace(module_name="status", status="failed", raw_result={"fetchOutcome": outcome})]
+    assert collect_scan_evidence(rows) == {}
+    raw = collect_scan_evidence(rows, include_fetch_failures=True)
+    detail = build_scan_detail("scan", "https://example.com", raw)
+    assert detail["statusCheck"]["httpStatusCode"] is None
+    assert detail["statusCheck"]["responseTimeMs"] is None
+    assert detail["statusCheck"]["fetchOutcome"] == outcome
+
+
+@pytest.mark.parametrize("raw", [
+    {"responseCode": True}, {"responseCode": "403"}, {"responseCode": 0},
+    {"statusCode": 503}, {"responseCode": 600},
+    {"responseCode": 403, "fetchOutcome": {}},
+    {"data": {"fetchOutcome": "dns_error"}, "fetchOutcome": []},
+    {"success": "false", "data": {"responseCode": 403}},
+])
+def test_malformed_status_evidence_does_not_create_target_response(raw: dict) -> None:
+    rows = [SimpleNamespace(module_name="status", status="failed", raw_result=raw)]
+    detail = build_scan_detail("scan", "https://example.com", collect_scan_evidence(rows, include_fetch_failures=True))
+    assert detail["statusCheck"] is None
+
+
+@pytest.mark.parametrize("status,error,code", [("timeout", None, 200), ("failed", "TLS certificate error", 403), ("failed", "probe exception", 200)])
+def test_stale_status_from_failed_attempt_is_not_reused(status: str, error: str | None, code: int) -> None:
+    rows = [SimpleNamespace(module_name="status", status=status, error_message=error, raw_result={"responseCode": code})]
+    assert collect_scan_evidence(rows, include_fetch_failures=True) == {}
+
+
+@pytest.mark.parametrize("duration", [True, -1, float("nan"), float("inf")])
+def test_status_response_time_requires_a_finite_nonnegative_measurement(duration: float) -> None:
+    detail = build_scan_detail("scan", "https://example.com", {"status": {"responseCode": 200, "responseTime": duration}})
+    assert detail["statusCheck"]["responseTimeMs"] is None
+
+
+def test_excessively_nested_status_envelopes_fail_closed() -> None:
+    raw = {"responseCode": 403, "data": {"success": "false", "responseCode": 200}}
+    for _ in range(3):
+        raw = {"success": True, "data": raw}
+    detail = build_scan_detail("scan", "https://example.com", {"status": raw})
+    assert detail["statusCheck"] is None
+
+
+@pytest.mark.parametrize("module", ["social-tags", "linked-pages", "page-source"])
+def test_failed_blocking_content_does_not_become_original_site_evidence(module: str) -> None:
+    from app.services.security_analyzer import extract_key_findings
+
+    rows = [SimpleNamespace(module_name=module, status="failed", raw_result=None,
+        error_message="Content unavailable: HTTP 403")]
+    evidence = collect_scan_evidence(rows)
+    detail = build_scan_detail("scan", "https://example.com", evidence)
+    assert evidence == {}
+    assert extract_key_findings(evidence) == []
+    assert generate_recommendations(detail, []) == []
+
+
+@pytest.mark.parametrize("is_up", [True, False])
+def test_legacy_reachability_does_not_invent_http_response(is_up: bool) -> None:
+    raw = {"isUp": is_up}
+    rows = [SimpleNamespace(module_name="status", status="success", raw_result=raw)]
+    detail = build_scan_detail("scan", "https://example.com", collect_scan_evidence(rows))
+    assert detail["statusCheck"]["httpStatusCode"] is None
+    assert detail["statusCheck"]["responseTimeMs"] is None
+    assert detail["statusCheck"]["fetchOutcome"] is None
+    rows[0].status = "failed"
+    assert collect_scan_evidence(rows, include_fetch_failures=True) == {}
