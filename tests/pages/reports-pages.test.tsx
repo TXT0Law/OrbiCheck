@@ -13,7 +13,7 @@ const schedulesMock = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 const previewMock = vi.hoisted(() => ({ content: "# Heading\n\nReport body" }));
-const reportsMock = vi.hoisted(() => ({ empty: false }));
+const reportsMock = vi.hoisted(() => ({ empty: false, error: false, refetch: vi.fn(), paginated: false, fetching: false, total: 25, removedLastPage: false }));
 
 vi.mock("next/navigation", () => ({
   useRouter: vi.fn(() => ({ push: vi.fn() })),
@@ -48,13 +48,18 @@ vi.mock("@/lib/hooks/use-report-schedules", () => ({
 }));
 
 vi.mock("@/lib/hooks/use-reports", () => ({
-  useReportList: vi.fn(() => ({
+  useReportList: vi.fn((params?: { page?: number }) => ({
     isLoading: false,
+    isFetching: reportsMock.fetching,
+    isError: reportsMock.error,
+    refetch: reportsMock.refetch,
+    error: reportsMock.error ? new Error("Report API unavailable") : null,
     data: {
-      reports: reportsMock.empty ? [] : [
+      meta: reportsMock.paginated ? { page: params?.page ?? 1, limit: 20, total: reportsMock.total } : undefined,
+      reports: reportsMock.empty || (reportsMock.removedLastPage && params?.page === 2) ? [] : [
         {
           id: "report-1",
-          title: "Security Report - example.com",
+          title: reportsMock.paginated && params?.page === 2 ? "Older report" : "Security Report - example.com",
           format: "both",
           status: "completed",
           scanId: "scan-1",
@@ -125,6 +130,12 @@ describe("reports pages", () => {
     schedulesMock.error = false;
     previewMock.content = "# Heading\n\nReport body";
     reportsMock.empty = false;
+    reportsMock.error = false;
+    reportsMock.paginated = false;
+    reportsMock.fetching = false;
+    reportsMock.total = 25;
+    reportsMock.removedLastPage = false;
+    reportsMock.refetch.mockClear();
   });
 
   it("renders the reports list", () => {
@@ -147,14 +158,105 @@ describe("reports pages", () => {
     expect(screen.queryByText("Security Report - example.com")).not.toBeInTheDocument();
   });
 
+  it("shows a persistent report error and allows retry without empty onboarding", () => {
+    reportsMock.empty = true;
+    reportsMock.error = true;
+    render(<ReportsPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Reports could not be loaded.");
+    expect(screen.queryByRole("heading", { name: "No reports yet" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(reportsMock.refetch).toHaveBeenCalled();
+  });
+
+  it("lets users reach older reports and return with clear page boundaries", () => {
+    reportsMock.paginated = true;
+    render(<ReportsPage />);
+    expect(screen.getByRole("navigation", { name: "Report pages" })).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Older report")).toBeInTheDocument();
+    expect(screen.queryByText("Security Report - example.com")).not.toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getByText("Security Report - example.com")).toBeInTheDocument();
+  });
+
+  it("returns to the last valid page after the only report on page two is deleted", () => {
+    reportsMock.paginated = true;
+    reportsMock.total = 21;
+    const { rerender } = render(<ReportsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Older report")).toBeInTheDocument();
+
+    // The invalidated list returns the authoritative total after deletion.
+    reportsMock.total = 20;
+    reportsMock.removedLastPage = true;
+    rerender(<ReportsPage />);
+    expect(screen.queryByRole("heading", { name: "No reports yet" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Page 2 of 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Security Report - example.com")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+  });
+
+  it("resets to the first page when the report collection becomes empty", () => {
+    reportsMock.paginated = true;
+    const { rerender } = render(<ReportsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    reportsMock.total = 0;
+    reportsMock.empty = true;
+    rerender(<ReportsPage />);
+    expect(screen.getByRole("heading", { name: "No reports yet" })).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+  });
+
+  it("preserves cached reports with a persistent warning when refresh fails", () => {
+    reportsMock.error = true;
+    render(<ReportsPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Reports could not be loaded.");
+    expect(screen.getByText("Security Report - example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "No reports yet" })).not.toBeInTheDocument();
+  });
+
+  it("prevents duplicate navigation while fetching and lets users leave or retry a failed page", () => {
+    reportsMock.paginated = true;
+    const { rerender } = render(<ReportsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    reportsMock.fetching = true;
+    rerender(<ReportsPage />);
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    reportsMock.fetching = false;
+    reportsMock.error = true;
+    reportsMock.empty = true;
+    rerender(<ReportsPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Reports could not be loaded.");
+    expect(screen.queryByRole("heading", { name: "No reports yet" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(reportsMock.refetch).toHaveBeenCalled();
+    reportsMock.error = false;
+    reportsMock.empty = false;
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getByText("Security Report - example.com")).toBeInTheDocument();
+  });
+
   it("renders the reports page chrome in Chinese", () => {
     localStorage.setItem(APPEARANCE_KEYS.language, "zh");
+    reportsMock.paginated = true;
 
     render(<ReportsPage />);
 
     expect(screen.getByRole("heading", { name: "報告" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "建立排程" })).toBeInTheDocument();
     expect(screen.getByText("排程")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "報告分頁" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上一頁" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下一頁" })).toBeEnabled();
+    expect(screen.getByText("第 1 頁，共 2 頁")).toBeInTheDocument();
   });
 
   it("renders the schedule list controls in Chinese", () => {

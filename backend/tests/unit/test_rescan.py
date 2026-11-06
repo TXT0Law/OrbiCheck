@@ -252,7 +252,7 @@ async def test_rescan_port_scan_requires_persisted_explicit_opt_in(
         url="https://example.com",
         domain="example.com",
         module_results=[],
-        scan_options=stored_options,
+        scan_options={**stored_options, "selectedModules": list(scan_service.ALL_MODULES)},
     )
     added_rows = []
     dispatched_options = []
@@ -283,3 +283,41 @@ async def test_rescan_port_scan_requires_persisted_explicit_opt_in(
     ports_row = next(row for row in added_rows if row.module_name == scan_service.PORTS_MODULE)
     assert (ports_row.status == ModuleStatus.PENDING) is expect_port_scan
     assert dispatched_options[0]["enablePortScan"] is expect_port_scan
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata", [None, ["dns", "ssl"], []])
+async def test_rescan_preserves_selected_subset(monkeypatch, metadata) -> None:
+    options = {"selectedModules": metadata} if metadata is not None else {}
+    selected = [] if metadata == [] else scan_service.ALL_MODULES[:2]
+    if metadata is not None:
+        options["selectedModules"] = selected
+    scan = SimpleNamespace(
+        id=uuid4(), status=ScanStatus.COMPLETED, url="https://example.com",
+        scan_options=options,
+        module_results=[SimpleNamespace(module_name=name, raw_result={} if name in selected else {"skipped": True}) for name in scan_service.ALL_MODULES],
+    )
+    rows = []
+    db = SimpleNamespace(add=rows.append, delete=AsyncMock(), flush=AsyncMock())
+    monkeypatch.setattr(scan_service, "get_scan", AsyncMock(return_value=scan))
+    from unittest.mock import Mock
+    dispatch = Mock(return_value=SimpleNamespace(id="task"))
+    monkeypatch.setattr(scan_service.execute_scan, "delay", dispatch)
+    monkeypatch.setattr(scan_service, "settings", SimpleNamespace(APP_ENV="production"))
+    await scan_service.rescan(db, scan.id)
+    assert dispatch.call_args.args[1] == selected
+    assert scan.total_modules == len(selected)
+    assert scan.scan_options["selectedModules"] == selected
+    assert [row.module_name for row in rows if row.status == ModuleStatus.PENDING] == selected
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_scan_persists_effective_selection(monkeypatch) -> None:
+    monkeypatch.setattr(scan_service, "validate_url_safety", lambda _url: None)
+    db = SimpleNamespace(add=lambda _row: None, flush=AsyncMock())
+    selected = scan_service.ALL_MODULES[:2]
+    scan = await scan_service.create_scan(db, "https://example.com", modules=selected)
+    assert scan.scan_options["selectedModules"] == selected
+    assert scan.total_modules == len(selected)

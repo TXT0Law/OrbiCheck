@@ -39,6 +39,15 @@ describe("url-groups api", () => {
     expect(result).toEqual(expected);
   });
 
+  it("passes literal member URL search to the backend", async () => {
+    apiClientMock.get.mockResolvedValue({ data: { groups: [], total: 0 } });
+    const { listGroups } = await import("@/lib/api/url-groups");
+    await listGroups(0, 10, "example.com");
+    expect(apiClientMock.get).toHaveBeenCalledWith("/url-groups", {
+      params: { skip: 0, limit: 10, search: "example.com" },
+    });
+  });
+
   it("creates and deletes a group", async () => {
     apiClientMock.post.mockResolvedValue({
       data: {

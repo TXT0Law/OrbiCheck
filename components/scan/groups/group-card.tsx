@@ -78,7 +78,9 @@ export function GroupCard({
     latestRun?.id ?? "",
     !!latestRun && ACTIVE_GROUP_RUN_STATUSES.includes(latestRun.status)
   );
-  const displayedRun = liveRun ?? latestRun;
+  const displayedRun = latestRun && !ACTIVE_GROUP_RUN_STATUSES.includes(latestRun.status)
+    ? latestRun
+    : liveRun ?? latestRun;
   const hasActiveRun =
     !!displayedRun && ACTIVE_GROUP_RUN_STATUSES.includes(displayedRun.status);
   const memberCountForActions = detail?.members.length ?? group.memberCount;

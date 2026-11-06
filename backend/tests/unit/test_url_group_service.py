@@ -236,3 +236,23 @@ async def test_get_members_with_scan_status_with_and_without_scan() -> None:
     assert out[1]["scan_id"] is None
     assert out[1]["status"] == "incomplete"
     assert out[1]["security_score"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_search_filters_both_queries_with_literal_member_exists() -> None:
+    from sqlalchemy.dialects import postgresql
+    db = AsyncMock(spec=AsyncSession)
+    count_result, rows_result = MagicMock(), MagicMock()
+    count_result.scalar_one.return_value = 1
+    rows_result.all.return_value = []
+    db.execute.side_effect = [count_result, rows_result]
+    await url_group_service.list_groups(db, skip=1, limit=2, search="Example%_/")
+    assert db.execute.await_count == 2
+    for call in db.execute.call_args_list:
+        compiled = call.args[0].compile(dialect=postgresql.dialect())
+        sql = str(compiled)
+        assert "EXISTS" in sql
+        assert "url_groups.name ILIKE" in sql
+        assert "url_group_members.url ILIKE" in sql
+        assert "%Example/%/_//%" in compiled.params.values()
