@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 
 import { ReportGenerateDialog } from "@/components/report/report-generate-dialog";
@@ -16,12 +16,26 @@ import { useReportSchedules } from "@/lib/hooks/use-report-schedules";
 import { useReportList } from "@/lib/hooks/use-reports";
 import { getDashboardMessages } from "@/lib/i18n/dashboard";
 
+const FIRST_REPORT_PAGE = 1;
+const REPORT_PAGE_SIZE = 20;
+const PAGE_STEP = 1;
+
 export default function ReportsPage() {
   const language = useAppearanceLanguage();
   const messages = getDashboardMessages(language).reports;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
-  const reportsQuery = useReportList({ page: 1, limit: 20 });
+  const [page, setPage] = useState(FIRST_REPORT_PAGE);
+  const reportsQuery = useReportList({ page, limit: REPORT_PAGE_SIZE });
+  const reportMessages = getReportHistoryMessages(language);
+  const meta = reportsQuery.data?.meta;
+  const totalPages = meta
+    ? Math.max(FIRST_REPORT_PAGE, Math.ceil(meta.total / (meta.limit || REPORT_PAGE_SIZE)))
+    : page;
+  const pageOutOfRange = Boolean(meta) && !reportsQuery.isError && !reportsQuery.isFetching && page > totalPages;
+  useEffect(() => {
+    if (pageOutOfRange) setPage(totalPages);
+  }, [pageOutOfRange, totalPages]);
   const schedulesQuery = useReportSchedules();
 
   return (
@@ -50,7 +64,15 @@ export default function ReportsPage() {
         </TabsList>
 
         <TabsContent value="reports" className="space-y-4">
-          {reportsQuery.isLoading ? (
+          {reportsQuery.isError && (
+            <div role="alert" className="space-y-3 rounded-lg border p-4">
+              <p>{getReportHistoryMessages(language).reportsError}</p>
+              <Button variant="outline" disabled={reportsQuery.isFetching} onClick={() => void reportsQuery.refetch()}>
+                {getReportHistoryMessages(language).retry}
+              </Button>
+            </div>
+          )}
+          {reportsQuery.isLoading || pageOutOfRange ? (
             <Card>
               <CardContent className="py-10 text-sm text-muted-foreground">
                 {messages.loadingReports}
@@ -58,7 +80,7 @@ export default function ReportsPage() {
             </Card>
           ) : reportsQuery.data?.reports.length ? (
             <ReportListTable reports={reportsQuery.data.reports} />
-          ) : (
+          ) : reportsQuery.isError ? null : (
             <Card>
               <CardContent className="flex min-h-64 flex-col items-center justify-center gap-4 px-6 py-10 text-center">
                 <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground" aria-hidden="true">
@@ -72,6 +94,21 @@ export default function ReportsPage() {
                 </div>
               </CardContent>
             </Card>
+          )}
+          {!pageOutOfRange && (meta || page > FIRST_REPORT_PAGE) && (
+            <nav aria-label={reportMessages.reportPages} className="flex flex-wrap items-center justify-end gap-3">
+              {meta && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {reportMessages.pageSummary.replace("{page}", String(page)).replace("{total}", String(totalPages))}
+                </p>
+              )}
+              <Button variant="outline" disabled={page <= FIRST_REPORT_PAGE || reportsQuery.isFetching} onClick={() => setPage(page - PAGE_STEP)}>
+                {reportMessages.previousPage}
+              </Button>
+              <Button variant="outline" disabled={!meta || page >= totalPages || reportsQuery.isFetching || reportsQuery.isError} onClick={() => setPage(page + PAGE_STEP)}>
+                {reportMessages.nextPage}
+              </Button>
+            </nav>
           )}
         </TabsContent>
 

@@ -42,7 +42,7 @@ export function EditGroupDialog({
     e.preventDefault();
     if (!group || !name.trim()) return;
     updateGroup(
-      { name: name.trim(), description: description.trim() || undefined },
+      { name: name.trim(), description: description.trim() },
       {
         onSuccess: () => {
           onOpenChange(false);
@@ -55,7 +55,7 @@ export function EditGroupDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Edit Group</DialogTitle>
         </DialogHeader>

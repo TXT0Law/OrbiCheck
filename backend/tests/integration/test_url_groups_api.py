@@ -60,7 +60,8 @@ async def test_list_groups_200(async_client, monkeypatch) -> None:
         created_at = now
         updated_at = now
 
-    async def _fake_list_groups(db, skip=0, limit=50):
+    async def _fake_list_groups(db, skip=0, limit=50, search=None):
+        assert search is None
         return [(FakeGroup(), 2)], 1
 
     monkeypatch.setattr(url_group_service, "list_groups", _fake_list_groups)
@@ -541,3 +542,21 @@ async def test_retry_failed_group_run_201(async_client, monkeypatch) -> None:
 
     assert response.status_code == 201
     assert response.json()["data"]["id"] == str(retry_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_groups_forwards_member_url_search_before_pagination(async_client, monkeypatch) -> None:
+    captured = {}
+
+    async def fake_list_groups(db, skip=0, limit=50, search=None):
+        captured.update(skip=skip, limit=limit, search=search)
+        return [], 3
+
+    monkeypatch.setattr(url_group_service, "list_groups", fake_list_groups)
+    response = await async_client.get(
+        "/api/v1/url-groups", params={"search": "Example%_", "skip": 2, "limit": 1}
+    )
+    assert response.status_code == 200
+    assert captured == {"search": "Example%_", "skip": 2, "limit": 1}
+    assert response.json()["data"] == {"groups": [], "total": 3}

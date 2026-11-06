@@ -18,17 +18,11 @@ interface ScanGroupViewProps {
   sortBy?: ScanListSortBy;
 }
 
-function filterAndSortGroups(
+function sortGroups(
   groups: UrlGroup[],
-  searchTerm: string,
   sortBy: ScanListSortBy
 ): UrlGroup[] {
-  const term = searchTerm.trim().toLowerCase();
-  const filtered = term
-    ? groups.filter((g) => g.name.toLowerCase().includes(term))
-    : [...groups];
-
-  return filtered.sort((a, b) => {
+  return [...groups].sort((a, b) => {
     switch (sortBy) {
       case "created_at_desc":
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
@@ -54,12 +48,12 @@ export function ScanGroupView({
   searchTerm = "",
   sortBy = "created_at_desc",
 }: ScanGroupViewProps) {
-  const { data, isLoading, error } = useUrlGroups(0, 100);
+  const { data, isLoading, error } = useUrlGroups(0, 100, searchTerm);
 
   const displayedGroups = useMemo(() => {
     const raw = data?.groups ?? [];
-    return filterAndSortGroups(raw, searchTerm, sortBy);
-  }, [data?.groups, searchTerm, sortBy]);
+    return sortGroups(raw, sortBy);
+  }, [data?.groups, sortBy]);
 
   if (isLoading) {
     return (

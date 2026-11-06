@@ -192,7 +192,7 @@ def execute_scan(
                     for m in modules_filter
                     if m in ALL_MODULES and (m != PORTS_MODULE or port_scan_enabled)
                 ]
-                if modules_filter and len(modules_filter) > 0
+                if modules_filter is not None
                 else None
             )
             total_modules = (

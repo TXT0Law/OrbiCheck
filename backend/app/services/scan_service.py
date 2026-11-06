@@ -169,6 +169,7 @@ async def create_scan(
             "enablePortScan": enable_port_scan,
             "portScanProfile": port_scan_profile,
             "acknowledgeScanAuthorization": acknowledge_scan_authorization,
+            "selectedModules": selected,
         },
     )
     db.add(scan)
@@ -373,27 +374,42 @@ async def rescan(
     if existing.status not in TERMINAL_STATUSES:
         raise ScanNotRescannableError(str(scan_id), existing.status.value)
 
-    # Clear module results and recreate slots
+    stored_options = getattr(existing, "scan_options", None)
+    scan_options = stored_options if isinstance(stored_options, dict) else {}
+    enable_port_scan = port_scan_authorized(scan_options)
+    port_scan_profile = str(scan_options.get("portScanProfile", DEFAULT_PORT_SCAN_PROFILE))
+    stored_selection = scan_options.get("selectedModules")
+    if "selectedModules" in scan_options:
+        selected = (
+            [name for name in ALL_MODULES if name in stored_selection]
+            if isinstance(stored_selection, list) else []
+        )
+    else:
+        # Legacy scans have no selection metadata. Only replay modules with
+        # evidence of selection; missing rows never authorize additional work.
+        selected = [
+            name for name in ALL_MODULES
+            if any(
+                row.module_name == name
+                and not (isinstance(row.raw_result, dict) and row.raw_result.get("skipped") is True)
+                for row in existing.module_results
+            )
+        ]
+    selected = [name for name in selected if name != PORTS_MODULE or enable_port_scan]
+    existing.scan_options = {**scan_options, "selectedModules": selected}
     for mr in existing.module_results:
         await db.delete(mr)
     await db.flush()
 
-    stored_options = getattr(existing, "scan_options", None)
-    scan_options = stored_options if isinstance(stored_options, dict) else {}
-    enable_port_scan = port_scan_authorized(scan_options)
-    port_scan_profile = str(
-        scan_options.get("portScanProfile", DEFAULT_PORT_SCAN_PROFILE)
-    )
-
     for module_name in ALL_MODULES:
-        if module_name == PORTS_MODULE and not enable_port_scan:
+        if module_name not in selected:
             module_result = ScanModuleResult(
                 scan_id=existing.id,
                 module_name=module_name,
                 status=ModuleStatus.SUCCESS,
                 raw_result={
                     "skipped": True,
-                    "data": {"note": "Skipped because port scanning is disabled"},
+                    "data": {"note": "Skipped because port scanning is disabled" if module_name == PORTS_MODULE and not enable_port_scan else "Skipped by user"},
                 },
                 duration_ms=0,
                 completed_at=datetime.now(timezone.utc),
@@ -410,7 +426,7 @@ async def rescan(
     existing.status = ScanStatus.PENDING
     existing.progress = 0
     existing.completed_modules = 0
-    existing.total_modules = len(ALL_MODULES) if enable_port_scan else len(ALL_MODULES) - 1
+    existing.total_modules = len(selected)
     existing.security_score = None
     existing.error_message = None
     existing.started_at = None
@@ -433,19 +449,21 @@ async def rescan(
         background_tasks.add_task(
             execute_scan.run,
             str(existing.id),
-            None,
+            selected,
             {
                 "enablePortScan": enable_port_scan,
                 "portScanProfile": port_scan_profile,
+                "acknowledgeScanAuthorization": enable_port_scan,
             },
         )
     elif settings.APP_ENV.lower() != "development":
         task = execute_scan.delay(
             str(existing.id),
-            None,
+            selected,
             {
                 "enablePortScan": enable_port_scan,
                 "portScanProfile": port_scan_profile,
+                "acknowledgeScanAuthorization": enable_port_scan,
             },
         )
         existing.celery_task_id = task.id if task else None

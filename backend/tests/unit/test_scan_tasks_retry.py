@@ -484,3 +484,20 @@ def test_batch_preserves_status_fetch_failure_and_module_error(
     saved = next(values for values in updates if "raw_result" in values)
     assert saved["raw_result"] == {"fetchOutcome": "dns_error"}
     assert saved["error_message"] == "getaddrinfo ENOTFOUND"
+
+
+@pytest.mark.unit
+def test_explicit_empty_selection_never_dispatches_modules(monkeypatch, patched_environment, stub_scan) -> None:
+    batch = MagicMock(side_effect=AssertionError("Empty selection dispatched a batch"))
+    single = MagicMock(side_effect=AssertionError("Empty selection dispatched a module"))
+    monkeypatch.setattr(scan_tasks, "call_scan_batch_sync", batch)
+    monkeypatch.setattr(scan_tasks, "call_scan_module_sync", single)
+    scan_tasks.execute_scan.request.id = "task-empty-selection"
+    result = scan_tasks.execute_scan.run(str(stub_scan.id), [])
+    batch.assert_not_called()
+    single.assert_not_called()
+    assert result["status"] == ScanStatus.FAILED.value
+    progress = json.loads(patched_environment["redis"].storage[f"scan:{stub_scan.id}:progress"])
+    assert progress["totalModules"] == 0
+    assert progress["completedModules"] == 0
+    assert progress["phase"] == "done"
