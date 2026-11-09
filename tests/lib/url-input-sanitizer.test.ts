@@ -114,6 +114,38 @@ describe("validateSingleUrl", () => {
     expect(result.valid).toBe(true);
   });
 
+  it.each([
+    "https://[2001:db8::1]",
+    "http://[2001:db8::1]:8080/path?value=test#section",
+    "[2001:db8::1]/path",
+  ])("accepts parser-valid bracketed IPv6 URL %s", (url) => {
+    expect(validateSingleUrl(url)).toEqual({ valid: true });
+    expect(parseAndValidateUrls(url).errors).toEqual([]);
+  });
+
+  it.each([
+    "https://[2001:db8:::1]",
+    "https://[2001:db8::gggg]",
+    "https://2001:db8::1",
+    "https://[2001:db8::1",
+  ])("rejects malformed IPv6 URL %s", (url) => {
+    expect(validateSingleUrl(url).valid).toBe(false);
+  });
+
+  it.each([
+    "https://[::]", "https://[::1]", "https://[fc00::1]", "https://[fc01::1]",
+    "https://[fd00::1]", "https://[fe80::1]", "https://[fe90::1]",
+    "https://[::ffff:127.0.0.1]", "https://[::ffff:192.168.1.1]",
+  ])(
+    "preserves private IPv6 rejection for %s",
+    (url) => {
+      expect(validateSingleUrl(url)).toEqual({
+        valid: false,
+        error: "Cannot scan private/internal addresses",
+      });
+    },
+  );
+
   it("rejects URL exceeding max length", () => {
     const result = validateSingleUrl(
       "https://example.com/" + "a".repeat(2048)
