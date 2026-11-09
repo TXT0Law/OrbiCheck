@@ -1,6 +1,7 @@
 .PHONY: help test test-frontend test-backend test-backend-unit test-backend-integration test-backend-e2e test-osint test-scanner test-phase1-network test-p2-hardening test-watch test-cov lint lint-frontend lint-backend lint-osint clean-safe db-migrate db-rollback export-openapi docs-generate check-docs check-bundle backup-restore-drill check-harness
 
 .PHONY: test-weekly-report-recovery
+.PHONY: verify-iterate verify-pr verify-main test-local-regression test-harness-tools
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -68,6 +69,23 @@ test-cov: ## Run all tests with coverage reports
 
 check-harness: ## Run all harness CI checks (dependency direction, boundary validation)
 	bash scripts/ci/check-harness.sh
+
+verify-iterate: ## Focused local feedback (ARGS="--scope frontend --test tests/path.test.ts")
+	python3 scripts/dev/verify.py --stage iterate $(ARGS)
+
+verify-pr: ## Final scoped PR checks once (ARGS="--scope all --base origin/main")
+	python3 scripts/dev/verify.py --stage pr $(ARGS)
+
+verify-main: ## Post-merge flow checks; supplements the final PR evidence
+	python3 scripts/dev/verify.py --stage main $(ARGS)
+
+test-local-regression: ## Isolated production browser flows, including backend unavailable
+	python3 scripts/dev/local-regression.py $(ARGS)
+
+test-harness-tools: ## Regression fixtures for workflow policy and local verification tools
+	python3 scripts/ci/test-workflow-policy.py
+	python3 scripts/dev/test-verify.py
+	python3 scripts/dev/test-local-regression.py
 
 export-openapi: ## Export static OpenAPI schema to docs/openapi.json
 	cd backend && UV_LINK_MODE=copy uv run python ../scripts/dev/export-openapi.py

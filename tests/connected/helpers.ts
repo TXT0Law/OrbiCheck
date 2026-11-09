@@ -1,5 +1,6 @@
 import {
   expect,
+  test,
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
@@ -42,7 +43,7 @@ export async function openScanPageWithoutBackend(page: Page): Promise<void> {
     {
       name: "orbicheck_auth",
       value: "backend-unavailable",
-      domain: "127.0.0.1",
+      domain: new URL(String(test.info().project.use.baseURL)).hostname,
       path: "/",
       sameSite: "Lax",
     },

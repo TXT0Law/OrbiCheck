@@ -1,27 +1,7 @@
 name: Frontend Tests
 
 on:
-  push:
-    branches: ["**"]
-    paths:
-      - "app/**"
-      - "components/**"
-      - "lib/**"
-      - "tests/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "vitest.config.ts"
-      - ".github/workflows/frontend.yml"
-  pull_request:
-    paths:
-      - "app/**"
-      - "components/**"
-      - "lib/**"
-      - "tests/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "vitest.config.ts"
-      - ".github/workflows/frontend.yml"
+  workflow_dispatch:
 
 jobs:
   test:
