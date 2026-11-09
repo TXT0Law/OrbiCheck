@@ -66,10 +66,11 @@ def _should_run_group_scan_inline() -> bool:
 async def list_groups(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
+    search: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """List URL groups with pagination."""
-    rows, total = await url_group_service.list_groups(db, skip=skip, limit=limit)
+    rows, total = await url_group_service.list_groups(db, skip=skip, limit=limit, search=search)
     groups = [_group_to_response(grp, cnt) for grp, cnt in rows]
     return SuccessResponse(data=UrlGroupListResponse(groups=groups, total=total))
 

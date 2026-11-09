@@ -27,11 +27,15 @@ import type {
   UrlGroupUpdateInput,
 } from "@/types/url-group";
 import { useEffect, useState } from "react";
+import { ZodError } from "zod";
 
-export function useUrlGroups(skip?: number, limit?: number) {
+const GROUP_RUN_REFRESH_INTERVAL_MS = 3000;
+const ACTIVE_GROUP_RUN_STATUSES = ["pending", "running"];
+
+export function useUrlGroups(skip?: number, limit?: number, search?: string) {
   return useQuery({
-    queryKey: ["url-groups", skip ?? 0, limit ?? 50],
-    queryFn: () => listGroups(skip, limit),
+    queryKey: ["url-groups", skip ?? 0, limit ?? 50, search?.trim() ?? ""],
+    queryFn: () => listGroups(skip, limit, search?.trim()),
   });
 }
 
@@ -106,6 +110,10 @@ export function useGroupRuns(groupId: string, skip?: number, limit?: number) {
   return useQuery({
     queryKey: ["url-group-runs", groupId, skip ?? 0, limit ?? 10],
     queryFn: () => listGroupRuns(groupId, skip, limit),
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((run) => ACTIVE_GROUP_RUN_STATUSES.includes(run.status))
+        ? GROUP_RUN_REFRESH_INTERVAL_MS
+        : false,
     enabled: !!groupId,
   });
 }
@@ -170,6 +178,8 @@ export function useGroupRunProgress(
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    setProgress(null);
+    let active = true;
     if (!enabled || !groupId || !runId || typeof EventSource === "undefined") {
       return;
     }
@@ -180,29 +190,53 @@ export function useGroupRunProgress(
     );
 
     eventSource.onmessage = (event) => {
-      const raw = JSON.parse(event.data) as unknown;
+      if (!active) return;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(event.data) as unknown;
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        return;
+      }
       if (
         typeof raw === "object" &&
         raw !== null &&
         "done" in raw &&
         raw.done === true
       ) {
+        active = false;
+        setProgress(null);
         eventSource.close();
         queryClient.invalidateQueries({ queryKey: ["url-group-runs", groupId] });
         return;
       }
-      const parsed = parseGroupRunProgress(raw);
+      let parsed: UrlGroupRun;
+      try {
+        parsed = parseGroupRunProgress(raw);
+      } catch (error) {
+        if (!(error instanceof ZodError)) throw error;
+        return;
+      }
+      if (parsed.id !== runId || parsed.groupId !== groupId) return;
       setProgress(parsed);
       queryClient.setQueryData(["url-group-runs", groupId, runId], parsed);
     };
 
     eventSource.onerror = () => {
+      if (!active) return;
+      active = false;
+      setProgress(null);
       eventSource.close();
       queryClient.invalidateQueries({ queryKey: ["url-group-runs", groupId] });
     };
 
-    return () => eventSource.close();
+    return () => {
+      active = false;
+      eventSource.close();
+    };
   }, [enabled, groupId, queryClient, runId]);
 
-  return progress;
+  return enabled && progress?.id === runId && progress.groupId === groupId
+    ? progress
+    : null;
 }

@@ -152,11 +152,13 @@ function normalizeGroupRunPayload(payload: unknown): unknown {
 
 export async function listGroups(
   skip?: number,
-  limit?: number
+  limit?: number,
+  search?: string
 ): Promise<{ groups: UrlGroup[]; total: number }> {
-  const params: Record<string, number> = {};
+  const params: Record<string, number | string> = {};
   if (skip !== undefined) params.skip = skip;
   if (limit !== undefined) params.limit = limit;
+  if (search?.trim()) params.search = search.trim();
   const { data } = await apiClient.get<{ groups: UrlGroup[]; total: number }>(
     "/url-groups",
     { params }

@@ -28,15 +28,15 @@ def normalize_url(url: str) -> str:
 
     try:
         parsed = urlparse(s)
-    except Exception:
+        host = parsed.hostname or ""
+        port = parsed.port
+    except ValueError:
         return ""
 
     if not parsed.netloc:
         return ""
 
     scheme = parsed.scheme.lower()
-    host = parsed.hostname or ""
-    port = parsed.port
     path = parsed.path or "/"
     query = parsed.query
     # Fragment explicitly omitted
@@ -52,6 +52,7 @@ def normalize_url(url: str) -> str:
 
     path = path.rstrip("/") or ""
 
+    host_lower = f"[{host_lower}]" if ":" in host_lower else host_lower
     netloc = host_lower
     if port:
         netloc = f"{host_lower}:{port}"

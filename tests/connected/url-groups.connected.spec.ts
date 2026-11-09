@@ -91,3 +91,44 @@ test.describe("Connected URL groups workflow", () => {
     await expect(page).toHaveURL(/\/dashboard\/scan\/[^/]+/);
   });
 });
+
+
+test("member URL search finds a collapsed group and cleared description persists", async ({ page }) => {
+  const groupName = uniqueTestName("Search and edit group");
+  const memberUrl = `https://${groupName.toLowerCase().replace(/[^a-z0-9]/g, "")}.example.test`;
+  await navigateTo(page, "/dashboard/scan/groups");
+  await page.getByRole("button", { name: "New Group" }).first().click();
+  await page.getByLabel("Name *").fill(groupName);
+  await page.getByLabel("Description (optional)").fill("Description to clear");
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  const group = page.getByRole("button", { name: new RegExp(groupName) });
+  await expect(group).toBeVisible();
+  await group.getByRole("button", { name: /^Add URL$/ }).click();
+  await page.getByLabel("URLs to add").fill(memberUrl);
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await group.locator('button[aria-haspopup="menu"]').click();
+  await page.getByRole("button", { name: "Edit Group", exact: true }).click();
+  await page.getByLabel("Description (optional)").fill("");
+  const update = page.waitForResponse((response) => response.url().includes("/url-groups/") && response.request().method() === "PUT");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  expect((await update).ok()).toBe(true);
+  await page.reload();
+  const persistedGroup = page.getByRole("button", { name: new RegExp(groupName) });
+  await persistedGroup.locator('button[aria-haspopup="menu"]').click();
+  await page.getByRole("button", { name: "Edit Group", exact: true }).click();
+  await expect(page.getByLabel("Description (optional)")).toHaveValue("");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await page.goto("/dashboard/scan");
+  await page.getByRole("button", { name: "By Group", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]view=group(?:&|$)/);
+  const search = page.getByRole("textbox", { name: "Search scans", exact: true });
+  await search.fill(memberUrl);
+  await search.press("Enter");
+  await expect(page).toHaveURL((url) => url.searchParams.get("view") === "group" && url.searchParams.get("search") === memberUrl);
+  await expect(page.getByRole("button", { name: new RegExp(groupName) })).toBeVisible();
+  await page.reload();
+  await expect(search).toHaveValue(memberUrl);
+  await expect(page).toHaveURL((url) => url.searchParams.get("view") === "group" && url.searchParams.get("search") === memberUrl);
+  await expect(page.getByRole("button", { name: new RegExp(groupName) })).toBeVisible();
+});

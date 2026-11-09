@@ -65,6 +65,7 @@ async def test_create_scan_creates_pending_scan_and_module_slots(
         "enablePortScan": False,
         "portScanProfile": "quick",
         "acknowledgeScanAuthorization": False,
+        "selectedModules": ["ssl", "headers"],
     }
     assert len(module_rows) == len(ALL_MODULES)
     assert sum(1 for row in module_rows if row.status == ModuleStatus.PENDING) == 2
@@ -129,6 +130,7 @@ async def test_create_scan_keeps_ports_when_port_scan_enabled(
         "enablePortScan": True,
         "portScanProfile": "quick",
         "acknowledgeScanAuthorization": True,
+        "selectedModules": list(ALL_MODULES),
     }
     assert ports_row.status == ModuleStatus.PENDING
 
@@ -174,6 +176,7 @@ async def test_create_scan_stores_port_scan_profile(monkeypatch: pytest.MonkeyPa
         "enablePortScan": True,
         "portScanProfile": "deep",
         "acknowledgeScanAuthorization": True,
+        "selectedModules": list(ALL_MODULES),
     }
 
 

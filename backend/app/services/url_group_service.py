@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -61,12 +61,22 @@ async def list_groups(
     db: AsyncSession,
     skip: int = 0,
     limit: int = 50,
+    search: str | None = None,
 ) -> tuple[list[tuple[UrlGroup, int]], int]:
     """
     List groups ordered by updated_at DESC.
     Returns ((group, member_count), total_count).
     """
-    count_stmt = select(func.count()).select_from(UrlGroup)
+    filters = []
+    if search and search.strip():
+        literal = search.strip().replace("/", "//").replace("%", "/%").replace("_", "/_")
+        pattern = f"%{literal}%"
+        member_match = select(UrlGroupMember.id).where(
+            UrlGroupMember.group_id == UrlGroup.id,
+            UrlGroupMember.url.ilike(pattern, escape="/"),
+        ).exists()
+        filters.append(or_(UrlGroup.name.ilike(pattern, escape="/"), member_match))
+    count_stmt = select(func.count()).select_from(UrlGroup).where(*filters)
     total = (await db.execute(count_stmt)).scalar_one()
 
     member_count_subq = (
@@ -78,6 +88,7 @@ async def list_groups(
     )
     stmt = (
         select(UrlGroup, member_count_subq.label("member_count"))
+        .where(*filters)
         .order_by(desc(UrlGroup.updated_at))
         .offset(skip)
         .limit(limit)
