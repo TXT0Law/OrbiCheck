@@ -132,3 +132,30 @@ test("member URL search finds a collapsed group and cleared description persists
   await expect(page).toHaveURL((url) => url.searchParams.get("view") === "group" && url.searchParams.get("search") === memberUrl);
   await expect(page.getByRole("button", { name: new RegExp(groupName) })).toBeVisible();
 });
+
+test("Add URL persists a bracketed IPv6 member after reload", async ({ page }) => {
+  const groupName = uniqueTestName("IPv6 member group");
+  const memberUrl = "https://[2001:db8::1]:8443/path?value=test";
+  await navigateTo(page, "/dashboard/scan/groups");
+  await page.getByRole("button", { name: "New Group" }).first().click();
+  await page.getByLabel("Name *").fill(groupName);
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  const group = page.getByRole("button", { name: new RegExp(groupName) });
+  await expect(group).toBeVisible();
+  await group.getByRole("button", { name: /^Add URL$/ }).click();
+  await page.getByLabel("URLs to add").fill(memberUrl);
+  const submission = page.waitForResponse((response) =>
+    response.url().includes("/url-groups/") &&
+    response.url().endsWith("/members") && response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  const response = await submission;
+  expect(response.status()).toBe(201);
+  expect(response.request().postDataJSON()).toEqual({ url: memberUrl });
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.reload();
+  const persistedGroup = page.getByRole("button", { name: new RegExp(groupName) });
+  await expect(persistedGroup).toBeVisible();
+  await persistedGroup.click();
+  await expect(page.getByText(memberUrl, { exact: true })).toBeVisible();
+});

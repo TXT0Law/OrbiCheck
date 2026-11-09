@@ -125,11 +125,15 @@ export function validateSingleUrl(url: string): ValidationResult {
     return { valid: false, error: "URL must have a valid hostname" };
   }
 
-  if (isPrivateHost(parsed.hostname)) {
+  // URL validates IPv6 syntax and retains the hostname brackets.
+  const isIpv6Literal = parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]");
+  const hostname = isIpv6Literal ? parsed.hostname.slice(1, -1) : parsed.hostname;
+
+  if (isPrivateHost(hostname)) {
     return { valid: false, error: "Cannot scan private/internal addresses" };
   }
 
-  if (!parsed.hostname.includes(".")) {
+  if (!isIpv6Literal && !parsed.hostname.includes(".")) {
     return { valid: false, error: "URL must have a valid domain name" };
   }
 
@@ -195,9 +199,11 @@ function isPrivateHost(hostname: string): boolean {
     /^172\.(1[6-9]|2\d|3[01])\./,
     /^192\.168\./,
     /^0\.0\.0\.0$/,
+    /^::$/,
     /^::1$/,
-    /^fc00:/i,
-    /^fe80:/i,
+    /^::ffff:/i,
+    /^fc[\da-f]{2}:/i,
+    /^fe[89ab][\da-f]:/i,
     /^fd/i,
     /\.local$/i,
     /\.internal$/i,
