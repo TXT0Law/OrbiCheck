@@ -114,3 +114,18 @@ Copy reports that must survive another invocation into the evidence directory
 before launching another suite. Record exact commands, exit codes and the tested
 commit. A missing or overwritten log must be disclosed, never reconstructed and
 presented as an original complete log.
+
+## Layered local entry points
+
+The [validation workflow](validation-workflow.md) defines `make verify-iterate`,
+`make verify-pr`, `make verify-main`, and `make test-local-regression`.
+Focused iteration is not a completed PR, and post-merge smoke evidence does not
+replace the final PR's complete affected-subsystem evidence. Coverage runs may
+satisfy the corresponding full test requirement without a second ordinary test
+run. One successful harness invocation includes documentation checks and the
+validation-tool fixtures; do not duplicate those checks for the same source and
+environment.
+
+The primary CI workflow remains the complete automatic PR/main baseline;
+standalone frontend/backend workflows are manual diagnostic entries. Existing
+core checks and their final quality gate remain mandatory within that workflow.

@@ -27,6 +27,16 @@ else
   echo ""
 fi
 
+# Local entry points and workflow ownership are part of the harness contract.
+echo "=== Validation Tool Self-tests ==="
+if make -C "$SCRIPT_DIR/../.." test-harness-tools; then
+  echo "  ✅ PASS"
+  echo ""
+else
+  FAILURES=$((FAILURES + 1))
+  echo ""
+fi
+
 # 1. Dependency direction
 if bash "$SCRIPT_DIR/check-dependency-direction.sh"; then
   echo ""

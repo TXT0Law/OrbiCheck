@@ -7,17 +7,17 @@ import {
   startScan,
 } from "./helpers";
 
-const LINKED_BACKEND_URL = "http://127.0.0.1:8010";
+const LINKED_API_PATH = "/api/v1";
 const CANCEL_SMOKE_TARGET = "https://iana.org/orbicheck-cancel-hold";
 
 test.describe("Connected scan cancel flow", () => {
   test("reaches the real linked backend cancel endpoint", async ({ request }) => {
     const csrfToken = await authenticateRequest(
       request,
-      `${LINKED_BACKEND_URL}/api/v1`
+      `${LINKED_API_PATH}`
     );
     const createResponse = await request.post(
-      `${LINKED_BACKEND_URL}/api/v1/scans`,
+      `${LINKED_API_PATH}/scans`,
       {
         data: { url: CANCEL_SMOKE_TARGET },
         headers: { "X-CSRF-Token": csrfToken },
@@ -33,7 +33,7 @@ test.describe("Connected scan cancel flow", () => {
     expect(typeof scanId).toBe("string");
 
     const cancelResponse = await request.post(
-      `${LINKED_BACKEND_URL}/api/v1/scans/${scanId}/cancel`,
+      `${LINKED_API_PATH}/scans/${scanId}/cancel`,
       { headers: { "X-CSRF-Token": csrfToken } }
     );
 
